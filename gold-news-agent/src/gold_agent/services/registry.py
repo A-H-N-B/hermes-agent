@@ -14,6 +14,20 @@ def _collector(ctx: AppContext) -> Service:
     return CollectorService(ctx)
 
 
+def _market(ctx: AppContext) -> Service:
+    from gold_agent.services.market import MarketService
+
+    return MarketService(ctx)
+
+
+def _calendar(ctx: AppContext) -> Service:
+    from gold_agent.services.calendar import CalendarService
+
+    return CalendarService(ctx)
+
+
 SERVICE_FACTORIES: dict[str, Callable[[AppContext], Service]] = {
     "collector": _collector,
+    "market": _market,
+    "calendar": _calendar,
 }

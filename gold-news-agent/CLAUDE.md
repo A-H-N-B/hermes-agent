@@ -59,5 +59,14 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   normaliser, dedup/cluster (hash, rapidfuzz, number guard, optional embeddings), archive,
   latency stages + p50/p95 summary, `gold-agent run collector`. Integration tests run when
   `GOLD_TEST_POSTGRES_URL` / `GOLD_TEST_REDIS_URL` are set.
-- Phases 2–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
+- **Phase 2 (done).** `timeutils/sessions.py` (sessions, trading day 17:00 NY, weekly open/close,
+  daily break, US/UK holidays) + `risky.py`; DST tests cover both one-country-switched windows.
+  Market: candle builder (H4/D1 anchored to 17:00 NY), numpy indicators (EMA/RSI/ATR Wilder,
+  BB, VWAP→TWAP fallback, pivots, swings), levels, USD tracker (synthetic DXY or EURUSDT proxy),
+  FRED yields, adapters (Binance PAXG/EURUSDT, Twelve Data, MT5 with server-offset detection,
+  MT5 bridge over Redis, failover), market service (context every 5 s, stale-price alerts,
+  weekend PAXG drift, closed-market bars dropped). Calendar: `config/events.yaml` specs (prior
+  surprise_std), Forex Factory sync (ETag, 429 back-off, actuals preserved), FOMC page parser +
+  blackout window, countdown. Services: `collector`, `market`, `calendar`.
+- Phases 3–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
   after ≥ 2–4 weeks of recorded paper trading.

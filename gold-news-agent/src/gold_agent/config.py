@@ -197,9 +197,12 @@ class TradingSettings(StrictModel):
     post_release_confirm_seconds: int = Field(ge=0, le=600)
 
 
+PriceFeedName = Literal["mt5", "mt5_bridge", "twelvedata", "binance_paxg"]
+
+
 class PriceFeedSettings(StrictModel):
-    primary: Literal["mt5", "twelvedata", "binance_paxg"]
-    fallbacks: tuple[Literal["mt5", "twelvedata", "binance_paxg"], ...]
+    primary: PriceFeedName
+    fallbacks: tuple[PriceFeedName, ...]
     mt5_symbol: str | None
     mt5_server_utc_offset: Literal["auto"] | int
     stale_tick_seconds: int = Field(gt=0)
@@ -340,11 +343,31 @@ class SessionSettings(StrictModel):
     daily_break: DailyWindow
     weekly_open: WeeklyMoment
     weekly_close: WeeklyMoment
+    liquidity: dict[Literal["asia", "london", "overlap", "new_york"], float]
+    holiday_factor: float = Field(gt=0, le=1)
 
 
 class OutlookSettings(StrictModel):
     conditional_beyond_hours: int = Field(gt=0)
     refresh_minute: int = Field(ge=0, le=59)
+
+
+class MarketSettings(StrictModel):
+    candle_buffer: int = Field(gt=50)
+    history_bars: dict[Timeframe, int]
+    tick_store_min_interval_ms: int = Field(ge=0)
+    tick_publish_min_interval_ms: int = Field(ge=0)
+    context_store_seconds: float = Field(gt=0)
+    spread_window_minutes: int = Field(gt=0)
+    round_levels: tuple[float, ...]
+    swing_half_width: int = Field(ge=1)
+    usd_source: Literal["binance_eurusdt", "mt5_synthetic", "none"]
+    usd_history_days: int = Field(gt=0)
+    fred_refresh_minutes: int = Field(gt=0)
+    twelvedata_symbol: str
+    twelvedata_poll_seconds: float = Field(gt=0)
+    mt5_poll_ms: int = Field(gt=0)
+    mt5_fx_symbols: dict[str, str]
 
 
 class InfraSettings(StrictModel):
@@ -382,6 +405,7 @@ class Settings(StrictModel):
     collectors: CollectorSettings
     trading: TradingSettings
     price_feed: PriceFeedSettings
+    market: MarketSettings
     risk: RiskSettings
     budget: BudgetSettings
     notifications: NotificationSettings

@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 
@@ -29,6 +29,7 @@ from gold_agent.collectors.parsers import (
     parse_json_items,
     parse_rss,
     parse_timestamp,
+    resolve_path,
     to_utc,
 )
 from gold_agent.config import ParseSpec, Source, SourceKind, SourceType, expand_url
@@ -359,8 +360,13 @@ async def check_websocket_source(
                 received = clock()
                 messages += 1
                 if spec.time_field:
-                    payload = cast(dict[str, Any], json.loads(raw))
-                    sent = parse_timestamp(payload.get(spec.time_field), spec.time_format)
+                    decoded: Any = json.loads(raw)
+                    payload = resolve_path(decoded, spec.items) if spec.items else decoded
+                    sent = (
+                        parse_timestamp(payload.get(spec.time_field), spec.time_format)
+                        if isinstance(payload, dict)
+                        else None
+                    )
                     if sent is not None:
                         lags.append((received - to_utc(sent)[0]).total_seconds())
                 if messages >= sample_size:

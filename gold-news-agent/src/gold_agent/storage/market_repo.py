@@ -1,0 +1,143 @@
+"""Ticks, candles and context snapshots."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from datetime import datetime
+
+from sqlalchemy import desc, select
+
+from gold_agent.models import Candle, MarketContext, Tick
+from gold_agent.storage.db import Database
+from gold_agent.storage.tables import CandleRow, MarketContextRow, TickRow
+
+
+class MarketRepo:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def insert_ticks(self, ticks: Sequence[Tick]) -> None:
+        if not ticks:
+            return
+        async with self._db.session() as session:
+            session.add_all(
+                TickRow(
+                    ts=t.ts,
+                    source=t.source,
+                    bid=t.bid,
+                    ask=t.ask,
+                    last=t.last,
+                    volume=t.volume,
+                )
+                for t in ticks
+            )
+
+    async def ticks_between(self, source: str | None, start: datetime, end: datetime) -> list[Tick]:
+        async with self._db.session() as session:
+            query = select(TickRow).where(TickRow.ts >= start, TickRow.ts < end)
+            if source:
+                query = query.where(TickRow.source == source)
+            rows = await session.scalars(query.order_by(TickRow.ts))
+            return [
+                Tick(
+                    ts=r.ts,
+                    bid=r.bid,
+                    ask=r.ask,
+                    last=r.last,
+                    volume=r.volume,
+                    source=r.source,
+                    received_at=r.ts,
+                )
+                for r in rows
+            ]
+
+    async def upsert_candles(self, candles: Sequence[Candle]) -> None:
+        if not candles:
+            return
+        async with self._db.session() as session:
+            for c in candles:
+                await self._db.upsert(
+                    session,
+                    CandleRow,
+                    {
+                        "source": c.source,
+                        "tf": c.tf,
+                        "open_time": c.open_time,
+                        "close_time": c.close_time,
+                        "open": c.open,
+                        "high": c.high,
+                        "low": c.low,
+                        "close": c.close,
+                        "volume": c.volume,
+                        "ticks": c.ticks,
+                    },
+                    ["source", "tf", "open_time"],
+                )
+
+    async def candles(
+        self,
+        tf: str,
+        start: datetime,
+        end: datetime,
+        *,
+        source: str | None = None,
+    ) -> list[Candle]:
+        async with self._db.session() as session:
+            query = select(CandleRow).where(
+                CandleRow.tf == tf, CandleRow.open_time >= start, CandleRow.open_time < end
+            )
+            if source:
+                query = query.where(CandleRow.source == source)
+            rows = await session.scalars(query.order_by(CandleRow.open_time))
+            return [
+                Candle(
+                    source=r.source,
+                    tf=r.tf,  # type: ignore[arg-type]
+                    open_time=r.open_time,
+                    close_time=r.close_time,
+                    open=r.open,
+                    high=r.high,
+                    low=r.low,
+                    close=r.close,
+                    volume=r.volume,
+                    ticks=r.ticks,
+                )
+                for r in rows
+            ]
+
+    async def latest_candles(
+        self, tf: str, limit: int, *, source: str | None = None
+    ) -> list[Candle]:
+        async with self._db.session() as session:
+            query = select(CandleRow).where(CandleRow.tf == tf)
+            if source:
+                query = query.where(CandleRow.source == source)
+            rows = list(
+                await session.scalars(query.order_by(desc(CandleRow.open_time)).limit(limit))
+            )
+            return [
+                Candle(
+                    source=r.source,
+                    tf=r.tf,  # type: ignore[arg-type]
+                    open_time=r.open_time,
+                    close_time=r.close_time,
+                    open=r.open,
+                    high=r.high,
+                    low=r.low,
+                    close=r.close,
+                    volume=r.volume,
+                    ticks=r.ticks,
+                )
+                for r in reversed(rows)
+            ]
+
+    async def save_context(self, context: MarketContext) -> None:
+        async with self._db.session() as session:
+            session.add(MarketContextRow(ts=context.ts, payload=context.model_dump(mode="json")))
+
+    async def latest_context(self) -> MarketContext | None:
+        async with self._db.session() as session:
+            row = await session.scalar(
+                select(MarketContextRow).order_by(desc(MarketContextRow.ts)).limit(1)
+            )
+            return MarketContext.model_validate(row.payload) if row else None

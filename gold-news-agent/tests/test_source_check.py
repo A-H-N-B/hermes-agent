@@ -166,7 +166,7 @@ def test_parse_ics_reads_utc_and_flags_tzid_events() -> None:
     )
     body = parse_ics(ics.encode())
     assert body.items[0].published == datetime(2026, 10, 14, 12, 30, tzinfo=UTC)
-    assert any("TZID" in note for note in body.notes)
+    assert body.items[1].published == datetime(2026, 10, 15, 12, 30, tzinfo=UTC)  # 08:30 New York
 
 
 # --------------------------------------------------------------------------- HTTP checks

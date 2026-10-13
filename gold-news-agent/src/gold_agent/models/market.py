@@ -102,4 +102,6 @@ class MarketContext(BaseModel):
     real_yield_10y: float | None = None
     real_yield_change_1d: float | None = None
     yields_as_of: str | None = None
+    weekend_drift: float | None = None  # proxy move since Friday's close (Monday gap estimate)
+    weekend_reference: float | None = None
     notes: list[str] = Field(default_factory=list)

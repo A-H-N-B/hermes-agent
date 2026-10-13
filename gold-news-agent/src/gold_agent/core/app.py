@@ -16,7 +16,9 @@ from gold_agent.config import (
 from gold_agent.core.bus import Bus, MemoryBus, make_bus
 from gold_agent.core.clock import Clock, SystemClock
 from gold_agent.ops.redaction import Redactor
+from gold_agent.storage.calendar_repo import CalendarRepo
 from gold_agent.storage.db import DEFAULT_SQLITE_URL, Database
+from gold_agent.storage.market_repo import MarketRepo
 from gold_agent.storage.news_repo import NewsRepo
 from gold_agent.storage.ops_repo import OpsRepo
 
@@ -36,10 +38,14 @@ class AppContext:
     redact: Redactor
     news: NewsRepo = field(init=False)
     ops: OpsRepo = field(init=False)
+    market: MarketRepo = field(init=False)
+    calendar: CalendarRepo = field(init=False)
 
     def __post_init__(self) -> None:
         self.news = NewsRepo(self.db)
         self.ops = OpsRepo(self.db)
+        self.market = MarketRepo(self.db)
+        self.calendar = CalendarRepo(self.db)
 
     async def close(self) -> None:
         await self.bus.close()

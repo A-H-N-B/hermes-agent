@@ -44,11 +44,28 @@ trading:
   post_release_confirm_seconds: 60 # 30–120; FLASH alerts still go out immediately
 
 price_feed:
-  primary: binance_paxg # Q2: mt5 | twelvedata | binance_paxg
+  primary: binance_paxg # Q2: mt5 | mt5_bridge | twelvedata | binance_paxg
   fallbacks: [twelvedata]
   mt5_symbol: null # Q2: e.g. XAUUSD, XAUUSDm, GOLD
   mt5_server_utc_offset: auto # MT5 bar times are broker-server time, not UTC (section C)
   stale_tick_seconds: 20 # no tick for this long while the market is open -> WAIT + alert
+
+market:
+  candle_buffer: 600 # bars kept in memory per timeframe
+  history_bars: { M1: 1500, M5: 1500, M15: 1000, M30: 600, H1: 1500 } # H4/D1 are built from H1
+  tick_store_min_interval_ms: 1000 # archive at most one tick per second
+  tick_publish_min_interval_ms: 250 # bus/dashboard tick rate cap
+  context_store_seconds: 60
+  spread_window_minutes: 30
+  round_levels: [10, 50]
+  swing_half_width: 3 # fractal width on H1 for swing highs/lows
+  usd_source: binance_eurusdt # binance_eurusdt (proxy) | mt5_synthetic (6 FX pairs) | none
+  usd_history_days: 5
+  fred_refresh_minutes: 60
+  twelvedata_symbol: XAU/USD
+  twelvedata_poll_seconds: 60 # free plan: ~8 credits/min, 800/day
+  mt5_poll_ms: 100
+  mt5_fx_symbols: { EURUSD: EURUSD, USDJPY: USDJPY, GBPUSD: GBPUSD, USDCAD: USDCAD, USDSEK: USDSEK, USDCHF: USDCHF }
 
 risk:
   account_equity: null # Q3: required before lot sizing is shown
@@ -149,6 +166,9 @@ sessions:
   daily_break: { zone: America/New_York, start: "17:00", end: "18:00" }
   weekly_open: { zone: America/New_York, weekday: sunday, local: "18:00" }
   weekly_close: { zone: America/New_York, weekday: friday, local: "17:00" }
+  # Session liquidity multipliers for the composite score (calibrated in Phase 6).
+  liquidity: { asia: 0.8, london: 1.0, overlap: 1.0, new_york: 0.95 }
+  holiday_factor: 0.7 # US or UK holiday: thin liquidity
 
 outlook:
   conditional_beyond_hours: 4

@@ -11,6 +11,7 @@ import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import feedparser  # pyright: ignore[reportMissingTypeStubs]
 from pydantic import BaseModel, Field
@@ -68,7 +69,8 @@ def parse_timestamp(value: object, fmt: str) -> datetime | None:
     return datetime.strptime(text, fmt)  # noqa: DTZ007 - zone resolved by caller
 
 
-def _resolve(data: Any, path: str) -> Any:
+def resolve_path(data: Any, path: str) -> Any:
+    """Follow a dot path through nested dicts; None when any step is missing."""
     node = data
     for part in filter(None, path.split(".")):
         if not isinstance(node, dict):
@@ -125,7 +127,7 @@ def parse_json_items(content: bytes, spec: ParseSpec | None) -> ParsedBody:
     except json.JSONDecodeError as exc:
         raise FormatError(f"bukan JSON yang valid: {exc}") from exc
     spec = spec or ParseSpec()
-    node: Any = _resolve(data, spec.items)
+    node: Any = resolve_path(data, spec.items)
     if isinstance(node, dict):
         entries: list[Any] = [node]
     elif isinstance(node, list):
@@ -196,45 +198,68 @@ _ICS_EVENT = re.compile(r"BEGIN:VEVENT(?P<body>.*?)END:VEVENT", re.S)
 _ICS_START = re.compile(r"^DTSTART(?P<params>;[^:]*)?:(?P<value>\d{8}(?:T\d{6}Z?)?)\s*$", re.M)
 _ICS_SUMMARY = re.compile(r"^SUMMARY:(?P<value>.*)$", re.M)
 _ICS_UID = re.compile(r"^UID:(?P<value>.*)$", re.M)
+_TZID = re.compile(r"TZID=(?P<tz>[^;:]+)")
+_TZ_ALIASES = {
+    "us-eastern": "America/New_York",
+    "eastern standard time": "America/New_York",
+    "us/eastern": "America/New_York",
+}
+
+
+def _ics_zone(params: str) -> ZoneInfo | None:
+    match = _TZID.search(params)
+    if not match:
+        return None
+    name = match.group("tz").strip().strip('"')
+    try:
+        return ZoneInfo(_TZ_ALIASES.get(name.lower(), name))
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
 
 
 def parse_ics(content: bytes) -> ParsedBody:
     text = content.decode("utf-8", errors="replace").replace("\r\n ", "").replace("\r\n", "\n")
     if "BEGIN:VCALENDAR" not in text:
         raise FormatError("bukan iCalendar (tidak ada BEGIN:VCALENDAR)")
-    raw: list[FeedItem] = []
-    naive: list[bool] = []
-    zoned = 0
+    items: list[FeedItem] = []
+    unresolved = 0
+    floating = 0
     for index, event in enumerate(_ICS_EVENT.finditer(text)):
         body = event.group("body")
         start = _ICS_START.search(body)
         published: datetime | None = None
-        was_naive = False
         if start:
             value, params = start.group("value"), start.group("params") or ""
-            fmt = "%Y%m%dT%H%M%SZ" if value.endswith("Z") else "%Y%m%dT%H%M%S"
             if len(value) == 8:
-                fmt = "%Y%m%d"
-            moment = datetime.strptime(value, fmt)  # noqa: DTZ007 - zone resolved below
-            if value.endswith("Z"):
-                published = moment.replace(tzinfo=UTC)
+                published = datetime.strptime(value, "%Y%m%d").replace(tzinfo=UTC)
+            elif value.endswith("Z"):
+                published = datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
             else:
-                published, was_naive = to_utc(moment)
-                zoned += "TZID" in params
+                naive = datetime.strptime(value, "%Y%m%dT%H%M%S")  # noqa: DTZ007
+                zone = _ics_zone(params)
+                if zone is not None:
+                    published = naive.replace(tzinfo=zone).astimezone(UTC)
+                else:
+                    published = naive.replace(tzinfo=UTC)
+                    if "TZID" in params:
+                        unresolved += 1
+                    else:
+                        floating += 1
         summary = _ICS_SUMMARY.search(body)
         uid = _ICS_UID.search(body)
-        raw.append(
+        items.append(
             FeedItem(
                 id=uid.group("value").strip() if uid else str(index),
                 title=summary.group("value").strip() if summary else None,
                 published=published,
             )
         )
-        naive.append(was_naive and "TZID" not in (start.group("params") or "") if start else False)
-    body = _finish(raw, naive)
-    if zoned:
-        body.notes.append(f"{zoned} event memakai TZID; zona di-resolve oleh sinkronisasi kalender")
-    return body
+    notes: list[str] = []
+    if unresolved:
+        notes.append(f"{unresolved} event memakai TZID yang tidak dikenal; diasumsikan UTC")
+    if floating:
+        notes.append(f"{floating} timestamp tanpa zona waktu, diasumsikan UTC")
+    return ParsedBody(items=items, notes=notes)
 
 
 def parse_body(source: Source, content: bytes) -> ParsedBody:

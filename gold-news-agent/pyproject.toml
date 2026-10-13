@@ -82,6 +82,10 @@ pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
+# JSON payloads are Any by nature; validate them with pydantic instead of annotating every step.
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownLambdaType = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
