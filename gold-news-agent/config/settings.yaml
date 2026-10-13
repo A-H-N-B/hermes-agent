@@ -11,12 +11,27 @@ time:
   storage_tz: UTC
   display_tz: Asia/Jakarta
 
+infra:
+  bus: memory # memory = all services in one process; redis = one container per service
+  context_interval_seconds: 5
+
+logging:
+  level: INFO
+  format: json # json | console
+
 http:
   # Some official sources (BLS) reject requests without a contact address in the UA.
   user_agent: "gold-news-agent/0.0.1 (personal research bot)"
   contact_email: null # Q12: fill before production so BLS/SEC-style hosts accept us
   timeout_seconds: 15
   min_poll_seconds: 10 # hard floor for any poller, regardless of sources.yaml
+
+collectors:
+  max_item_age_minutes: 60 # older items are archived as backfill, never used as triggers
+  seen_capacity: 5000
+  health_flush_seconds: 15
+  backoff_base_seconds: 2
+  backoff_max_seconds: 300
 
 trading:
   symbol: XAUUSD

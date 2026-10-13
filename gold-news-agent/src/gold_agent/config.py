@@ -21,6 +21,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from gold_agent.models.common import Timeframe
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = PROJECT_ROOT / "config"
 
@@ -81,6 +83,8 @@ class ParseSpec(StrictModel):
     time_format: str = "iso"
     title_field: str | None = None
     id_field: str | None = None
+    link_field: str | None = None
+    body_field: str | None = None
 
 
 class Source(StrictModel):
@@ -97,6 +101,8 @@ class Source(StrictModel):
     enabled: bool
     status: SourceStatus
     requires_env: tuple[str, ...] = ()
+    official: bool = False
+    silence_alert_minutes: int | None = None
     tos_url: str | None = None
     tos_note: str
 
@@ -175,9 +181,6 @@ class HttpSettings(StrictModel):
         if self.contact_email:
             return f"{self.user_agent} contact: {self.contact_email}"
         return self.user_agent
-
-
-Timeframe = Literal["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
 
 
 class Timeframes(StrictModel):
@@ -344,6 +347,24 @@ class OutlookSettings(StrictModel):
     refresh_minute: int = Field(ge=0, le=59)
 
 
+class InfraSettings(StrictModel):
+    bus: Literal["memory", "redis"]
+    context_interval_seconds: float = Field(gt=0)
+
+
+class LoggingSettings(StrictModel):
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+    format: Literal["json", "console"]
+
+
+class CollectorSettings(StrictModel):
+    max_item_age_minutes: int = Field(gt=0)
+    seen_capacity: int = Field(gt=0)
+    health_flush_seconds: float = Field(gt=0)
+    backoff_base_seconds: float = Field(gt=0)
+    backoff_max_seconds: float = Field(gt=0)
+
+
 class WatchdogSettings(StrictModel):
     default_source_silence_minutes: int = Field(gt=0)
     tick_stale_alert_seconds: int = Field(gt=0)
@@ -355,7 +376,10 @@ class Settings(StrictModel):
     mode: Literal["SIGNAL_ONLY", "PAPER"]
     execution_enabled: Literal[False]
     time: TimeSettings
+    infra: InfraSettings
+    logging: LoggingSettings
     http: HttpSettings
+    collectors: CollectorSettings
     trading: TradingSettings
     price_feed: PriceFeedSettings
     risk: RiskSettings
@@ -395,6 +419,8 @@ class Secrets(BaseSettings):
     mt5_password: SecretStr | None = None
     mt5_server: SecretStr | None = None
     dashboard_password: SecretStr | None = None
+    database_url: SecretStr | None = None
+    redis_url: SecretStr | None = None
 
     def env_values(self) -> dict[str, str]:
         """Non-empty secrets keyed by their env var name (for URL placeholders + redaction)."""

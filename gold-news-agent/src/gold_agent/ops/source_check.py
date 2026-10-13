@@ -6,14 +6,9 @@ Every number in the report comes from a real request made by this module; nothin
 from __future__ import annotations
 
 import asyncio
-import calendar
-import csv
-import io
 import json
-import math
-import re
 import time
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -21,11 +16,46 @@ from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 
-import feedparser  # pyright: ignore[reportMissingTypeStubs]
 import httpx
 from pydantic import BaseModel, Field
 
+from gold_agent.collectors.parsers import (
+    FeedItem,
+    FormatError,
+    ParsedBody,
+    parse_body,
+    parse_csv_items,
+    parse_ics,
+    parse_json_items,
+    parse_rss,
+    parse_timestamp,
+    to_utc,
+)
 from gold_agent.config import ParseSpec, Source, SourceKind, SourceType, expand_url
+from gold_agent.ops.redaction import Redactor
+from gold_agent.stats import percentile
+
+__all__ = [
+    "FeedItem",
+    "FormatError",
+    "LagStats",
+    "ParsedBody",
+    "Redactor",
+    "RobotsCache",
+    "SourceCheck",
+    "check_http_source",
+    "check_telegram_source",
+    "check_websocket_source",
+    "lag_stats",
+    "parse_csv_items",
+    "parse_ics",
+    "parse_json_items",
+    "parse_rss",
+    "run_checks",
+    "timestamp_precision",
+    "utc_now",
+    "watch_lag",
+]
 
 Clock = Callable[[], datetime]
 Sleep = Callable[[float], Awaitable[None]]
@@ -40,26 +70,10 @@ _RECORD_SUFFIX = {
     SourceType.ICS: ".ics",
     SourceType.HTML: ".html",
 }
-_SECRET_QUERY = re.compile(r"(?i)\b(api_?key|apikey|token|access_token|key)=([^&\s\"']+)")
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-class FormatError(ValueError):
-    """The body was fetched but is not the format the source claims."""
-
-
-class FeedItem(BaseModel):
-    id: str
-    title: str | None = None
-    published: datetime | None = None
-
-
-class ParsedBody(BaseModel):
-    items: list[FeedItem]
-    notes: list[str] = Field(default_factory=list)
 
 
 class LagStats(BaseModel):
@@ -102,45 +116,7 @@ class SourceCheck(BaseModel):
     tos_url: str | None = None
 
 
-# --------------------------------------------------------------------------- redaction
-
-
-class Redactor:
-    """Removes secret values (and secret-looking query params) from any text we emit."""
-
-    def __init__(self, secrets: Iterable[str]) -> None:
-        self._secrets = sorted((s for s in secrets if len(s) >= 4), key=len, reverse=True)
-
-    def __call__(self, text: str) -> str:
-        for secret in self._secrets:
-            text = text.replace(secret, "***")
-        return _SECRET_QUERY.sub(lambda m: f"{m.group(1)}=***", text)
-
-
-# --------------------------------------------------------------------------- time helpers
-
-
-def to_utc(moment: datetime) -> tuple[datetime, bool]:
-    """Return (aware UTC datetime, whether the zone had to be assumed)."""
-    if moment.tzinfo is None:
-        return moment.replace(tzinfo=UTC), True
-    return moment.astimezone(UTC), False
-
-
-def parse_timestamp(value: object, fmt: str) -> datetime | None:
-    """Parse a source timestamp; returns a naive datetime when the source gave no zone."""
-    if value is None or value == "":
-        return None
-    text = str(value)
-    if fmt == "unix":
-        return datetime.fromtimestamp(float(text), UTC)
-    if fmt == "unix_ms":
-        return datetime.fromtimestamp(float(text) / 1000, UTC)
-    if fmt == "iso":
-        return datetime.fromisoformat(text)
-    if fmt == "date":
-        return datetime.strptime(text, "%Y-%m-%d")  # noqa: DTZ007 - zone resolved by caller
-    return datetime.strptime(text, fmt)  # noqa: DTZ007 - zone resolved by caller
+# --------------------------------------------------------------------------- timing helpers
 
 
 def timestamp_precision(times: Sequence[datetime]) -> Precision:
@@ -154,14 +130,6 @@ def timestamp_precision(times: Sequence[datetime]) -> Precision:
     return "second"
 
 
-def percentile(values: Sequence[float], q: float) -> float:
-    ordered = sorted(values)
-    rank = (len(ordered) - 1) * q
-    low = math.floor(rank)
-    high = min(low + 1, len(ordered) - 1)
-    return ordered[low] + (ordered[high] - ordered[low]) * (rank - low)
-
-
 def lag_stats(samples: Sequence[float]) -> LagStats:
     if not samples:
         return LagStats(samples=0, p50_seconds=None, p95_seconds=None, max_seconds=None)
@@ -172,144 +140,6 @@ def lag_stats(samples: Sequence[float]) -> LagStats:
         max_seconds=round(max(samples), 3),
         negative=sum(1 for s in samples if s < 0),
     )
-
-
-# --------------------------------------------------------------------------- body parsers
-
-
-def _resolve(data: Any, path: str) -> Any:
-    node = data
-    for part in filter(None, path.split(".")):
-        if not isinstance(node, dict):
-            return None
-        node = cast(dict[str, Any], node).get(part)
-    return node
-
-
-def _items_with_times(
-    raw: Iterable[tuple[str, str | None, datetime | None]],
-) -> ParsedBody:
-    items: list[FeedItem] = []
-    assumed = 0
-    for item_id, title, moment in raw:
-        published = None
-        if moment is not None:
-            published, was_assumed = to_utc(moment)
-            assumed += was_assumed
-        items.append(FeedItem(id=item_id, title=title, published=published))
-    notes = [f"{assumed} timestamp tanpa zona waktu, diasumsikan UTC"] if assumed else []
-    return ParsedBody(items=items, notes=notes)
-
-
-def parse_rss(content: bytes) -> ParsedBody:
-    parsed = cast(Any, feedparser.parse(content))
-    entries = cast(list[Any], parsed.entries)
-    if parsed.bozo and not entries:
-        raise FormatError(f"bukan RSS/Atom yang valid: {parsed.bozo_exception}")
-    items: list[FeedItem] = []
-    for index, entry in enumerate(entries):
-        struct = entry.get("published_parsed") or entry.get("updated_parsed")
-        published = datetime.fromtimestamp(calendar.timegm(struct), UTC) if struct else None
-        title = entry.get("title")
-        item_id = entry.get("id") or entry.get("link") or title or str(index)
-        items.append(FeedItem(id=str(item_id), title=title, published=published))
-    notes = ["feed punya peringatan parser (bozo) tapi tetap terbaca"] if parsed.bozo else []
-    return ParsedBody(items=items, notes=notes)
-
-
-def parse_json_items(content: bytes, spec: ParseSpec | None) -> ParsedBody:
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise FormatError(f"bukan JSON yang valid: {exc}") from exc
-    spec = spec or ParseSpec()
-    node: Any = _resolve(data, spec.items)
-    if isinstance(node, dict):
-        entries: list[Any] = [node]
-    elif isinstance(node, list):
-        entries = cast(list[Any], node)
-    else:
-        raise FormatError(f"path item '{spec.items}' bukan list")
-    raw: list[tuple[str, str | None, datetime | None]] = []
-    unparsable = 0
-    for index, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            continue
-        row = cast(dict[str, Any], entry)
-        moment = None
-        if spec.time_field:
-            try:
-                moment = parse_timestamp(row.get(spec.time_field), spec.time_format)
-            except (ValueError, OverflowError):
-                unparsable += 1
-        title = (
-            str(row[spec.title_field]) if spec.title_field and row.get(spec.title_field) else None
-        )
-        item_id = row.get(spec.id_field) if spec.id_field else None
-        raw.append((str(item_id or title or index), title, moment))
-    body = _items_with_times(raw)
-    if unparsable:
-        body.notes.append(f"{unparsable} timestamp tidak bisa dibaca ({spec.time_format})")
-    return body
-
-
-def parse_csv_items(content: bytes, spec: ParseSpec | None) -> ParsedBody:
-    text = content.decode("utf-8-sig", errors="replace")
-    rows = [row for row in csv.reader(io.StringIO(text)) if any(cell.strip() for cell in row)]
-    if not rows:
-        raise FormatError("CSV kosong")
-    header, data_rows = rows[0], rows[1:]
-    column = header.index(spec.time_field) if spec and spec.time_field in header else None
-    raw: list[tuple[str, str | None, datetime | None]] = []
-    for index, row in enumerate(data_rows):
-        moment = None
-        if spec and column is not None and column < len(row):
-            try:
-                moment = parse_timestamp(row[column].strip(), spec.time_format)
-            except ValueError:
-                moment = None
-        raw.append((str(index), None, moment))
-    return _items_with_times(raw)
-
-
-_ICS_START = re.compile(r"^DTSTART(?P<params>;[^:]*)?:(?P<value>\d{8}(?:T\d{6}Z?)?)\s*$", re.M)
-
-
-def parse_ics(content: bytes) -> ParsedBody:
-    text = content.decode("utf-8", errors="replace")
-    if "BEGIN:VCALENDAR" not in text:
-        raise FormatError("bukan iCalendar (tidak ada BEGIN:VCALENDAR)")
-    raw: list[tuple[str, str | None, datetime | None]] = []
-    zoned = 0
-    for index, match in enumerate(_ICS_START.finditer(text)):
-        value, params = match.group("value"), match.group("params") or ""
-        fmt = "%Y%m%dT%H%M%SZ" if value.endswith("Z") else "%Y%m%dT%H%M%S"
-        if len(value) == 8:
-            fmt = "%Y%m%d"
-        moment = datetime.strptime(value, fmt)  # noqa: DTZ007 - zone resolved below
-        if value.endswith("Z"):
-            moment = moment.replace(tzinfo=UTC)
-        elif "TZID" in params:
-            zoned += 1
-        raw.append((str(index), None, moment))
-    body = _items_with_times(raw)
-    if zoned:
-        body.notes.append(f"{zoned} event memakai TZID; zona perlu di-resolve di parser Fase 2")
-    return body
-
-
-def parse_body(source: Source, content: bytes) -> ParsedBody:
-    match source.type:
-        case SourceType.RSS:
-            return parse_rss(content)
-        case SourceType.JSON:
-            return parse_json_items(content, source.parse)
-        case SourceType.CSV:
-            return parse_csv_items(content, source.parse)
-        case SourceType.ICS:
-            return parse_ics(content)
-        case _:
-            return ParsedBody(items=[])
 
 
 # --------------------------------------------------------------------------- robots.txt

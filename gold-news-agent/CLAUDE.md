@@ -18,8 +18,10 @@ uv sync                                              # create/refresh .venv (Pyt
 uv run pytest -q                                     # tests
 uv run ruff check . && uv run ruff format --check .  # lint/format
 uv run pyright                                       # strict type check
-uv run python scripts/verify_sources.py              # one verification pass -> docs/source_report.md
-uv run python scripts/verify_sources.py --watch-minutes 120 --note "VPS <region>"  # + source lag
+uv run gold-agent verify-sources                     # one verification pass -> docs/source_report.md
+uv run gold-agent verify-sources --watch-minutes 120 --note "VPS <region>"  # + source lag
+uv run gold-agent run all                            # every service in one process (memory bus)
+uv run gold-agent db upgrade                         # Alembic migrations (DATABASE_URL)
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
@@ -44,11 +46,18 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 
 ## Phase log
 
-- **Phase 0 (in progress, awaiting approval).** Done: repo scaffold (uv, ruff, pyright strict,
-  pytest, pre-commit with gitleaks), validated config (`settings.yaml`, `sources.yaml` with 31
-  candidates, `keywords.yaml`, `gold_drivers.yaml`, `fed_officials.yaml` structure),
-  `scripts/verify_sources.py` (+34 tests), section C of the prompt, architecture decisions.
-  Blocked: the build container's network policy rejects every source host, so
-  `docs/source_report.md` has no real latency yet. It has to be re-run on the production host
-  (or after the cloud environment allows those domains). Open questions: Q1–Q13 (prompt §3 + §C6).
-- Phase 1+ not started. Stop for approval at the end of Phase 0 and before Phase 8.
+- **Phase 0 (done).** Scaffold, validated config, `verify-sources` (+report), prompt section C.
+  The build container's network policy rejects every source host, so `docs/source_report.md`
+  holds no real latency yet: re-run it on the production host. 2026-10-13: the user said
+  "lanjutkan sampai jadi" without answering Q1–Q13, so the recommended defaults in
+  `settings.yaml` stand (intraday, Binance PAXG proxy, 0.5% risk, 3% daily loss, Linux VPS,
+  quiet 00:00–05:00 WIB, no news trading). Changing an answer = editing config, not code.
+- **Phase 1 (done).** Models (`models/`), bus (`core/bus.py`: MemoryBus + Redis Streams with
+  consumer groups, XAUTOCLAIM, dead-letter), storage (`storage/`: SQLAlchemy async, Alembic
+  `0001`, verified on SQLite + PostgreSQL 16), collectors (RSS/JSON poller with ETag/304,
+  Retry-After, jittered backoff, backfill marking; Telethon push collector incl. edits),
+  normaliser, dedup/cluster (hash, rapidfuzz, number guard, optional embeddings), archive,
+  latency stages + p50/p95 summary, `gold-agent run collector`. Integration tests run when
+  `GOLD_TEST_POSTGRES_URL` / `GOLD_TEST_REDIS_URL` are set.
+- Phases 2–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
+  after ≥ 2–4 weeks of recorded paper trading.
