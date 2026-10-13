@@ -1,0 +1,85 @@
+# Prefilter vocabulary (Phase 3). Case-insensitive; entries are regex fragments matched on word
+# boundaries. A headline is relevant when it hits >= 1 "strong" term, or >= 2 "context" terms.
+# Irrelevant items are still archived for research.
+
+strong:
+  gold:
+    - gold
+    - xau(?:usd)?
+    - bullion
+    - comex
+    - lbma
+    - spdr gold|\bgld\b
+    - emas
+    - logam mulia
+  fed:
+    - fed(?:eral reserve)?
+    - fomc
+    - powell|fed chair
+    - rate (?:cut|hike|decision)s?
+    - dot plot
+    - beige book
+    - suku bunga
+  us_data:
+    - cpi
+    - core cpi
+    - pce
+    - (?:non-?farm )?payrolls|nfp
+    - jobless claims
+    - unemployment rate
+    - retail sales
+    - ism (?:manufacturing|services)
+    - pmi
+    - gdp
+    - ppi
+    - jolts
+    - inflasi
+  central_bank_gold:
+    - central bank gold
+    - pboc|people'?s bank of china
+    - gold reserves?
+    - cadangan emas
+
+context:
+  usd_rates:
+    - dollar|dxy|greenback
+    - treasur(?:y|ies)
+    - yields?
+    - real yields?|tips
+    - auction
+  geopolitics:
+    - war
+    - ceasefire
+    - missile
+    - strike[sd]?
+    - invasion
+    - sanctions?
+    - escalat(?:e|ion)
+    - nuclear
+    - perang
+  trade_fiscal:
+    - tariffs?
+    - trade war
+    - shutdown
+    - debt ceiling
+    - downgrade
+    - deficit
+    - tarif
+  other_central_banks:
+    - ecb
+    - boj|bank of japan
+    - boe|bank of england
+    - snb
+  risk:
+    - risk-off|risk off
+    - sell-?off
+    - margin call
+    - safe[- ]haven
+    - etf (?:flows?|holdings)
+
+# Never relevant on their own (filter noise like "gold medal", "Goldman").
+negative:
+  - gold medal
+  - golden (?:globe|state|retriever)
+  - goldman
+  - gold coast

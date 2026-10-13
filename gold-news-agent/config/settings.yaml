@@ -1,0 +1,145 @@
+# Gold News Agent — behaviour settings (non-secret). Secrets live in .env only.
+# Every value tagged "Qn" waits on the Phase 0 question n (PROMPT section 3 + section C).
+# Values are the prompt's starting points; Phase 6 calibrates them from recorded data.
+
+version: 1
+
+mode: SIGNAL_ONLY # SIGNAL_ONLY | PAPER. EXECUTION exists only after Phase 8 approval.
+execution_enabled: false
+
+time:
+  storage_tz: UTC
+  display_tz: Asia/Jakarta
+
+http:
+  # Some official sources (BLS) reject requests without a contact address in the UA.
+  user_agent: "gold-news-agent/0.0.1 (personal research bot)"
+  contact_email: null # Q12: fill before production so BLS/SEC-style hosts accept us
+  timeout_seconds: 15
+  min_poll_seconds: 10 # hard floor for any poller, regardless of sources.yaml
+
+trading:
+  symbol: XAUUSD
+  style: intraday # Q1: scalping | intraday | swing
+  timeframes:
+    entry: M5
+    signal: M15
+    trend: [H1, H4]
+  news_trading: false # Q8: false = never trade into a release; wait for price confirmation
+  post_release_confirm_seconds: 60 # 30–120; FLASH alerts still go out immediately
+
+price_feed:
+  primary: binance_paxg # Q2: mt5 | twelvedata | binance_paxg
+  fallbacks: [twelvedata]
+  mt5_symbol: null # Q2: e.g. XAUUSD, XAUUSDm, GOLD
+  mt5_server_utc_offset: auto # MT5 bar times are broker-server time, not UTC (section C)
+  stale_tick_seconds: 20 # no tick for this long while the market is open -> WAIT + alert
+
+risk:
+  account_equity: null # Q3: required before lot sizing is shown
+  account_currency: USD # Q3
+  risk_per_trade_pct: 0.5 # Q3: 0.5–1
+  max_daily_loss_pct: 3.0 # Q3
+  max_open_positions: 1
+  max_signals_per_day: 6
+  max_spread_usd: 0.50 # Q2/Q9: tune to the broker's normal XAUUSD spread
+
+budget:
+  llm_daily_usd: 3.0 # Q4: above this, only impact >= deep_min_impact goes to the LLM
+  paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
+
+notifications:
+  quiet_hours_wib: # Q7
+    start: "00:00"
+    end: "05:00"
+    allow_priorities: [high]
+  digest_interval_minutes: 60
+  max_messages_per_minute: 6
+
+deployment:
+  host: linux_vps # Q6: linux_vps | windows_vps | home_pc
+
+signal_engine:
+  weights:
+    news: 0.35
+    macro: 0.20
+    technical: 0.25
+    price_confirmation: 0.20
+  entry_threshold: 0.35 # |S| needed for BUY/SELL
+  min_confidence: 60
+  reversal_threshold: 0.50 # hysteresis: flipping direction needs this much
+  reversal_min_minutes: 15
+  cooldown_minutes: 10
+  event_blackout_minutes: 15
+  levels:
+    sl_atr_multiple: 1.2
+    sl_atr_timeframe: M15
+    tp_r_multiples: [1.0, 2.0] # TP3 = next structure level
+    move_sl_to_breakeven_after_tp1: true
+
+news:
+  dedup:
+    fuzzy_ratio: 90
+    window_minutes: 30
+    embedding_model: sentence-transformers/all-MiniLM-L6-v2
+    embedding_cosine: 0.90
+  unconfirmed_weight: 0.3 # weight multiplier while needs_confirmation is true
+
+price_led:
+  atr_multiple_k: 3.0
+  news_lookback_minutes: 5
+
+llm:
+  provider: anthropic
+  deep_min_impact: 3
+  triage:
+    model: claude-haiku-5-5
+    effort: low
+    thinking: disabled # Haiku 5.5 accepts disabled only at effort <= high
+    timeout_seconds: 6
+    max_tokens: 1024
+  deep:
+    model: claude-sonnet-5-5
+    effort: medium
+    timeout_seconds: 25
+    max_tokens: 4096
+  outlook:
+    model: claude-sonnet-5-5
+    effort: medium
+    timeout_seconds: 60
+    max_tokens: 8192
+  brief:
+    model: claude-opus-5-5 # optional; daily brief + weekly review
+    effort: high
+    timeout_seconds: 300
+    max_tokens: 16000
+  circuit_breaker:
+    failures: 5
+    cooldown_seconds: 120
+
+sessions:
+  # Local wall-clock times; converted to UTC/WIB per date with zoneinfo (never fixed offsets).
+  moments:
+    - { id: tokyo_open, zone: Asia/Tokyo, local: "09:00" }
+    - { id: sge_open, zone: Asia/Shanghai, local: "09:00" }
+    - { id: london_open, zone: Europe/London, local: "08:00" }
+    - { id: lbma_am, zone: Europe/London, local: "10:30" }
+    - { id: ny_open, zone: America/New_York, local: "08:00" }
+    - { id: us_data, zone: America/New_York, local: "08:30" }
+    - { id: lbma_pm, zone: Europe/London, local: "15:00" }
+    - { id: london_close, zone: Europe/London, local: "16:00" }
+    - { id: fomc_statement, zone: America/New_York, local: "14:00" }
+    - { id: daily_close, zone: America/New_York, local: "17:00" }
+  # Most brokers halt XAUUSD for ~1h after the NY close (CME metals daily break).
+  daily_break: { zone: America/New_York, start: "17:00", end: "18:00" }
+  weekly_open: { zone: America/New_York, weekday: sunday, local: "18:00" }
+  weekly_close: { zone: America/New_York, weekday: friday, local: "17:00" }
+
+outlook:
+  conditional_beyond_hours: 4
+  refresh_minute: 0
+
+watchdog:
+  default_source_silence_minutes: 30
+  tick_stale_alert_seconds: 60
+  queue_backlog_alert: 500
