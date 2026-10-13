@@ -251,8 +251,8 @@ async def test_silent_feed_fails_over_only_while_the_market_is_open() -> None:
         )
         stop = asyncio.Event()
 
-        async def emit(tick: Tick) -> None:
-            stop.set()
+        async def emit(tick: Tick, done: asyncio.Event = stop) -> None:
+            done.set()
 
         task = asyncio.create_task(adapter.run(emit, stop))
         await asyncio.sleep(0.4 if market_open else 0.3)
