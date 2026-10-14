@@ -88,8 +88,8 @@ def bollinger(
     data = _arr(closes)
     mid = sma(closes, period)
     std = np.full(data.shape, np.nan)
-    for i in range(period - 1, len(data)):
-        std[i] = data[i - period + 1 : i + 1].std(ddof=0)
+    if len(data) >= period:
+        std[period - 1 :] = np.lib.stride_tricks.sliding_window_view(data, period).std(axis=1)
     return mid, mid + mult * std, mid - mult * std
 
 

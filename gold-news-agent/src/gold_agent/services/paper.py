@@ -5,7 +5,6 @@ the daily loss limit). After a restart it resumes open positions and replays sto
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -224,13 +223,11 @@ class PaperService:
                     await self._unfilled(signal, "tidak tereksekusi: tidak ada harga dari sumber")
 
     async def _sweep_loop(self, stop: asyncio.Event) -> None:
-        while not stop.is_set():
+        while not await self._ctx.clock.wait(stop, SWEEP_SECONDS):
             try:
                 await self.sweep()
             except Exception:
                 log.exception("paper.sweep_failed")
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=SWEEP_SECONDS)
 
     async def run(self, stop: asyncio.Event) -> None:
         await self.load()

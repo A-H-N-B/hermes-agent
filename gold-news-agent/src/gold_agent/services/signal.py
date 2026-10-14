@@ -497,15 +497,11 @@ class SignalService:
         await self.scheduled_outlooks(now)
 
     async def _tick_loop(self, stop: asyncio.Event) -> None:
-        while not stop.is_set():
+        while not await self._ctx.clock.wait(stop, TICK_SECONDS):
             try:
                 await self.tick()
             except Exception:
                 log.exception("signal.tick_failed")
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=TICK_SECONDS)
-            except TimeoutError:
-                continue
 
     async def run(self, stop: asyncio.Event) -> None:
         await self.load()

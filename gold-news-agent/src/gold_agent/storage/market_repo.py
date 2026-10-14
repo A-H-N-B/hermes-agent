@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 
 from gold_agent.models import Candle, MarketContext, Tick
 from gold_agent.storage.db import Database
@@ -54,25 +55,23 @@ class MarketRepo:
     async def upsert_candles(self, candles: Sequence[Candle]) -> None:
         if not candles:
             return
+        rows = [
+            {
+                "source": c.source,
+                "tf": c.tf,
+                "open_time": c.open_time,
+                "close_time": c.close_time,
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+                "ticks": c.ticks,
+            }
+            for c in candles
+        ]
         async with self._db.session() as session:
-            for c in candles:
-                await self._db.upsert(
-                    session,
-                    CandleRow,
-                    {
-                        "source": c.source,
-                        "tf": c.tf,
-                        "open_time": c.open_time,
-                        "close_time": c.close_time,
-                        "open": c.open,
-                        "high": c.high,
-                        "low": c.low,
-                        "close": c.close,
-                        "volume": c.volume,
-                        "ticks": c.ticks,
-                    },
-                    ["source", "tf", "open_time"],
-                )
+            await self._db.upsert_many(session, CandleRow, rows, ["source", "tf", "open_time"])
 
     async def candles(
         self,
@@ -144,6 +143,16 @@ class MarketRepo:
     async def save_context(self, context: MarketContext) -> None:
         async with self._db.session() as session:
             session.add(MarketContextRow(ts=context.ts, payload=context.model_dump(mode="json")))
+
+    async def prune(self, *, ticks_before: datetime, contexts_before: datetime) -> tuple[int, int]:
+        """Retention (C4.3): drop archived ticks / context snapshots older than the cut-offs.
+        Candles are kept: they are small and feed the hourly profile and event studies."""
+        async with self._db.session() as session:
+            ticks: Any = await session.execute(delete(TickRow).where(TickRow.ts < ticks_before))
+            contexts: Any = await session.execute(
+                delete(MarketContextRow).where(MarketContextRow.ts < contexts_before)
+            )
+            return int(ticks.rowcount or 0), int(contexts.rowcount or 0)
 
     async def contexts_between(self, start: datetime, end: datetime) -> list[MarketContext]:
         """Stored snapshots, oldest first: exactly what the engine saw (replay / backtest)."""

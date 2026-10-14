@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 import httpx
 import structlog
@@ -13,6 +14,9 @@ from gold_agent.market.adapters.binance import BinanceAdapter
 from gold_agent.market.adapters.bridge import BridgeTickAdapter
 from gold_agent.market.adapters.failover import FailoverAdapter
 from gold_agent.market.adapters.twelvedata import TwelveDataAdapter
+
+if TYPE_CHECKING:
+    from gold_agent.market.adapters.mt5 import Mt5Adapter
 
 log = structlog.get_logger(__name__)
 
@@ -83,20 +87,26 @@ def _make(ctx: AppContext, client: httpx.AsyncClient, feed: str) -> PriceAdapter
         if sys.platform != "win32":
             log.warning("feed.mt5_unavailable", hint="MetaTrader5 runs on Windows; use mt5_bridge")
             return None
-        from gold_agent.market.adapters.mt5 import Mt5Adapter
-
-        offset = settings.price_feed.mt5_server_utc_offset
-        login = ctx.env.get("MT5_LOGIN")
-        return Mt5Adapter(
-            symbol=settings.price_feed.mt5_symbol or "XAUUSD",
-            clock=ctx.clock,
-            poll_ms=settings.market.mt5_poll_ms,
-            offset_hours=None if offset == "auto" else int(offset),
-            login=int(login) if login else None,
-            password=ctx.env.get("MT5_PASSWORD"),
-            server=ctx.env.get("MT5_SERVER"),
-        )
+        return mt5_adapter(ctx)
     return None
+
+
+def mt5_adapter(ctx: AppContext) -> Mt5Adapter:
+    """The local MT5 terminal (Windows only: importing MetaTrader5 fails elsewhere)."""
+    from gold_agent.market.adapters.mt5 import Mt5Adapter
+
+    settings = ctx.settings
+    offset = settings.price_feed.mt5_server_utc_offset
+    login = ctx.env.get("MT5_LOGIN")
+    return Mt5Adapter(
+        symbol=settings.price_feed.mt5_symbol or "XAUUSD",
+        clock=ctx.clock,
+        poll_ms=settings.market.mt5_poll_ms,
+        offset_hours=None if offset == "auto" else int(offset),
+        login=int(login) if login else None,
+        password=ctx.env.get("MT5_PASSWORD"),
+        server=ctx.env.get("MT5_SERVER"),
+    )
 
 
 def build_price_adapter(ctx: AppContext, client: httpx.AsyncClient) -> FailoverAdapter | None:

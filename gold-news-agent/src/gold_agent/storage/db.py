@@ -14,6 +14,7 @@ from gold_agent.config import PROJECT_ROOT
 from gold_agent.storage.tables import Base
 
 DEFAULT_SQLITE_URL = f"sqlite+aiosqlite:///{PROJECT_ROOT / 'data' / 'gold.db'}"
+UPSERT_CHUNK = 1000  # rows per statement: SQLite and PostgreSQL cap bound parameters at ~32k
 
 
 def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
@@ -91,6 +92,26 @@ class Database:
         else:
             stmt = stmt.on_conflict_do_nothing(index_elements=list(keys))
         await session.execute(stmt)
+
+    async def upsert_many(
+        self,
+        session: AsyncSession,
+        table: Any,
+        rows: Sequence[Mapping[str, Any]],
+        keys: Sequence[str],
+    ) -> None:
+        """`upsert` for many rows: one multi-row statement per chunk. A key repeated in the
+        batch keeps its last row, as row-by-row upserts would (PostgreSQL refuses to update
+        a row twice in one statement)."""
+        unique = list({tuple(row[k] for k in keys): row for row in rows}.values())
+        for i in range(0, len(unique), UPSERT_CHUNK):
+            batch = unique[i : i + UPSERT_CHUNK]
+            stmt = self.insert(table).values(batch)
+            columns = [c for c in batch[0] if c not in keys]
+            stmt = stmt.on_conflict_do_update(
+                index_elements=list(keys), set_={c: stmt.excluded[c] for c in columns}
+            )
+            await session.execute(stmt)
 
     async def insert_ignore(
         self, session: AsyncSession, table: Any, values: Mapping[str, Any], keys: Sequence[str]

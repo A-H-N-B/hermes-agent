@@ -475,6 +475,13 @@ class WatchdogSettings(StrictModel):
     default_source_silence_minutes: int = Field(gt=0)
     tick_stale_alert_seconds: int = Field(gt=0)
     queue_backlog_alert: int = Field(gt=0)
+    check_seconds: float = Field(gt=0)
+    heartbeat_stale_seconds: int = Field(gt=0)
+    clock_offset_alert_ms: float = Field(gt=0)
+    clock_offset_file: str | None = None
+    disk_free_min_pct: float = Field(gt=0, lt=100)
+    tick_retention_days: int = Field(gt=0)
+    context_retention_days: int = Field(gt=0)
 
 
 class Settings(StrictModel):

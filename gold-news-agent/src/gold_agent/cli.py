@@ -55,8 +55,10 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "eval_triage.md")
 
     from gold_agent.cli_eval import add_parsers
+    from gold_agent.cli_ops import add_parsers as add_ops_parsers
 
     add_parsers(sub)
+    add_ops_parsers(sub)
     sub.add_parser("verify-sources", help="Phase 0 source verification", add_help=False)
     return parser
 
@@ -219,6 +221,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             from gold_agent.cli_eval import HANDLERS
 
             return asyncio.run(HANDLERS[args.command](args))
+        case "mt5-bridge" | "replay":
+            from gold_agent.cli_ops import HANDLERS as OPS
+
+            return asyncio.run(OPS[args.command](args))
         case _:
             return 2
 

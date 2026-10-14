@@ -9,6 +9,7 @@ import pytest
 from gold_agent.core.app import AppContext
 from gold_agent.models import (
     Analysis,
+    Candle,
     LatencyStage,
     NewsCluster,
     NewsItem,
@@ -16,6 +17,7 @@ from gold_agent.models import (
     TriageResult,
 )
 from gold_agent.processing.normalizer import title_hash
+from gold_agent.storage.db import UPSERT_CHUNK
 from gold_agent.storage.migrate import upgrade
 from tests.conftest import T0, postgres_url
 
@@ -75,6 +77,20 @@ def analysis(cluster_id: str, version: int, impact: int = 4) -> Analysis:
     )
 
 
+def bar(i: int, *, close: float) -> Candle:
+    start = T0 + timedelta(minutes=i)
+    return Candle(
+        source="mt5",
+        tf="M1",
+        open_time=start,
+        close_time=start + timedelta(minutes=1),
+        open=close,
+        high=close + 1,
+        low=close - 1,
+        close=close,
+    )
+
+
 async def _storage_contract(ctx: AppContext) -> None:
     item = news_item(1)
     assert await ctx.news.save_item(item)
@@ -130,6 +146,14 @@ async def _storage_contract(ctx: AppContext) -> None:
     await ctx.ops.set_learned_reliability("feed", 0.65, 40, T0)
     await ctx.ops.sync_sources(ctx.sources, T0)  # config sync keeps the learned value
     assert await ctx.ops.learned_reliability() == {"feed": 0.65}
+
+    bars = [bar(i, close=100.0 + i) for i in range(UPSERT_CHUNK + 5)]  # spans two statements
+    await ctx.market.upsert_candles(bars)
+    await ctx.market.upsert_candles([bar(0, close=1.0), bar(0, close=2.0), bar(1, close=3.0)])
+    stored = await ctx.market.candles("M1", T0, T0 + timedelta(days=2), source="mt5")
+    assert len(stored) == UPSERT_CHUNK + 5  # updated in place, never duplicated
+    assert [c.close for c in stored[:3]] == [2.0, 3.0, 102.0]  # a repeated key keeps its last row
+    assert stored[-1].close == 100.0 + UPSERT_CHUNK + 4
 
 
 async def test_storage_contract_sqlite(ctx: AppContext) -> None:

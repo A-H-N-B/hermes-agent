@@ -149,13 +149,11 @@ class NotifierService:
     # ------------------------------------------------------------------ run
 
     async def _flush_loop(self, stop: asyncio.Event) -> None:
-        while not stop.is_set():
+        while not await self._ctx.clock.wait(stop, FLUSH_SECONDS):
             try:
                 await self.dispatcher.flush()
             except Exception:
                 log.exception("notify.flush_failed")
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=FLUSH_SECONDS)
 
     async def _start_bot(self) -> None:
         app = self._app

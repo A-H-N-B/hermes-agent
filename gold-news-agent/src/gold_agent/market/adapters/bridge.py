@@ -22,6 +22,7 @@ class BridgeTickAdapter:
         self._consumer = consumer
         self._contract_size: float | None = None
         self._volume_step: float | None = None
+        self._fx: dict[str, float] = {}  # broker symbol -> mid (for the synthetic DXY)
 
     async def run(self, emit: TickSink, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -30,9 +31,12 @@ class BridgeTickAdapter:
             )
             for message in messages:
                 data = message.data
-                if data.get("kind") == "symbol_info":
+                kind = data.get("kind")
+                if kind == "symbol_info":
                     self._contract_size = data.get("contract_size")
                     self._volume_step = data.get("volume_step")
+                elif kind == "fx_quotes":
+                    self._fx = {str(k): float(v) for k, v in (data.get("quotes") or {}).items()}
                 else:
                     await emit(Tick.model_validate(data))
             await self._bus.ack(STREAM_TICKS_RAW, "market", [m.id for m in messages])
@@ -47,6 +51,10 @@ class BridgeTickAdapter:
 
     async def contract_size(self) -> float | None:
         return self._contract_size
+
+    def quotes(self, symbols: dict[str, str]) -> dict[str, float]:
+        """Latest FX mids forwarded by the bridge (logical name -> broker symbol), like MT5's."""
+        return {name: self._fx[broker] for name, broker in symbols.items() if broker in self._fx}
 
     async def volume_step(self) -> float | None:
         return self._volume_step

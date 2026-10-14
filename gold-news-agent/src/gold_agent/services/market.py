@@ -195,13 +195,11 @@ class MarketService:
 
     async def _context_loop(self, stop: asyncio.Event) -> None:
         interval = self._ctx.settings.infra.context_interval_seconds
-        while not stop.is_set():
+        while not await self._ctx.clock.wait(stop, interval):
             try:
                 await self.publish_context()
             except Exception:
                 log.exception("market.context_failed")
-            if await sleep_or_stop(stop, interval):
-                return
 
     # ------------------------------------------------------------------ macro feeds
 

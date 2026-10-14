@@ -62,6 +62,12 @@ def _evaluator(ctx: AppContext) -> Service:
     return EvaluatorService(ctx)
 
 
+def _watchdog(ctx: AppContext) -> Service:
+    from gold_agent.services.watchdog import WatchdogService
+
+    return WatchdogService(ctx)
+
+
 SERVICE_FACTORIES: dict[str, Callable[[AppContext], Service]] = {
     "collector": _collector,
     "market": _market,
@@ -72,4 +78,5 @@ SERVICE_FACTORIES: dict[str, Callable[[AppContext], Service]] = {
     "evaluator": _evaluator,
     "notifier": _notifier,
     "dashboard": _dashboard,
+    "watchdog": _watchdog,
 }

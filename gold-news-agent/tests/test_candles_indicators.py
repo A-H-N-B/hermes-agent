@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -143,6 +144,14 @@ def test_atr_bollinger_vwap_pivots_and_swings() -> None:
     assert ind.last(ind.atr(highs, lows, closes, 14)) == pytest.approx(2.0)
     mid, upper, lower = ind.bollinger([10.0] * 25)
     assert ind.last(mid) == ind.last(upper) == ind.last(lower) == 10.0
+    wavy = [100 + 3 * math.sin(i / 3) + i * 0.1 for i in range(60)]
+    mid, upper, lower = ind.bollinger(wavy, 20, 2.0)
+    assert math.isnan(upper[18]) and not math.isnan(upper[19])
+    for i in (19, 40, 59):
+        window = wavy[i - 19 : i + 1]
+        assert mid[i] == pytest.approx(statistics.fmean(window))
+        assert upper[i] - mid[i] == pytest.approx(2 * statistics.pstdev(window))
+        assert mid[i] - lower[i] == pytest.approx(2 * statistics.pstdev(window))
     assert ind.vwap([2.0], [0.0], [1.0], [0.0]) == (1.0, True)
     value, twap = ind.vwap([2.0, 4.0], [0.0, 2.0], [1.0, 3.0], [1.0, 3.0])
     assert value == pytest.approx(2.5) and not twap

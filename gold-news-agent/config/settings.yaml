@@ -248,6 +248,15 @@ dashboard:
   tick_push_per_second: 2 # live price updates pushed to each browser
 
 watchdog:
-  default_source_silence_minutes: 30
+  default_source_silence_minutes: 30 # no successful poll for this long = collector problem
   tick_stale_alert_seconds: 60
-  queue_backlog_alert: 500
+  queue_backlog_alert: 500 # unread messages in a consumer group
+  check_seconds: 30
+  heartbeat_stale_seconds: 180 # a service that stopped reporting
+  clock_offset_alert_ms: 100 # C4.1: |chrony offset| above this raises an alert
+  # Docker: a host timer writes the chrony offset (seconds) here (scripts/clock_offset.sh);
+  # natively the watchdog asks `chronyc` itself.
+  clock_offset_file: /run/gold/clock_offset
+  disk_free_min_pct: 10
+  tick_retention_days: 30 # older archived ticks are deleted nightly (~9 MB/day at 1 tick/s)
+  context_retention_days: 180
