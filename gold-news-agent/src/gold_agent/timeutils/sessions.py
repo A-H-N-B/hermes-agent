@@ -45,6 +45,12 @@ _DAYS_ID = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 _MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
 
 
+def fmt_wib_date(moment: datetime) -> str:
+    """'Selasa 13 Okt' (the WIB calendar date, Indonesian names)."""
+    local = to_wib(moment)
+    return f"{_DAYS_ID[local.weekday()]} {local.day} {_MONTHS_ID[local.month - 1]}"
+
+
 def fmt_wib(moment: datetime, with_date: bool = False) -> str:
     """'19:30' or 'Selasa 13 Okt 19:30' (Indonesian day/month names, WIB)."""
     local = to_wib(moment)

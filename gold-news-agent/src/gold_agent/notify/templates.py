@@ -20,6 +20,7 @@ from gold_agent.models import (
     PlaybookBucket,
     ReleaseReading,
     Signal,
+    SignalOutcome,
     SignalState,
 )
 from gold_agent.notify.format import (
@@ -110,6 +111,42 @@ def render_signal_replaced(old: Signal, new_id: str, new_action: str) -> str:
             f"♻️ <b>Sinyal {old.action} dibatalkan</b> (dibuat {esc(old.created_at_wib)})",
             f"Arah berbalik menjadi {esc(new_action)} — lihat sinyal {esc(new_id)}.",
             DISCLAIMER,
+        ]
+    )
+
+
+CLOSE_REASON = {
+    "tp2": "TP2 tercapai",
+    "tp1": "TP1 tercapai, sisa ditutup karena waktu habis",
+    "breakeven": "TP1 tercapai, sisa kena stop breakeven",
+    "sl": "kena stop loss",
+    "expired": "kedaluwarsa sebelum TP1",
+    "cancelled": "dibatalkan",
+}
+
+
+def render_paper_tp1(signal: Signal, outcome: SignalOutcome) -> str:
+    stop = price(outcome.stop) if outcome.stop is not None else "-"
+    return "\n".join(
+        [
+            f"✅ <b>TP1 tercapai</b> · {signal.action} {esc(signal.created_at_wib)}",
+            f"Paper: {outcome.realized_r:+.2f}R sudah diamankan · geser SL ke breakeven {stop}",
+            f"Sisa posisi menuju TP2 {price(signal.tp2)}. Bukan saran keuangan.",
+        ]
+    )
+
+
+def render_paper_close(signal: Signal, outcome: SignalOutcome) -> str:
+    r_value = outcome.r_multiple if outcome.r_multiple is not None else 0.0
+    icon = "📗" if r_value > 0 else "📕" if r_value < 0 else "📘"
+    duration = duration_id((outcome.duration_minutes or 0.0) * 60)
+    return "\n".join(
+        [
+            f"{icon} <b>Sinyal {signal.action} ditutup</b> · {esc(signal.created_at_wib)} · "
+            f"{CLOSE_REASON.get(outcome.status, outcome.status)}",
+            f"Hasil paper {r_value:+.2f}R · entry {price(outcome.entry_price)} → keluar "
+            f"{price(outcome.exit_price)} · durasi {duration}",
+            f"MFE {outcome.mfe_r:+.2f}R · MAE -{outcome.mae_r:.2f}R",
         ]
     )
 

@@ -9,7 +9,13 @@ from sqlalchemy import desc, select, update
 
 from gold_agent.models import Analysis, NewsCluster, NewsItem, ReleaseReading
 from gold_agent.storage.db import Database
-from gold_agent.storage.tables import AnalysisRow, NewsClusterRow, NewsItemRow, ReleaseRow
+from gold_agent.storage.tables import (
+    AnalysisRow,
+    AnalysisVersionRow,
+    NewsClusterRow,
+    NewsItemRow,
+    ReleaseRow,
+)
 
 
 class NewsRepo:
@@ -129,6 +135,27 @@ class NewsRepo:
                 },
                 ["id"],
             )
+            session.add(
+                AnalysisVersionRow(
+                    cluster_id=analysis.cluster_id,
+                    version_at=analysis.version_at or analysis.triaged_at,
+                    payload=analysis.model_dump(mode="json"),
+                )
+            )
+
+    async def analysis_versions_between(self, start: datetime, end: datetime) -> list[Analysis]:
+        """Every version published in [start, end), oldest first (for no-lookahead replays)."""
+        async with self._db.session() as session:
+            rows = await session.scalars(
+                select(AnalysisVersionRow)
+                .where(AnalysisVersionRow.version_at >= start, AnalysisVersionRow.version_at < end)
+                .order_by(AnalysisVersionRow.version_at, AnalysisVersionRow.id)
+            )
+            versions: list[Analysis] = []
+            for row in rows:
+                analysis = Analysis.model_validate(row.payload)
+                versions.append(analysis.model_copy(update={"version_at": row.version_at}))
+            return versions
 
     async def get_analysis(self, cluster_id: str) -> Analysis | None:
         async with self._db.session() as session:

@@ -18,8 +18,9 @@ from gold_agent.core.bus import (
     Message,
 )
 from gold_agent.core.clock import ManualClock
+from gold_agent.market.series import PriceSeries
 from gold_agent.models import Candle, Level, MarketContext, ReleaseReading
-from gold_agent.services.signal import PriceHistory, SignalService
+from gold_agent.services.signal import SignalService
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT
 from gold_agent.signals.outlook import OutlookNarrative
 from tests.builders import T0, analysis, market
@@ -266,7 +267,7 @@ async def test_profile_is_rebuilt_from_stored_h1_bars(
 
 
 def test_price_history_answers_only_inside_its_window() -> None:
-    history = PriceHistory(keep=timedelta(hours=1), max_gap=timedelta(minutes=5))
+    history = PriceSeries(keep=timedelta(hours=1), max_gap=timedelta(minutes=5))
     for minute in range(0, 90, 1):
         history.add(T0 + timedelta(minutes=minute), 2600.0 + minute)
     assert len(history) == 61  # older than one hour is dropped

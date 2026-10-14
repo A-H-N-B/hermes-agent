@@ -50,12 +50,26 @@ def _dashboard(ctx: AppContext) -> Service:
     return DashboardService(ctx)
 
 
+def _paper(ctx: AppContext) -> Service:
+    from gold_agent.services.paper import PaperService
+
+    return PaperService(ctx)
+
+
+def _evaluator(ctx: AppContext) -> Service:
+    from gold_agent.services.evaluator import EvaluatorService
+
+    return EvaluatorService(ctx)
+
+
 SERVICE_FACTORIES: dict[str, Callable[[AppContext], Service]] = {
     "collector": _collector,
     "market": _market,
     "calendar": _calendar,
     "analyzer": _analyzer,
     "signal": _signal,
+    "paper": _paper,
+    "evaluator": _evaluator,
     "notifier": _notifier,
     "dashboard": _dashboard,
 }

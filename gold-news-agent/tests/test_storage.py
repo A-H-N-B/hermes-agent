@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
@@ -146,6 +147,31 @@ async def test_alembic_migration_builds_the_same_schema(
         await context.close()
 
 
+async def _schema_diff(context: AppContext) -> list[Any]:
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from gold_agent.storage.tables import Base
+
+    def diff(connection: Any) -> list[Any]:
+        return list(compare_metadata(MigrationContext.configure(connection), Base.metadata))
+
+    async with context.db.engine.connect() as conn:
+        return await conn.run_sync(diff)
+
+
+async def test_migrations_create_exactly_the_model_schema(
+    ctx_factory: Callable[..., AppContext], tmp_path: object
+) -> None:
+    """A model change without a migration (or the reverse) fails here, not in production."""
+    context = ctx_factory(database_url=f"sqlite+aiosqlite:///{tmp_path}/diff.db")
+    try:
+        await upgrade(context.db.url)
+        assert await _schema_diff(context) == []
+    finally:
+        await context.close()
+
+
 @pytest.mark.skipif(postgres_url() is None, reason="set GOLD_TEST_POSTGRES_URL for PostgreSQL")
 async def test_storage_contract_postgres(ctx_factory: Callable[..., AppContext]) -> None:
     url = postgres_url()
@@ -158,6 +184,7 @@ async def test_storage_contract_postgres(ctx_factory: Callable[..., AppContext])
             await conn.execute(text("DROP SCHEMA public CASCADE"))
             await conn.execute(text("CREATE SCHEMA public"))
         await upgrade(context.db.url)
+        assert await _schema_diff(context) == []
         await _storage_contract(context)
     finally:
         await context.close()

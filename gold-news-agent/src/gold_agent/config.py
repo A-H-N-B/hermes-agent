@@ -418,6 +418,29 @@ class MarketSettings(StrictModel):
     mt5_fx_symbols: dict[str, str]
 
 
+class PaperSettings(StrictModel):
+    slippage_usd: float = Field(ge=0)
+    tp1_fraction: float = Field(gt=0, le=1)
+    max_hold_hours: float = Field(gt=0)
+    news_spread_multiplier: float = Field(ge=1)
+    news_window_minutes: int = Field(ge=0)
+
+
+class DailyMoment(StrictModel):
+    zone: Zone
+    local: HHMM
+
+
+class ReportSettings(StrictModel):
+    daily: DailyMoment
+    weekly: WeeklyMoment
+    use_llm: bool
+    event_study_days: int = Field(gt=0)
+    min_event_samples: int = Field(gt=0)
+    reliability_prior_weight: float = Field(gt=0)
+    reliability_min_samples: int = Field(gt=0)
+
+
 class DashboardSettings(StrictModel):
     host: str
     port: int = Field(gt=0, lt=65536)
@@ -477,6 +500,8 @@ class Settings(StrictModel):
     llm: LlmSettings
     sessions: SessionSettings
     outlook: OutlookSettings
+    paper: PaperSettings
+    reports: ReportSettings
     dashboard: DashboardSettings
     watchdog: WatchdogSettings
 

@@ -125,3 +125,4 @@ class Analysis(BaseModel):
     )
     release: ReleaseReading | None = None
     notes: list[str] = Field(default_factory=list)
+    version_at: datetime | None = None  # when this version was published (replay visibility)

@@ -16,7 +16,8 @@ BUY / SELL / WAIT beserta outlook per jam (WIB). Hasilnya dikirim ke Telegram da
 | 3 | Analisis: prefilter, fast path rilis data, triage LLM, verifikasi, lonjakan harga | selesai |
 | 4 | Sinyal BUY/SELL/WAIT, outlook 24 jam per jam WIB, playbook event, mode akhir pekan | selesai |
 | 5 | Telegram (notifikasi + perintah bot) dan dashboard web | selesai |
-| 6–7 | Evaluasi paper trading, deploy 24/7 | dikerjakan |
+| 6 | Paper trading otomatis, event study, backtest walk-forward, laporan harian/mingguan | selesai |
+| 7 | Deploy 24/7 (Docker Compose, watchdog, replay, backup, runbook) | dikerjakan |
 | 8 | Eksekusi order MT5 | **tidak dibangun** (butuh persetujuan + paper trading ≥ 2–4 minggu) |
 
 Semua sumber di `config/sources.yaml` masih `candidate`: belum ada yang diverifikasi dari jaringan
@@ -81,7 +82,7 @@ menjalankan sumber `verified`.
 ```bash
 uv run gold-agent db upgrade          # migrasi database (DATABASE_URL di .env; default SQLite)
 uv run gold-agent run all             # semua service dalam satu proses (bus memori)
-uv run gold-agent run collector market calendar analyzer signal notifier dashboard --bus redis
+uv run gold-agent run collector market calendar analyzer signal paper evaluator notifier dashboard --bus redis
 uv run gold-agent labels export --limit 150          # headline arsip -> data/labels/todo.jsonl
 uv run gold-agent labels import data/labels/todo.jsonl --labeler kamu
 uv run gold-agent eval-triage [--llm]                # presisi/recall triage -> docs/eval_triage.md
@@ -120,6 +121,29 @@ Kesehatan sistem. Akses dari HP lewat Tailscale / Cloudflare Tunnel / SSH tunnel
 port langsung ke internet. Jika `dashboard.host` bukan localhost, `DASHBOARD_PASSWORD` wajib diisi
 (service menolak start tanpa itu).
 
+## Evaluasi & laporan
+
+Setiap sinyal otomatis di-*paper trade* oleh service `paper` dengan harga dari sumber yang sama:
+isi di ask/bid + slippage, 50% ditutup di TP1 lalu stop ke breakeven, sisanya ke TP2, dan
+kedaluwarsa jika TP1 tidak tersentuh dalam masa berlaku. Hasil (R, MFE/MAE, durasi) tersimpan
+dan ikut menghitung batas rugi harian. Service `evaluator` tiap pagi (05:30 WIB) menjalankan
+event study, memperbarui reliabilitas sumber, lalu mengirim laporan harian, dan tiap Sabtu
+laporan mingguan. Laporan juga tersimpan di `data/reports/`.
+
+```bash
+uv run gold-agent report harian [--date 2026-10-13] [--llm]   # laporan + ringkasan AI opsional
+uv run gold-agent report mingguan
+uv run gold-agent event-study --days 90     # gerak +1/+5/+15/+60 mnt setelah berita
+uv run gold-agent backtest --days 30 --folds 4   # replay snapshot tersimpan, walk-forward
+uv run gold-agent calibrate                 # usulan bobot (butuh ≥ 100 sinyal tertutup)
+```
+
+Aturan kejujuran: win rate selalu dengan interval 95%, expectancy dengan CI bootstrap, dan sampel
+kecil ditulis "sampel belum cukup". Bobot skor **tidak pernah** diubah otomatis: `calibrate` hanya
+membuat usulan yang harus lebih baik di data uji (holdout) dan kamu terapkan sendiri di config.
+Backtest memakai snapshot pasar dan setiap versi analisis berita sesuai waktu terbitnya, jadi
+tidak ada informasi dari masa depan yang ikut terpakai.
+
 ## Test & kualitas kode
 
 ```bash
@@ -149,9 +173,11 @@ src/gold_agent/
   signals/         skor gabungan, SL/TP & lot, mesin sinyal, outlook 24 jam, profil per jam
   notify/          template Telegram, kebijakan prioritas, dispatcher, perintah bot
   dashboard/       FastAPI + WebSocket, halaman statis (JS polos, CSP ketat), grafik vendored
-  services/        collector, market, calendar, analyzer, signal, notifier, dashboard
+  services/        collector, market, calendar, analyzer, signal, paper, evaluator, notifier,
+                   dashboard
   storage/         SQLAlchemy async + migrasi Alembic
-  evaluation/      label headline, evaluasi triage
+  evaluation/      label & evaluasi triage, paper trading, performa, event study, reliabilitas,
+                   kalibrasi bobot, backtest walk-forward, laporan
   ops/             verifikasi sumber, health, metrik, redaksi secret
 scripts/     verify_sources.py
 tests/       test perilaku

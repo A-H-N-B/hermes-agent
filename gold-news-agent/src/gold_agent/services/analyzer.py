@@ -226,6 +226,7 @@ class AnalyzerService:
         self, analysis: Analysis, stage: Literal["triaged", "analyzed"] | None
     ) -> None:
         ctx = self._ctx
+        analysis = analysis.model_copy(update={"version_at": ctx.clock.now()})
         await ctx.news.save_analysis(analysis)
         await ctx.bus.publish(STREAM_ANALYSES, analysis)
         self.recent[analysis.cluster_id] = analysis

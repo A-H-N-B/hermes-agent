@@ -168,6 +168,22 @@ Dashboard menampilkan teks dari sumber luar (judul berita), jadi XSS adalah risi
 - Test E2E (Playwright + Chromium) memeriksa kelima halaman, push WebSocket, teks berita
   berbahaya yang tetap inert, nol pelanggaran CSP, dan lebar layar HP.
 
+### ADR-015 Evaluasi yang jujur — Diterapkan (Fase 6)
+
+- **Satu logika trade.** Paper trading live dan backtest memakai fungsi yang sama
+  (`evaluation/paper.py`). Isi di ask/bid + slippage, stop dicek sebelum target, dan target
+  diisi di levelnya (limit). Jadi angka backtest dan paper bisa dibandingkan.
+- **Tanpa lookahead.** Analisis berita bisa berubah setelah terbit (konfirmasi sumber kedua,
+  analisis mendalam). Tabel `analyses` hanya menyimpan versi terbaru, jadi setiap versi juga
+  disimpan di `analysis_versions` beserta waktu terbitnya. Replay hanya melihat versi yang
+  sudah terbit pada saat itu, dan sebuah test memastikan berita yang baru terkonfirmasi belakangan
+  tidak diperdagangkan lebih awal.
+- **Kalibrasi = usulan.** Bobot tidak pernah berubah sendiri. `calibrate` menolak bekerja
+  sebelum ada ≥ 100 sinyal tertutup. Usulan hanya diterima jika lebih baik di data uji
+  (holdout) yang dipisah menurut waktu, dan diterapkan manusia lewat config.
+- **Reliabilitas sumber** dipelajari dari event study dengan shrinkage ke nilai awal
+  (20 pseudo-observasi), minimal 10 berita berarah.
+
 ## Estimasi biaya LLM (untuk Q4)
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):

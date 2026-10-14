@@ -25,6 +25,8 @@ CONFIG_FILES = ("settings.yaml", "gold_drivers.yaml", "keywords.yaml", "events.y
 TREND_ID = {"up": "naik", "down": "turun", "flat": "datar"}
 KV_ENGINE = "signal_engine"  # EngineState.to_json()
 KV_HALT = "trading_halt"  # {"halted": bool, "by": user id, "at": iso}, written by /stop
+KV_PAPER_DAILY = "paper_daily"  # {"day": WIB date, "r": realised R, "trades"}, paper tracker
+KV_EVENT_MOVES = "event_moves"  # event_key -> typical 60-min |move| $, from the event study
 KEEP_CLOSED_IDS = 200
 
 

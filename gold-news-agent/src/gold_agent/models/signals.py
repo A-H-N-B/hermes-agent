@@ -78,11 +78,17 @@ class SignalState(BaseModel):
     halted: bool = False
 
 
+OutcomeStatus = Literal["open", "tp1", "tp2", "tp3", "sl", "breakeven", "expired", "cancelled"]
+
+
 class SignalOutcome(BaseModel):
+    """Paper-trading result of one signal (R = multiples of the initial risk per unit)."""
+
     signal_id: str
-    status: Literal["open", "tp1", "tp2", "tp3", "sl", "breakeven", "expired", "cancelled"]
-    entry_price: float
-    exit_price: float | None = None
+    action: Literal["BUY", "SELL"] = "BUY"
+    status: OutcomeStatus
+    entry_price: float  # actual paper fill (ask/bid + slippage), not the signal's entry zone
+    exit_price: float | None = None  # last exit
     opened_at: datetime
     closed_at: datetime | None = None
     r_multiple: float | None = None
@@ -90,6 +96,12 @@ class SignalOutcome(BaseModel):
     mae_r: float = 0.0
     tp1_hit_at: datetime | None = None
     duration_minutes: float | None = None
+    risk_per_unit: float | None = None  # |fill - initial stop|
+    stop: float | None = None  # current stop (breakeven after TP1)
+    remaining: float = 1.0  # fraction of the position still open
+    realized_r: float = 0.0  # R already booked by partial exits
+    last_price_at: datetime | None = None  # last quote applied (restart catch-up point)
+    price_source: str | None = None
     notes: list[str] = Field(default_factory=list)
 
 

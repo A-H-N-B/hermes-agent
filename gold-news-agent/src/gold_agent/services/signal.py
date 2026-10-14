@@ -8,7 +8,6 @@ last release), `trading_halt` (/stop) and `paper_daily` (realised R, written by 
 from __future__ import annotations
 
 import asyncio
-import bisect
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -32,6 +31,7 @@ from gold_agent.core.bus import (
     consume,
 )
 from gold_agent.econ_calendar.events import load_events
+from gold_agent.market.series import PriceSeries
 from gold_agent.models import (
     Analysis,
     CalendarEvent,
@@ -44,7 +44,9 @@ from gold_agent.models import (
 )
 from gold_agent.signals.engine import (
     KV_ENGINE,
+    KV_EVENT_MOVES,
     KV_HALT,
+    KV_PAPER_DAILY,
     Decision,
     EngineState,
     SignalEngine,
@@ -65,11 +67,7 @@ from gold_agent.timeutils.sessions import SessionClock, last_weekly
 
 log = structlog.get_logger(__name__)
 
-KV_PAPER_DAILY = "paper_daily"
-KV_EVENT_MOVES = "event_moves"  # event study (Phase 6): event_key -> typical 60-min |move|
 
-PRICE_KEEP = timedelta(hours=6)
-PRICE_MAX_GAP = timedelta(minutes=5)
 EVENTS_REFRESH = timedelta(minutes=5)
 SLOW_REFRESH = timedelta(hours=1)  # learned reliability, event moves
 PROFILE_REFRESH = timedelta(days=7)
@@ -82,43 +80,6 @@ MOMENT_NAMES = {
     "london_open": "London",
     "ny_open": "New York",
 }
-
-
-class PriceHistory:
-    """Recent mid prices so the engine can ask 'what was the price at t?'."""
-
-    def __init__(self, keep: timedelta = PRICE_KEEP, max_gap: timedelta = PRICE_MAX_GAP) -> None:
-        self._keep = keep
-        self._max_gap = max_gap
-        self._times: list[datetime] = []
-        self._prices: list[float] = []
-
-    def __len__(self) -> int:
-        return len(self._times)
-
-    def add(self, ts: datetime, price: float) -> None:
-        if self._times and ts <= self._times[-1]:
-            index = bisect.bisect_left(self._times, ts)
-            if index < len(self._times) and self._times[index] == ts:
-                self._prices[index] = price
-                return
-            self._times.insert(index, ts)
-            self._prices.insert(index, price)
-        else:
-            self._times.append(ts)
-            self._prices.append(price)
-        cutoff = self._times[-1] - self._keep
-        drop = bisect.bisect_left(self._times, cutoff)
-        if drop:
-            del self._times[:drop]
-            del self._prices[:drop]
-
-    def at(self, moment: datetime) -> float | None:
-        """Last price at or before `moment`; None before the buffer or across a data gap."""
-        index = bisect.bisect_right(self._times, moment) - 1
-        if index < 0 or moment - self._times[index] > self._max_gap:
-            return None
-        return self._prices[index]
 
 
 class SignalService:
@@ -141,7 +102,7 @@ class SignalService:
         self.state = EngineState()
         self.context: MarketContext | None = None
         self.analyses: dict[str, Analysis] = {}
-        self.prices = PriceHistory()
+        self.prices = PriceSeries(keep=timedelta(hours=6))
         self.last_state: SignalState | None = None
         self.profile = HourlyProfile(min_samples=settings.outlook.profile_min_samples)
         self.event_moves: dict[str, float] = {}

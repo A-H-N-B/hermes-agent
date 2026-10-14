@@ -217,6 +217,23 @@ outlook:
   playbook_build_minutes: 60 # 11.4: build the scenario table at T-60
   playbook_send_minutes: 30 # and send it at T-30
 
+paper:
+  # Paper trading (section 17): every signal is evaluated tick by tick, realistically.
+  slippage_usd: 0.05 # added against us on every market fill (entry, stop, expiry)
+  tp1_fraction: 0.5 # closed at TP1; the rest runs to TP2 with the stop at breakeven
+  max_hold_hours: 24 # a runner still open after this is closed at market
+  news_spread_multiplier: 2.5 # backtest: spread around high-impact releases ...
+  news_window_minutes: 5 # ... within this many minutes of the release
+
+reports:
+  daily: { zone: Asia/Jakarta, local: "05:30" } # report on the previous WIB day
+  weekly: { zone: Asia/Jakarta, weekday: saturday, local: "08:00" }
+  use_llm: true # short narrative by the brief model on top of the numbers (never edits them)
+  event_study_days: 90
+  min_event_samples: 5 # per group before a typical move is published to the outlook
+  reliability_prior_weight: 20 # pseudo-observations: learned reliability moves slowly
+  reliability_min_samples: 10
+
 dashboard:
   # Bind to localhost and reach it through Tailscale / Cloudflare Tunnel / an SSH tunnel (C2.4).
   # Any other bind address refuses to start unless DASHBOARD_PASSWORD is set.

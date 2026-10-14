@@ -54,6 +54,9 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--llm", action="store_true", help="also call Claude (costs money)")
     evaluate.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "eval_triage.md")
 
+    from gold_agent.cli_eval import add_parsers
+
+    add_parsers(sub)
     sub.add_parser("verify-sources", help="Phase 0 source verification", add_help=False)
     return parser
 
@@ -212,6 +215,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return asyncio.run(_labels(args))
         case "eval-triage":
             return asyncio.run(_eval_triage(args))
+        case "report" | "event-study" | "backtest" | "calibrate":
+            from gold_agent.cli_eval import HANDLERS
+
+            return asyncio.run(HANDLERS[args.command](args))
         case _:
             return 2
 

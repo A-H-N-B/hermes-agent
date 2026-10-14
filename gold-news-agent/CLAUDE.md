@@ -100,5 +100,22 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   "sampel belum cukup"). `dashboard/`: FastAPI JSON APIs + WebSocket hub, plain-JS SPA under a
   strict CSP (ADR-014), vendored lightweight-charts 5.2.1, HMAC cookie login, refuses
   non-loopback bind without a password. Services `notifier`, `dashboard`. Playwright E2E test.
-- Phases 6–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
+- **Phase 6 (done, pending real data).** `evaluation/paper.py` (one trade-management
+  implementation shared by live paper and backtest: ask/bid + slippage fills, stop before
+  target, 50% at TP1 then breakeven, validity before TP1, max hold after), `services/paper.py`
+  (fills on the next quote from the signal's own source, TP1/close notifications,
+  `signal.closed` + `paper.daily` back to the engine, restart catch-up from stored ticks,
+  unfilled signals recorded with r = None). `event_study.py` (+1/+5/+15/+60 from first_seen,
+  Wilson CI, typical release moves -> kv `event_moves` for the outlook), `reliability.py`
+  (shrunk towards the prior), `calibration.py` (Spearman IC with tie-aware ranks, time-ordered
+  holdout, refuses < 100 closed signals, output is a proposal only), `backtest.py` (replay of
+  stored contexts + **analysis versions by `version_at`**: new append-only table
+  `analysis_versions`, migration 0002, so later confirmations never leak backwards;
+  expanding-window walk-forward), `reports.py` (daily/weekly, honest notes, optional brief LLM
+  on sanitized input). `core/schedule.py` (restart-safe wall-clock jobs). Services `paper`,
+  `evaluator`; CLI `report`, `event-study`, `backtest`, `calibrate` (`cli_eval.py`). A schema
+  test now diffs Alembic head against the models on SQLite and PostgreSQL. First report
+  produced on the empty archive ("sampel belum cukup"): weights stay at their configured priors
+  until ≥ 100 closed paper signals exist (C3.2 takes precedence over "bobot awal dikalibrasi").
+- Phase 7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
   after ≥ 2–4 weeks of recorded paper trading.

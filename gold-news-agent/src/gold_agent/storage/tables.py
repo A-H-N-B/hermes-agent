@@ -113,6 +113,17 @@ class AnalysisRow(Base):
     payload: Mapped[dict[str, Any]] = mapped_column()
 
 
+class AnalysisVersionRow(Base):
+    """Append-only: every published version with the time it became known, so a replay never
+    sees a later confirmation or deep analysis before it existed."""
+
+    __tablename__ = "analysis_versions"
+    id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)
+    cluster_id: Mapped[str] = mapped_column(String(96), index=True)
+    version_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column()
+
+
 class ReleaseRow(Base):
     __tablename__ = "releases"
     id: Mapped[int] = mapped_column(BigIntId, primary_key=True, autoincrement=True)

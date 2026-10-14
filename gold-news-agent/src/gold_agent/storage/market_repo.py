@@ -145,6 +145,16 @@ class MarketRepo:
         async with self._db.session() as session:
             session.add(MarketContextRow(ts=context.ts, payload=context.model_dump(mode="json")))
 
+    async def contexts_between(self, start: datetime, end: datetime) -> list[MarketContext]:
+        """Stored snapshots, oldest first: exactly what the engine saw (replay / backtest)."""
+        async with self._db.session() as session:
+            rows = await session.scalars(
+                select(MarketContextRow)
+                .where(MarketContextRow.ts >= start, MarketContextRow.ts < end)
+                .order_by(MarketContextRow.ts)
+            )
+            return [MarketContext.model_validate(r.payload) for r in rows]
+
     async def latest_context(self) -> MarketContext | None:
         async with self._db.session() as session:
             row = await session.scalar(

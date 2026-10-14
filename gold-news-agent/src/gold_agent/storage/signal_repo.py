@@ -140,6 +140,15 @@ class SignalRepo:
             )
             return [SignalOutcome.model_validate(r.payload) for r in rows]
 
+    async def outcomes_closed_between(self, start: datetime, end: datetime) -> list[SignalOutcome]:
+        async with self._db.session() as session:
+            rows = await session.scalars(
+                select(SignalOutcomeRow)
+                .where(SignalOutcomeRow.closed_at >= start, SignalOutcomeRow.closed_at < end)
+                .order_by(SignalOutcomeRow.closed_at)
+            )
+            return [SignalOutcome.model_validate(r.payload) for r in rows]
+
     # ------------------------------------------------------------------ outlooks
 
     async def save_outlook(self, outlook: Outlook) -> None:
