@@ -158,8 +158,8 @@ events:
     unit: "%"
     higher_is: hawkish
     surprise_std: 0.5
-    aliases: ["gdp q/q", "gdp qoq", "gdp (qoq)", "gdp annualized", "advance gdp", "prelim gdp", "final gdp", "gdp growth rate"]
-    exclude: ["price index", "deflator", "sales"]
+    aliases: ["gdp q/q", "gdp qoq", "gdp (qoq)", "gdp annualized", "advance gdp", "prelim gdp", "final gdp", "gdp growth rate", "gdp"]
+    exclude: ["price index", "deflator", "sales", "nowcast", "gdpnow", "tracker"]
     ff_titles: ["Advance GDP q/q", "Prelim GDP q/q", "Final GDP q/q"]
 
   - key: us_jolts

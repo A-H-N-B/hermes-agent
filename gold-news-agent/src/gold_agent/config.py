@@ -310,14 +310,34 @@ class CircuitBreaker(StrictModel):
     cooldown_seconds: int = Field(gt=0)
 
 
+class ModelPrice(StrictModel):
+    input: float = Field(ge=0)
+    output: float = Field(ge=0)
+    cache_write: float = Field(ge=0)
+    cache_read: float = Field(ge=0)
+
+
 class LlmSettings(StrictModel):
     provider: Literal["anthropic"]
+    enabled: bool
     deep_min_impact: int = Field(ge=0, le=5)
     triage: LlmRoute
     deep: LlmRoute
     outlook: LlmRoute
     brief: LlmRoute
     circuit_breaker: CircuitBreaker
+    pricing_per_mtok: dict[str, ModelPrice]
+
+
+class AnalysisSettings(StrictModel):
+    triage_max_age_minutes: int = Field(gt=0)
+    big_claim_categories: tuple[str, ...]
+    deep_on_scheduled_release: bool
+    release_calendar_window_minutes: int = Field(gt=0)
+    max_body_chars: int = Field(gt=0)
+    volatility_cooldown_minutes: int = Field(gt=0)
+    spread_spike_multiple: float = Field(gt=1)
+    targeted_search_sources: tuple[str, ...]
 
 
 class SessionMoment(StrictModel):
@@ -413,6 +433,7 @@ class Settings(StrictModel):
     signal_engine: SignalEngineSettings
     news: NewsSettings
     price_led: PriceLedSettings
+    analysis: AnalysisSettings
     llm: LlmSettings
     sessions: SessionSettings
     outlook: OutlookSettings

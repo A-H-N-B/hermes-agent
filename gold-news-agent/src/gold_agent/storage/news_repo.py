@@ -130,6 +130,16 @@ class NewsRepo:
                 ["id"],
             )
 
+    async def get_analysis(self, cluster_id: str) -> Analysis | None:
+        async with self._db.session() as session:
+            row = await session.scalar(
+                select(AnalysisRow)
+                .where(AnalysisRow.cluster_id == cluster_id)
+                .order_by(desc(AnalysisRow.triaged_at))
+                .limit(1)
+            )
+            return Analysis.model_validate(row.payload) if row else None
+
     async def analyses_since(
         self, since: datetime, *, relevant_only: bool = True
     ) -> list[Analysis]:

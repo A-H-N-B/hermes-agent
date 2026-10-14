@@ -6,10 +6,12 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import structlog
 
-from gold_agent.core.app import AppContext, build_context
+from gold_agent.config import PROJECT_ROOT
+from gold_agent.core.app import DATA_DIR, AppContext, build_context
 from gold_agent.core.logging import configure_logging
 from gold_agent.core.service import install_signal_handlers, supervise
 from gold_agent.services.registry import SERVICE_FACTORIES
@@ -35,6 +37,22 @@ def _parser() -> argparse.ArgumentParser:
     health = sub.add_parser("healthcheck", help="exit 0 if the service heartbeat is fresh")
     health.add_argument("service")
     health.add_argument("--max-age", type=float, default=180.0)
+
+    labels = sub.add_parser("labels", help="labelled headline set for the triage evaluation")
+    label_sub = labels.add_subparsers(dest="labels_command", required=True)
+    export = label_sub.add_parser("export", help="write archived headlines to label (JSONL)")
+    export.add_argument("--days", type=float, default=14)
+    export.add_argument("--limit", type=int, default=150)
+    export.add_argument("--all", action="store_true", help="include prefilter-irrelevant items")
+    export.add_argument("--out", type=Path, default=DATA_DIR / "labels" / "todo.jsonl")
+    imp = label_sub.add_parser("import", help="store a filled JSONL file")
+    imp.add_argument("path", type=Path)
+    imp.add_argument("--labeler", required=True)
+
+    evaluate = sub.add_parser("eval-triage", help="score prefilter/rules/LLM on the labels")
+    evaluate.add_argument("--labeler", help="only this labeller's labels")
+    evaluate.add_argument("--llm", action="store_true", help="also call Claude (costs money)")
+    evaluate.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "eval_triage.md")
 
     sub.add_parser("verify-sources", help="Phase 0 source verification", add_help=False)
     return parser
@@ -114,6 +132,66 @@ async def _telegram_login() -> int:
     return 0
 
 
+async def _labels(args: argparse.Namespace) -> int:
+    from datetime import timedelta
+
+    from gold_agent.evaluation.labels import export_template, label_payload, read_labels
+
+    ctx = build_context(bus_kind="memory")
+    try:
+        if args.labels_command == "export":
+            now = ctx.clock.now()
+            items = await ctx.news.items_between(
+                now - timedelta(days=args.days), now, relevant_only=not args.all
+            )
+            labelled = {item_id for item_id, _, _ in await ctx.ops.labels()}
+            fresh = [i for i in items if i.id not in labelled and not i.backfill]
+            count = export_template(fresh, args.out, limit=args.limit)
+            print(f"{count} headline ditulis ke {args.out}.")
+            print("Isi relevant/direction/impact di file itu, lalu jalankan `labels import`.")
+            return 0
+        labels, problems = read_labels(args.path)
+        now = ctx.clock.now()
+        for label in labels:
+            await ctx.ops.save_label(label.item_id, args.labeler, label_payload(label), now)
+        print(f"{len(labels)} label disimpan; {len(problems)} baris dilewati.")
+        for problem in problems[:20]:
+            print(f"  - {problem}")
+        return 0
+    finally:
+        await ctx.close()
+
+
+async def _eval_triage(args: argparse.Namespace) -> int:
+    from gold_agent.evaluation.labels import HeadlineLabel
+    from gold_agent.evaluation.runner import evaluate
+    from gold_agent.evaluation.triage_eval import render_report
+
+    ctx = build_context(bus_kind="memory")
+    try:
+        rows = await ctx.ops.labels()
+        labels = [
+            HeadlineLabel.model_validate({"item_id": item_id, **payload})
+            for item_id, labeler, payload in rows
+            if args.labeler is None or labeler == args.labeler
+        ]
+        if not labels:
+            print("Belum ada label. Jalankan `gold-agent labels export` lalu `labels import`.")
+            return 2
+        reports = await evaluate(ctx, labels, use_llm=args.llm)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(render_report(reports), encoding="utf-8")
+        for report in reports:
+            print(
+                f"{report.name}: presisi={report.precision} recall={report.recall} "
+                f"arah={report.direction_accuracy} p95={report.latency_p95}"
+            )
+        print(f"laporan: {args.out}")
+        return 0
+    finally:
+        await ctx.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "verify-sources":
@@ -130,6 +208,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return asyncio.run(_healthcheck(args.service, args.max_age))
         case "telegram-login":
             return asyncio.run(_telegram_login())
+        case "labels":
+            return asyncio.run(_labels(args))
+        case "eval-triage":
+            return asyncio.run(_eval_triage(args))
         case _:
             return 2
 

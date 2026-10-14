@@ -34,6 +34,11 @@ strong:
     - ppi
     - jolts
     - inflasi
+  usd:
+    - dxy
+    - greenback
+    - dollar index
+    - dollar (?:rises|rose|falls|fell|slides|slid|gains|drops|jumps|weakens|strengthens|rallies|slumps|climbs|tumbles|surges)
   central_bank_gold:
     - central bank gold
     - pboc|people'?s bank of china
@@ -42,7 +47,7 @@ strong:
 
 context:
   usd_rates:
-    - dollar|dxy|greenback
+    - dollar
     - treasur(?:y|ies)
     - yields?
     - real yields?|tips
@@ -56,7 +61,31 @@ context:
     - sanctions?
     - escalat(?:e|ion)
     - nuclear
+    - explosions?
+    - blasts?
+    - attacks?|attacked
+    - drones?
+    - airstrikes?
     - perang
+  geo_actors:
+    - iran
+    - israel
+    - russia
+    - ukraine
+    - north korea
+    - taiwan
+    - gaza
+    - hezbollah
+    - houthis?
+    - red sea
+    - strait of hormuz
+    - middle east
+  commodities:
+    - oil
+    - crude
+    - brent
+    - wti
+    - silver
   trade_fiscal:
     - tariffs?
     - trade war

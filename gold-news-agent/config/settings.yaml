@@ -121,8 +121,20 @@ price_led:
   atr_multiple_k: 3.0
   news_lookback_minutes: 5
 
+analysis:
+  triage_max_age_minutes: 30 # older stories (by first_seen) are archived, not triaged as new
+  # Single unofficial source + one of these categories -> needs_confirmation (weight reduced).
+  big_claim_categories: [geopolitics, central_bank_gold, trade_tariff, fiscal_debt]
+  deep_on_scheduled_release: true
+  release_calendar_window_minutes: 30 # a release headline must sit within ±30 min of its calendar slot
+  max_body_chars: 1500 # text sent to the LLM per item
+  volatility_cooldown_minutes: 10
+  spread_spike_multiple: 3.0 # spread > 3x its 30-min median = spike
+  targeted_search_sources: [google_news_gold] # polled immediately after an unexplained price spike
+
 llm:
   provider: anthropic
+  enabled: true # false = rules-only mode
   deep_min_impact: 3
   triage:
     model: claude-haiku-5-5
@@ -148,6 +160,12 @@ llm:
   circuit_breaker:
     failures: 5
     cooldown_seconds: 120
+  # USD per million tokens (Claude API list prices checked 2026-10-06; update when they change).
+  # cache_write = 5-minute cache writes (1.25x input), cache_read = cached prefix reads.
+  pricing_per_mtok:
+    claude-haiku-5-5: { input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01 }
+    claude-sonnet-5-5: { input: 2.00, output: 10.00, cache_write: 2.50, cache_read: 0.20 }
+    claude-opus-5-5: { input: 4.00, output: 20.00, cache_write: 5.00, cache_read: 0.20 }
 
 sessions:
   # Local wall-clock times; converted to UTC/WIB per date with zoneinfo (never fixed offsets).

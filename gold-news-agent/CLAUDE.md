@@ -68,5 +68,14 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   weekend PAXG drift, closed-market bars dropped). Calendar: `config/events.yaml` specs (prior
   surprise_std), Forex Factory sync (ETag, 429 back-off, actuals preserved), FOMC page parser +
   blackout window, countdown. Services: `collector`, `market`, `calendar`.
-- Phases 3–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
+- **Phase 3 (done, pending real data).** Prefilter (`keywords.yaml`), fast-path release parser
+  (18 US events, country guard, calendar forecast fallback, prior vs calibrated surprise s.d.),
+  playbooks (11.4 buckets → actual thresholds), Claude client (`analysis/llm_client.py`:
+  `messages.parse` structured output, cached system prompt + KB, Haiku with thinking off,
+  timeouts, circuit breaker, WIB-day budget, `llm_usage` cost log, refusal handling), rules
+  fallback, anti-hallucination checks (ids, quotes, numbers), cross-verification weights, deep
+  analysis (Sonnet), price-led spikes → alert + targeted `collector.poll_now`, analyzer service.
+  `gold-agent labels export/import` + `gold-agent eval-triage [--llm]` measure the Phase 3 bar
+  (precision ≥ 0.9 on ≥ 100 labelled headlines, p95 < 5 s) — needs the real archive to run.
+- Phases 4–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
   after ≥ 2–4 weeks of recorded paper trading.
