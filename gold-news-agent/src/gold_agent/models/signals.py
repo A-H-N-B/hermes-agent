@@ -35,6 +35,7 @@ class Signal(BaseModel):
     tp1: float
     tp2: float
     tp3: float
+    tp3_source: str | None = None  # structure level name, or "3R"
     risk_reward: float
     risk_pct: float
     lot_size: float | None
@@ -60,6 +61,7 @@ class Signal(BaseModel):
     first_seen_at: datetime | None = None  # earliest linked news, for end-to-end latency
     trigger_summary: str | None = None
     trigger_source: str | None = None
+    trigger_category: str | None = None  # news category of the trigger (per-category stats)
 
 
 class SignalState(BaseModel):

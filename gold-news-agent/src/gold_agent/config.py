@@ -235,6 +235,11 @@ class NotificationSettings(StrictModel):
     quiet_hours_wib: QuietHours
     digest_interval_minutes: int = Field(gt=0)
     max_messages_per_minute: int = Field(gt=0)
+    dedupe_minutes: int = Field(gt=0)
+    news_min_impact: int = Field(ge=0, le=5)
+    news_high_impact: int = Field(ge=0, le=5)
+    outlook_triggers: tuple[str, ...]
+    max_age_minutes: dict[Literal["flash", "news", "alert", "outlook"], int]
 
 
 class DeploymentSettings(StrictModel):
@@ -413,6 +418,18 @@ class MarketSettings(StrictModel):
     mt5_fx_symbols: dict[str, str]
 
 
+class DashboardSettings(StrictModel):
+    host: str
+    port: int = Field(gt=0, lt=65536)
+    session_hours: float = Field(gt=0, le=168)
+    login_attempts_per_window: int = Field(gt=0)
+    login_window_minutes: int = Field(gt=0)
+    news_limit: int = Field(gt=0, le=500)
+    chart_timeframe: Timeframe
+    chart_bars: int = Field(gt=10, le=5000)
+    tick_push_per_second: float = Field(gt=0, le=20)
+
+
 class InfraSettings(StrictModel):
     bus: Literal["memory", "redis"]
     context_interval_seconds: float = Field(gt=0)
@@ -460,6 +477,7 @@ class Settings(StrictModel):
     llm: LlmSettings
     sessions: SessionSettings
     outlook: OutlookSettings
+    dashboard: DashboardSettings
     watchdog: WatchdogSettings
 
 

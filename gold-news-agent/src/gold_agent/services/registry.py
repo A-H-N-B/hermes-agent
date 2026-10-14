@@ -38,10 +38,24 @@ def _signal(ctx: AppContext) -> Service:
     return SignalService(ctx)
 
 
+def _notifier(ctx: AppContext) -> Service:
+    from gold_agent.services.notifier import NotifierService
+
+    return NotifierService(ctx)
+
+
+def _dashboard(ctx: AppContext) -> Service:
+    from gold_agent.services.dashboard import DashboardService
+
+    return DashboardService(ctx)
+
+
 SERVICE_FACTORIES: dict[str, Callable[[AppContext], Service]] = {
     "collector": _collector,
     "market": _market,
     "calendar": _calendar,
     "analyzer": _analyzer,
     "signal": _signal,
+    "notifier": _notifier,
+    "dashboard": _dashboard,
 }

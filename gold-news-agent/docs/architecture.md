@@ -125,9 +125,48 @@ atau Binance).
 ### ADR-012 Integrasi Hermes Agent — Opsional, setelah Fase 5
 
 Hermes sudah punya gateway Telegram, cron, dan skill. Hermes bisa menjadi antarmuka tanya-jawab,
-mis. skill yang memanggil API dashboard (`/api/signal`, `/api/outlook`) untuk menjawab "kenapa
+mis. skill yang memanggil API dashboard (`/api/state`, `/api/outlook`) untuk menjawab "kenapa
 sinyal tadi SELL?". Syaratnya: **bot token terpisah**. Dua proses yang long-polling token yang sama
 akan saling bentrok (HTTP 409).
+
+### ADR-013 Kebijakan notifikasi — Diterapkan (Fase 5)
+
+Telegram bisa jadi bising, padahal sinyal yang terlambat lebih buruk daripada tidak ada sinyal.
+
+- 🔴 *high*: sinyal, pembatalan sinyal, FLASH rilis data, playbook event high-impact, berita
+  dampak ≥ 4, lonjakan harga, alert kritis. Selalu langsung terkirim, menembus jam tenang dan
+  `/mute`, dan tidak pernah kena rate limit.
+- 🟡 *normal*: berita dampak 3, outlook saat pembukaan sesi / berita penting / Senin, alert
+  peringatan. Ditahan saat jam tenang (00:00–05:00 WIB) atau `/mute`. Lewat 6 pesan per menit,
+  sisanya digabung.
+- 🔵 *digest*: info ringan, dikirim sebagai ringkasan tiap 60 menit.
+- Pesan yang ditahan **tidak pernah dibuang**: flush berikutnya menggabungkannya jadi satu
+  ringkasan, dan item 🔴 di dalamnya tetap utuh. Setiap keputusan disimpan di tabel
+  `notifications`, jadi restart tidak menghilangkan pesan yang ditahan dan tidak mengirim ulang
+  pesan yang sudah terkirim (dedupe per kunci: 7 hari untuk sinyal/berita/playbook, 30 menit
+  untuk flash/alert).
+- Item yang sudah basi saat sampai di notifier (sinyal yang sudah lewat masa berlaku, flash
+  > 10 menit, berita > 60 menit) tidak dikirim terlambat.
+- Outlook per jam biasa hanya tampil di dashboard (24 pesan sehari terlalu banyak).
+
+### ADR-014 Dashboard: JavaScript polos + CSP ketat — Diterapkan (Fase 5)
+
+Dashboard menampilkan teks dari sumber luar (judul berita), jadi XSS adalah risiko nyata.
+
+- Front end berupa JavaScript polos tanpa framework dan tanpa `eval`. Semua teks ditulis lewat
+  `textContent`, tidak pernah `innerHTML`. Ini memungkinkan CSP `script-src 'self'` tanpa
+  `unsafe-inline`/`unsafe-eval` (Alpine.js standar butuh `unsafe-eval`, jadi tidak dipakai). Logo
+  atribusi di dalam grafik dimatikan karena menyisipkan `<style>` inline; atribusi TradingView ada
+  di footer.
+- Library grafik (lightweight-charts) di-vendor dengan checksum, tidak memakai CDN pihak ketiga.
+- Bind default `127.0.0.1`. Bind ke alamat lain ditolak tanpa `DASHBOARD_PASSWORD`. Session
+  memakai cookie HMAC (HttpOnly, SameSite=Strict, Secure di balik HTTPS). Ganti password berarti
+  semua sesi lama mati. Login gagal dibatasi per alamat. WebSocket menolak origin lain.
+- uvicorn berjalan di dalam proses (`run all`). Socket di-bind sendiri karena uvicorn memanggil
+  `sys.exit` saat bind gagal, dan penangkap sinyal uvicorn dimatikan supaya SIGTERM tetap milik
+  supervisor.
+- Test E2E (Playwright + Chromium) memeriksa kelima halaman, push WebSocket, teks berita
+  berbahaya yang tetap inert, nol pelanggaran CSP, dan lebar layar HP.
 
 ## Estimasi biaya LLM (untuk Q4)
 

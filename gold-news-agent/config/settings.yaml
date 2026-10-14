@@ -88,7 +88,13 @@ notifications:
     end: "05:00"
     allow_priorities: [high]
   digest_interval_minutes: 60
-  max_messages_per_minute: 6
+  max_messages_per_minute: 6 # beyond this, normal messages are merged into one summary
+  dedupe_minutes: 30 # same flash/alert key inside this window is sent once
+  news_min_impact: 3 # relevant news at/above this goes to Telegram (normal)
+  news_high_impact: 4 # ...and at/above this it is 🔴 and passes quiet hours
+  # Outlook triggers sent to Telegram (prefix match); the plain hourly rebuild stays on the dashboard.
+  outlook_triggers: ["pembukaan sesi", "pembukaan Senin", "berita"]
+  max_age_minutes: { flash: 10, news: 60, alert: 30, outlook: 60 } # older items are not sent late
 
 deployment:
   host: linux_vps # Q6: linux_vps | windows_vps | home_pc
@@ -210,6 +216,19 @@ outlook:
   profile_days: 365 # H1 history used to rebuild hourly_profile (weekly)
   playbook_build_minutes: 60 # 11.4: build the scenario table at T-60
   playbook_send_minutes: 30 # and send it at T-30
+
+dashboard:
+  # Bind to localhost and reach it through Tailscale / Cloudflare Tunnel / an SSH tunnel (C2.4).
+  # Any other bind address refuses to start unless DASHBOARD_PASSWORD is set.
+  host: 127.0.0.1
+  port: 8787
+  session_hours: 12
+  login_attempts_per_window: 5 # failed logins per client before HTTP 429
+  login_window_minutes: 5
+  news_limit: 60
+  chart_timeframe: M5
+  chart_bars: 300
+  tick_push_per_second: 2 # live price updates pushed to each browser
 
 watchdog:
   default_source_silence_minutes: 30

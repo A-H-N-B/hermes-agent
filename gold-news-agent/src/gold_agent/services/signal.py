@@ -42,7 +42,15 @@ from gold_agent.models import (
     Signal,
     SignalState,
 )
-from gold_agent.signals.engine import Decision, EngineState, SignalEngine, config_hash, wib_day
+from gold_agent.signals.engine import (
+    KV_ENGINE,
+    KV_HALT,
+    Decision,
+    EngineState,
+    SignalEngine,
+    config_hash,
+    wib_day,
+)
 from gold_agent.signals.outlook import (
     OutlookBuilder,
     OutlookInputs,
@@ -57,8 +65,6 @@ from gold_agent.timeutils.sessions import SessionClock, last_weekly
 
 log = structlog.get_logger(__name__)
 
-KV_ENGINE = "signal_engine"
-KV_HALT = "trading_halt"
 KV_PAPER_DAILY = "paper_daily"
 KV_EVENT_MOVES = "event_moves"  # event study (Phase 6): event_key -> typical 60-min |move|
 

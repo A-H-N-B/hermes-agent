@@ -89,5 +89,16 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   at T-30 (`calendar.playbooks`). `services/signal.py` publishes `signals`, `signals.state`,
   `signals.outlook`; `/stop` = `{"type": "signal.halt"}` on `app.events`, persisted in kv
   `trading_halt`; the paper tracker reports `signal.closed` and `paper.daily`.
-- Phases 5–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
+- **Phase 5 (done).** `notify/`: Telegram HTML templates (signal per spec, flash, news, alerts,
+  outlook, playbook, status, calendar, stats, digest; untrusted text always escaped, 4096-char
+  split on line boundaries), `policy.py` (what notifies at which priority, max age, dedupe
+  windows), `dispatcher.py` (quiet hours, /mute, dedupe, rate limit + merge, digest, retry after
+  a Telegram failure even in quiet hours for 🔴, notified latency; every decision persisted in
+  `notifications`), `commands.py` (admin allowlist + chat check, /stop writes kv directly),
+  `telegram.py` (PTB 22: RetryAfter/TimedOut/BadRequest handling). `evaluation/performance.py`
+  (Wilson CI, bootstrap expectancy, drawdown, per category/session/hour/setup/confidence bin,
+  "sampel belum cukup"). `dashboard/`: FastAPI JSON APIs + WebSocket hub, plain-JS SPA under a
+  strict CSP (ADR-014), vendored lightweight-charts 5.2.1, HMAC cookie login, refuses
+  non-loopback bind without a password. Services `notifier`, `dashboard`. Playwright E2E test.
+- Phases 6–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
   after ≥ 2–4 weeks of recorded paper trading.

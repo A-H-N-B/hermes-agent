@@ -15,7 +15,8 @@ BUY / SELL / WAIT beserta outlook per jam (WIB). Hasilnya dikirim ke Telegram da
 | 2 | Harga & waktu: sesi/DST, feed harga, candle, indikator, kalender ekonomi | selesai |
 | 3 | Analisis: prefilter, fast path rilis data, triage LLM, verifikasi, lonjakan harga | selesai |
 | 4 | Sinyal BUY/SELL/WAIT, outlook 24 jam per jam WIB, playbook event, mode akhir pekan | selesai |
-| 5–7 | Telegram + dashboard, evaluasi paper trading, deploy 24/7 | dikerjakan |
+| 5 | Telegram (notifikasi + perintah bot) dan dashboard web | selesai |
+| 6–7 | Evaluasi paper trading, deploy 24/7 | dikerjakan |
 | 8 | Eksekusi order MT5 | **tidak dibangun** (butuh persetujuan + paper trading ≥ 2–4 minggu) |
 
 Semua sumber di `config/sources.yaml` masih `candidate`: belum ada yang diverifikasi dari jaringan
@@ -80,11 +81,44 @@ menjalankan sumber `verified`.
 ```bash
 uv run gold-agent db upgrade          # migrasi database (DATABASE_URL di .env; default SQLite)
 uv run gold-agent run all             # semua service dalam satu proses (bus memori)
-uv run gold-agent run collector market calendar analyzer signal --bus redis   # proses terpisah
+uv run gold-agent run collector market calendar analyzer signal notifier dashboard --bus redis
 uv run gold-agent labels export --limit 150          # headline arsip -> data/labels/todo.jsonl
 uv run gold-agent labels import data/labels/todo.jsonl --labeler kamu
 uv run gold-agent eval-triage [--llm]                # presisi/recall triage -> docs/eval_triage.md
 ```
+
+## Telegram
+
+1. Buat bot lewat @BotFather (token **khusus** untuk sistem ini; jangan dipakai bersama Hermes
+   Agent, dua proses long-polling satu token saling bentrok).
+2. Isi `.env`: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (chat tujuan notifikasi) dan
+   `TELEGRAM_ADMIN_USER_IDS` (ID akunmu, pisahkan dengan koma).
+3. Jalankan service `notifier` (ikut di `run all`).
+
+Prioritas: 🔴 langsung & menembus jam tenang (sinyal, FLASH rilis data, playbook, berita dampak
+≥ 4, lonjakan harga, alert kritis); 🟡 normal (ditahan saat 00:00–05:00 WIB atau `/mute`, lalu
+dikirim sebagai ringkasan); 🔵 ringkasan berkala. Perintah hanya dilayani untuk admin, di chat yang
+dikonfigurasi atau chat pribadi admin dengan bot:
+
+| Perintah | Fungsi |
+|---|---|
+| `/status` | harga, sesi, status sinyal + alasan WAIT, event berikutnya |
+| `/signal` | sinyal aktif (format lengkap) atau sinyal terakhir |
+| `/outlook` | outlook 24 jam terbaru |
+| `/calendar` | event high/medium 48 jam ke depan |
+| `/stats` | performa paper trading (dengan interval keyakinan) |
+| `/mute 1h` · `/mute off` | bisukan 🟡/🔵 (🔴 tetap masuk) |
+| `/stop` · `/resume` | kill switch sinyal baru (tetap jalan walau LLM mati) |
+
+Tanpa token, notifikasi tetap dicatat dan terlihat di dashboard.
+
+## Dashboard
+
+`run all` (atau `run dashboard`) membuka dashboard di `http://127.0.0.1:8787`: Live (kartu sinyal,
+grafik dengan marker berita & sinyal, feed berita), Outlook 24 jam, Kalender + playbook, Performa,
+Kesehatan sistem. Akses dari HP lewat Tailscale / Cloudflare Tunnel / SSH tunnel, **jangan** buka
+port langsung ke internet. Jika `dashboard.host` bukan localhost, `DASHBOARD_PASSWORD` wajib diisi
+(service menolak start tanpa itu).
 
 ## Test & kualitas kode
 
@@ -113,7 +147,9 @@ src/gold_agent/
   market/          adapter harga (Binance PAXG, Twelve Data, MT5), candle, indikator, level
   timeutils/       sesi pasar & DST, jam rawan
   signals/         skor gabungan, SL/TP & lot, mesin sinyal, outlook 24 jam, profil per jam
-  services/        collector, market, calendar, analyzer, signal
+  notify/          template Telegram, kebijakan prioritas, dispatcher, perintah bot
+  dashboard/       FastAPI + WebSocket, halaman statis (JS polos, CSP ketat), grafik vendored
+  services/        collector, market, calendar, analyzer, signal, notifier, dashboard
   storage/         SQLAlchemy async + migrasi Alembic
   evaluation/      label headline, evaluasi triage
   ops/             verifikasi sumber, health, metrik, redaksi secret

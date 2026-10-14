@@ -19,7 +19,8 @@ from gold_agent.core.bus import (
 )
 from gold_agent.core.clock import ManualClock
 from gold_agent.models import Candle, Level, MarketContext, ReleaseReading
-from gold_agent.services.signal import KV_ENGINE, KV_HALT, PriceHistory, SignalService
+from gold_agent.services.signal import PriceHistory, SignalService
+from gold_agent.signals.engine import KV_ENGINE, KV_HALT
 from gold_agent.signals.outlook import OutlookNarrative
 from tests.builders import T0, analysis, market
 from tests.fakes import FakeAnthropic, parsed, timeout_error

@@ -23,6 +23,8 @@ from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wi
 
 CONFIG_FILES = ("settings.yaml", "gold_drivers.yaml", "keywords.yaml", "events.yaml")
 TREND_ID = {"up": "naik", "down": "turun", "flat": "datar"}
+KV_ENGINE = "signal_engine"  # EngineState.to_json()
+KV_HALT = "trading_halt"  # {"halted": bool, "by": user id, "at": iso}, written by /stop
 KEEP_CLOSED_IDS = 200
 
 
@@ -388,6 +390,7 @@ class SignalEngine:
             tp1=levels.tp1,
             tp2=levels.tp2,
             tp3=levels.tp3,
+            tp3_source=levels.tp3_source,
             risk_reward=levels.risk_reward,
             risk_pct=cfg.risk.risk_per_trade_pct,
             lot_size=lots,
@@ -417,4 +420,5 @@ class SignalEngine:
             first_seen_at=trigger.analysis.first_seen_at if trigger else None,
             trigger_summary=trigger.analysis.triage.summary_id if trigger else None,
             trigger_source=(trigger.analysis.source_ids or ["-"])[0] if trigger else None,
+            trigger_category=trigger.analysis.triage.category if trigger else None,
         )
