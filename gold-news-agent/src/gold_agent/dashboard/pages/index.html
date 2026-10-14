@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gold News Agent · XAUUSD</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">XAUUSD <span class="muted">Gold News Agent</span></div>
+    <div id="price" class="price">–</div>
+    <div id="conn" class="conn off" title="koneksi live">● live</div>
+    <form method="post" action="/logout"><button type="submit" class="link">Keluar</button></form>
+  </header>
+  <nav>
+    <a href="#live" data-page="live">Live</a>
+    <a href="#outlook" data-page="outlook">Outlook 24 jam</a>
+    <a href="#kalender" data-page="kalender">Kalender</a>
+    <a href="#performa" data-page="performa">Performa</a>
+    <a href="#kesehatan" data-page="kesehatan">Kesehatan</a>
+  </nav>
+  <main>
+    <section id="page-live" class="page">
+      <div class="grid">
+        <article id="signal-card" class="card"><p class="muted">Memuat…</p></article>
+        <article class="card chart-card"><div id="chart"></div></article>
+      </div>
+      <article class="card">
+        <h2>Berita terbaru</h2>
+        <ul id="news" class="feed"></ul>
+      </article>
+    </section>
+
+    <section id="page-outlook" class="page" hidden>
+      <article class="card">
+        <h2>Outlook 24 jam <span id="outlook-meta" class="muted"></span></h2>
+        <p id="countdown" class="countdown"></p>
+        <div class="table-wrap">
+          <table id="outlook-table" class="stack">
+            <thead><tr><th>Jam (WIB)</th><th>Sesi</th><th>Event</th><th>Volatilitas</th>
+              <th>Bias</th><th>Skenario</th><th>Conf.</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="outlook-narrative" class="narrative"></p>
+        <ul id="outlook-notes" class="notes"></ul>
+      </article>
+    </section>
+
+    <section id="page-kalender" class="page" hidden>
+      <article class="card">
+        <h2>Kalender ekonomi (7 hari)</h2>
+        <div class="table-wrap">
+          <table id="calendar-table" class="stack">
+            <thead><tr><th>Waktu (WIB) · Event</th><th>Impact</th>
+              <th class="num">Forecast</th><th class="num">Previous</th><th class="num">Actual</th>
+              <th>Playbook</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="page-performa" class="page" hidden>
+      <article class="card">
+        <h2>Performa paper trading (90 hari)</h2>
+        <div id="perf-tiles" class="tiles"></div>
+        <ul id="perf-notes" class="notes warn"></ul>
+      </article>
+      <div id="perf-groups" class="grid"></div>
+    </section>
+
+    <section id="page-kesehatan" class="page" hidden>
+      <div id="health-tiles" class="tiles"></div>
+      <article class="card">
+        <h2>Sumber berita</h2>
+        <div class="table-wrap">
+          <table id="sources-table" class="stack">
+            <thead><tr><th>Sumber</th><th>Status</th><th>Sukses terakhir</th><th>Item terakhir</th>
+              <th class="num">Error beruntun</th><th class="num">Lag p50</th><th class="num">Lag p95</th>
+              <th>Error terakhir</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+      <div class="grid">
+        <article class="card"><h2>Latensi pipeline (24 jam)</h2><div class="table-wrap">
+          <table id="stages-table"><thead><tr><th>Tahap</th><th>Sumber</th><th>n</th>
+            <th>p50 (dtk)</th><th>p95 (dtk)</th></tr></thead><tbody></tbody></table></div></article>
+        <article class="card"><h2>Service</h2><ul id="heartbeats" class="feed compact"></ul></article>
+      </div>
+      <div class="grid">
+        <article class="card"><h2>Alert terbaru</h2><ul id="alerts" class="feed compact"></ul></article>
+        <article class="card"><h2>Notifikasi</h2><ul id="notifications" class="feed compact"></ul></article>
+      </div>
+    </section>
+  </main>
+  <footer>
+    Bukan saran keuangan. Keputusan &amp; risiko di tanganmu.<br>
+    Grafik: TradingView Lightweight Charts™ · Copyright (c) 2026 TradingView, Inc. ·
+    <a href="https://www.tradingview.com/" rel="noopener noreferrer" target="_blank">tradingview.com</a>
+  </footer>
+</body>
+</html>

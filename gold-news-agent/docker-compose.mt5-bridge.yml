@@ -1,0 +1,9 @@
+# Only with the MT5 bridge (price source: MetaTrader 5 on a Windows host, docs/runbook.md):
+#   docker compose -f docker-compose.yml -f docker-compose.mt5-bridge.yml up -d
+# Publishes Redis on this VPS's Tailscale/WireGuard address ONLY, never on a public interface.
+# Replace 100.64.0.1 with `tailscale ip -4`. Redis keeps its password (REDIS_PASSWORD), and the
+# bridge's REDIS_URL is redis://:<REDIS_PASSWORD>@<that address>:6379/0.
+services:
+  redis:
+    ports:
+      - "100.64.0.1:6379:6379"

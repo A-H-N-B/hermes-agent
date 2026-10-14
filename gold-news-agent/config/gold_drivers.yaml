@@ -1,0 +1,102 @@
+# Gold fundamentals knowledge base. Used by the rule engine AND included (cached) in the LLM
+# system prompt. direction = typical short-term effect on XAUUSD when the news is a SURPRISE;
+# priced-in news moves little. half_life_minutes are starting points, calibrated in Phase 6.
+#
+# Core rule: the market reacts to the surprise versus expectations, not the raw headline.
+
+drivers:
+  - id: real_yield
+    category: yields
+    when_up: bearish
+    when_down: bullish
+    half_life_minutes: 720 # hours to days
+    note: 10Y TIPS real yield is the strongest long-run gold driver; FRED DFII10 is daily.
+
+  - id: usd
+    category: usd
+    when_up: bearish
+    when_down: bullish
+    half_life_minutes: 240
+    note: DXY or a synthetic DXY from FX pairs (section C).
+
+  - id: fed_stance
+    category: fed_policy
+    when_hawkish: bearish
+    when_dovish: bullish
+    half_life_minutes: 2880 # 1–3 days
+    note: Fewer expected cuts / tighter tone = hawkish. Weigh the voter status of the speaker.
+
+  - id: inflation_surprise
+    category: us_inflation
+    when_above_forecast: bearish
+    when_below_forecast: bullish
+    half_life_minutes: 60 # initial reaction 30–90 min
+    note: Short-term via higher rate expectations; core matters more than headline.
+
+  - id: labor_surprise
+    category: us_labor
+    when_strong: bearish
+    when_weak: bullish
+    half_life_minutes: 60
+    note: NFP, unemployment rate, jobless claims. Revisions can flip the read.
+
+  - id: growth_surprise
+    category: us_growth
+    when_strong: bearish
+    when_weak: bullish
+    half_life_minutes: 60
+    note: Retail sales, ISM/PMI, GDP.
+
+  - id: geopolitics
+    category: geopolitics
+    when_escalation: bullish
+    when_deescalation: bearish
+    half_life_minutes: 240 # 2–6 hours
+    note: Single unofficial source -> needs_confirmation until a second or official source.
+
+  - id: central_bank_buying
+    category: central_bank_gold
+    when_buying: bullish
+    when_selling: bearish
+    half_life_minutes: 20160 # weeks
+    note: PBoC monthly reserve data (around the 7th), WGC central bank statistics.
+
+  - id: trade_tariffs
+    category: trade_tariff
+    when_escalation: bullish
+    when_deescalation: bearish
+    half_life_minutes: 720
+    note: Usually bullish via uncertainty; a USD spike can dominate intraday.
+
+  - id: fiscal_stress
+    category: fiscal_debt
+    when_worse: bullish
+    when_better: bearish
+    half_life_minutes: 2880
+    note: Shutdowns, debt ceiling, rating downgrades.
+
+  - id: equity_selloff
+    category: risk_sentiment
+    when_sharp_selloff: mixed
+    half_life_minutes: 240
+    note: Can drop first (margin liquidation) then rally as a haven. Never a one-way rule.
+
+  - id: etf_flows
+    category: etf_flows
+    when_inflow: bullish
+    when_outflow: bearish
+    half_life_minutes: 2880
+    note: GLD/IAU holdings; daily cadence.
+
+  - id: positioning
+    category: risk_sentiment
+    when_crowded_long: bearish
+    when_crowded_short: bullish
+    half_life_minutes: 10080
+    note: CFTC COT managed-money net; extremes raise reversal risk (section C addition).
+
+  - id: commentary
+    category: commentary
+    weight: 0.1
+    half_life_minutes: 90
+    note: Opinion/analysis with no new information gets a very small weight.
