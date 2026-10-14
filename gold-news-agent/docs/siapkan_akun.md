@@ -1,8 +1,12 @@
 # Langkah 0 secara detail — Bot Telegram, API Claude, dan key lainnya
 
-Bagian ini menjelaskan cara mendapatkan setiap akun dan key, lalu ke mana tiap key ditulis.
-Semua key masuk ke file `.env` di folder project (langkah 4 di `docs/pasang_di_komputer.md`).
-File `.env` hanya ada di komputermu dan tidak pernah di-commit ke git.
+Bagian ini menjelaskan cara mendapatkan setiap akun dan key.
+
+> **Tentang file `.env`:** file ini **belum ada** saat kamu mengerjakan langkah 0. Ia baru
+> dibuat di langkah 4 panduan pasang, setelah kode program diunduh. Jadi sekarang **simpan dulu
+> semua token/key di catatan sementara** (mis. Notepad, jangan di chat). Setiap kali di bawah
+> tertulis "tulis di `.env`", artinya: catat dulu baris itu, nanti di langkah 4 dipindahkan ke
+> file `.env`. Cara membuat dan mengisi `.env` dijelaskan di bagian akhir dokumen ini.
 
 > **Aturan emas:** token bot dan API key setara password. Jangan kirim ke chat, grup, email,
 > screenshot, atau AI mana pun (termasuk saya). Bila tidak sengaja bocor, segera buat yang baru
@@ -209,6 +213,25 @@ Data FRED harian (bukan real-time). Sistem memakainya untuk konteks yield 10 tah
    selama sistem jalan.
 
 ---
+
+## Membuat dan mengisi file `.env` (dikerjakan di langkah 4)
+
+`.env` adalah file teks biasa bernama persis `.env` (diawali titik, tanpa nama di depannya),
+letaknya di folder project, mis. `C:\gold-news-agent\.env`. Program membacanya saat start.
+Isinya baris-baris `NAMA=nilai`. Di folder project sudah ada contohnya: `.env.example`.
+
+1. Buka PowerShell, masuk ke folder project: `cd C:\gold-news-agent`
+2. Salin contohnya menjadi `.env`: `Copy-Item .env.example .env`
+3. Buka untuk diedit: `notepad .env`
+4. Cari baris yang sesuai, tempel nilainya **setelah tanda `=`**, tanpa spasi dan tanpa tanda
+   kutip. Contoh: baris `TELEGRAM_BOT_TOKEN=` menjadi `TELEGRAM_BOT_TOKEN=1234567890:AAH-...`
+5. Simpan (Ctrl+S) lalu tutup Notepad.
+6. Cek namanya benar: `Get-ChildItem -Force .env*` harus menampilkan `.env` dan
+   `.env.example`. Bila yang muncul `.env.txt`, ganti namanya: `Rename-Item .env.txt .env`
+   (Notepad kadang menambah `.txt` diam-diam bila file dibuat lewat menu Save As).
+
+Baris yang diawali `#` hanya keterangan dan boleh dibiarkan. Baris yang nilainya kosong
+berarti fitur itu tidak dipakai.
 
 ## Contoh `.env` yang sudah terisi (nilai palsu)
 
