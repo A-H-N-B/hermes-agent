@@ -3,10 +3,15 @@ the nightly retention clean-up."""
 
 from __future__ import annotations
 
+import asyncio
 import os
+import struct
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -14,7 +19,14 @@ from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_ALERTS, STREAM_NEWS_RAW
 from gold_agent.core.clock import ManualClock
 from gold_agent.models import Alert, MarketContext, SourceHealth, Tick
-from gold_agent.ops.clock import file_offset, parse_tracking
+from gold_agent.ops.clock import (
+    ClockOffset,
+    file_offset,
+    parse_sntp,
+    parse_tracking,
+    sntp_offset,
+    sntp_request,
+)
 from gold_agent.ops.watchdog import Watchdog
 from gold_agent.services.watchdog import WatchdogService
 from tests.conftest import make_source
@@ -112,7 +124,7 @@ async def test_service_heartbeat_queue_backlog_clock_and_disk(
     assert alerts["Service signal tidak merespons"].severity == "critical"
     assert "Service market tidak merespons" not in alerts
     assert alerts["Antrian news.raw menumpuk"].detail.startswith("501 pesan belum diproses")
-    assert alerts["Jam sistem melenceng"].detail == "offset chrony +250 ms (batas ±100)"
+    assert alerts["Jam sistem melenceng"].detail == "offset jam +250 ms (batas ±100)"
     assert alerts["Jam sistem melenceng"].kind == "clock"
     assert alerts["Disk hampir penuh"].detail == "sisa 5.0% (0.0 GB)"
     unknown = watchdog(ctx, tmp_path, offset=None)
@@ -130,6 +142,61 @@ def test_chrony_output_and_offset_file(tmp_path: Path) -> None:
     written = offset.stat().st_mtime - 20 * 60
     os.utime(offset, (written, written))  # the host timer stopped 20 minutes ago
     assert file_offset(offset) is None  # a stale offset is unknown, not "fine"
+
+
+def ntp(unix: float) -> int:
+    return int((unix + 2_208_988_800) * 2**32)
+
+
+def server_reply(request: bytes, at: float, *, stratum: int = 2, leap: int = 0) -> bytes:
+    reply = bytearray(48)
+    reply[0], reply[1] = (leap << 6) | (4 << 3) | 4, stratum
+    reply[24:32] = request[40:48]  # originate = the client's transmit time
+    struct.pack_into("!QQ", reply, 32, ntp(at), ntp(at + 0.01))
+    return bytes(reply)
+
+
+def test_sntp_offset_follows_rfc_4330_and_rejects_bad_answers() -> None:
+    sent = 1_760_000_000.0  # 50 ms each way, server clock 0.5 s ahead of ours
+    request = sntp_request(sent)
+    reply = server_reply(request, sent + 0.05 + 0.5)
+    assert parse_sntp(reply, sent, sent + 0.11) == pytest.approx(-0.5, abs=1e-6)
+    assert parse_sntp(server_reply(request, sent, stratum=0), sent, sent) is None  # kiss-o'-death
+    assert parse_sntp(server_reply(request, sent, leap=3), sent, sent) is None  # unsynchronised
+    assert parse_sntp(server_reply(sntp_request(sent - 9), sent), sent, sent) is None  # not ours
+    assert parse_sntp(reply[:40], sent, sent) is None
+
+
+async def test_without_chrony_the_clock_is_checked_against_an_ntp_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Server(asyncio.DatagramProtocol):
+        requests = 0
+
+        def connection_made(self, transport: asyncio.BaseTransport) -> None:
+            self.transport = cast(asyncio.DatagramTransport, transport)
+
+        def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+            Server.requests += 1
+            self.transport.sendto(server_reply(data, time.time() + 0.3), addr)
+
+    async def no_chrony() -> None:
+        return None
+
+    monkeypatch.setattr("gold_agent.ops.clock.chrony_offset", no_chrony)
+    loop = asyncio.get_running_loop()
+    transport, _ = await loop.create_datagram_endpoint(Server, local_addr=("127.0.0.1", 0))
+    try:
+        port = transport.get_extra_info("sockname")[1]
+        assert await sntp_offset("127.0.0.1", port) == pytest.approx(-0.3, abs=0.05)
+        monkeypatch.setattr("gold_agent.ops.clock.sntp_offset", partial(sntp_offset, port=port))
+        reader = ClockOffset("127.0.0.1")
+        first = await reader(None)
+        assert first == pytest.approx(-0.3, abs=0.05)
+        assert await reader(None) == first  # reused: the server is not asked every check
+        assert Server.requests == 2
+    finally:
+        transport.close()
 
 
 async def test_service_publishes_alerts_and_prunes_old_data_nightly(

@@ -82,8 +82,8 @@ async def ctx(ctx_factory: Callable[..., AppContext]) -> AsyncIterator[AppContex
 
 def postgres_url() -> str | None:
     """Integration tests against a real PostgreSQL run when this is set (CI or local)."""
-    return os.environ.get("GOLD_TEST_POSTGRES_URL")
+    return os.environ.get("GOLD_TEST_POSTGRES_URL") or None  # empty = not configured
 
 
 def redis_url() -> str | None:
-    return os.environ.get("GOLD_TEST_REDIS_URL")
+    return os.environ.get("GOLD_TEST_REDIS_URL") or None

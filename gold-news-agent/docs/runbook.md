@@ -139,7 +139,7 @@ Untuk image produksi: pin `python:3.12-slim-bookworm` dan `ghcr.io/astral-sh/uv`
 | Jam sistem melenceng | \|offset\| > 100 ms | `chronyc tracking`, `chronyc sources -v`. Latensi yang tercatat selama itu tidak bisa dipercaya |
 | Offset jam sistem tidak diketahui | File offset tidak ada atau lebih tua dari 10 menit | `systemctl status gold-clock-offset.timer` |
 | Disk hampir penuh | Sisa < 10 % | `docker system df`, hapus image lama (`docker image prune`), pindahkan backup ke luar VPS, cek retensi (`watchdog.tick_retention_days`) |
-| Data harga basi / pulih | Tidak ada tick > 20 dtk saat pasar buka | Cek feed utama (Binance/MT5 bridge). Fallback otomatis ke `market.fallbacks`, label sumber tampil di sinyal |
+| Data harga basi / pulih | Tidak ada tick > 20 dtk saat pasar buka | Cek feed utama (Binance/MT5 bridge). Fallback otomatis ke `price_feed.fallbacks`, label sumber tampil di sinyal |
 | Claude API bermasalah — mode rules-only | Circuit breaker LLM terbuka | Cek status Anthropic dan kuota. Sistem tetap jalan dengan aturan (lebih konservatif) |
 | Budget LLM harian habis | Batas biaya WIB-harian (`budget.llm_daily_usd`) tercapai | Sengaja: sampai 00:00 WIB hanya berita dampak tinggi yang ke LLM, sisanya aturan. Naikkan batasnya bila memang perlu |
 | Lonjakan harga / Spread melebar | Harga bergerak tanpa berita yang diketahui | Informasi. Collector diminta poll ulang untuk mencari penyebabnya |
@@ -198,7 +198,7 @@ dalam satu jaringan Tailscale/WireGuard.
    `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER`, dan
    `REDIS_URL=redis://:<REDIS_PASSWORD>@<IP Tailscale VPS>:6379/0`. Jalankan
    `uv run gold-agent mt5-bridge` sebagai service (NSSM atau Task Scheduler "At startup").
-3. Di `config/settings.yaml`: `market.primary: mt5_bridge`. Bila DXY sintetis dari MT5 dipakai,
+3. Di `config/settings.yaml`: `price_feed.primary: mt5_bridge`. Bila DXY sintetis dari MT5 dipakai,
    isi `market.usd_source: mt5_synthetic` dan simbol FX broker di `market.mt5_fx_symbols`.
 4. Ukur hop jaringannya: bandingkan `received_at` tick dengan waktu server MT5 di dashboard.
 

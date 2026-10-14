@@ -24,7 +24,7 @@ from gold_agent.core.bus import (
     STREAM_SIGNALS,
 )
 from gold_agent.models import Alert
-from gold_agent.ops.clock import clock_offset
+from gold_agent.ops.clock import ClockOffset
 from gold_agent.timeutils.sessions import fmt_wib
 
 # (stream, consumer group) pairs whose backlog means the pipeline is falling behind.
@@ -63,12 +63,12 @@ class Watchdog:
         self,
         ctx: AppContext,
         *,
-        offset_reader: OffsetReader = clock_offset,
+        offset_reader: OffsetReader | None = None,
         disk_reader: DiskReader = _disk_usage,
         data_dir: Path = DATA_DIR,
     ) -> None:
         self._ctx = ctx
-        self._offset_reader = offset_reader
+        self._offset_reader = offset_reader or ClockOffset(ctx.settings.watchdog.ntp_server)
         self._disk_reader = disk_reader
         self._data_dir = data_dir
         self._failing: dict[str, Finding] = {}
@@ -158,7 +158,10 @@ class Watchdog:
                     key="clock:unknown",
                     problem=True,
                     title="Offset jam sistem tidak diketahui",
-                    detail="chrony tidak terdeteksi: pasang chrony agar latensi bisa dipercaya",
+                    detail=(
+                        "chrony maupun server NTP tidak bisa ditanya: sinkronkan jam sistem "
+                        "agar latensi bisa dipercaya"
+                    ),
                 )
             ]
         limit = cfg.clock_offset_alert_ms
@@ -169,7 +172,7 @@ class Watchdog:
                 key="clock:offset",
                 problem=too_far,
                 title="Jam sistem melenceng" if too_far else "Jam sistem sinkron kembali",
-                detail=f"offset chrony {offset * 1000:+.0f} ms (batas ±{limit:.0f})",
+                detail=f"offset jam {offset * 1000:+.0f} ms (batas ±{limit:.0f})",
                 critical=abs(offset) > 1.0,
             ),
         ]

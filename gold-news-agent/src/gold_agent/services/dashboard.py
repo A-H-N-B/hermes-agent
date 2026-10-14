@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import socket
+import sys
 from collections.abc import Awaitable, Callable, Generator
 from typing import Any
 
@@ -141,7 +142,10 @@ def listen(host: str, port: int) -> socket.socket:
     service in this process down with it."""
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     sock = socket.socket(family, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if sys.platform == "win32":  # SO_REUSEADDR there would let a second process share the port
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:  # quick restarts past TIME_WAIT
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((host, port))
         sock.listen(128)

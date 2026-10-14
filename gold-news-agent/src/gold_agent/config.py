@@ -461,6 +461,13 @@ class InfraSettings(StrictModel):
 class LoggingSettings(StrictModel):
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
     format: Literal["json", "console"]
+    file: str | None = Field(default=None, min_length=1)  # relative to the project root
+
+    def file_path(self) -> Path | None:
+        if self.file is None:
+            return None
+        path = Path(self.file)
+        return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 class CollectorSettings(StrictModel):
@@ -479,6 +486,7 @@ class WatchdogSettings(StrictModel):
     heartbeat_stale_seconds: int = Field(gt=0)
     clock_offset_alert_ms: float = Field(gt=0)
     clock_offset_file: str | None = None
+    ntp_server: str | None = Field(default=None, min_length=1)  # when neither file nor chronyc
     disk_free_min_pct: float = Field(gt=0, lt=100)
     tick_retention_days: int = Field(gt=0)
     context_retention_days: int = Field(gt=0)

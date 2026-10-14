@@ -35,7 +35,8 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     db = sub.add_parser("db", help="database maintenance")
-    db.add_argument("action", choices=["upgrade"])
+    db.add_argument("action", choices=["upgrade", "backup"])
+    db.add_argument("--keep", type=int, default=14, help="backup: newest copies to keep")
 
     sub.add_parser("telegram-login", help="one-time Telethon login for the channel reader")
 
@@ -69,9 +70,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _prepare(ctx: AppContext, *, migrate: bool) -> None:
-    configure_logging(
-        ctx.settings.logging.level, ctx.settings.logging.format, secrets=ctx.env.values()
-    )
+    cfg = ctx.settings.logging
+    configure_logging(cfg.level, cfg.format, secrets=ctx.env.values(), file=cfg.file_path())
     if migrate:
         await upgrade(ctx.db.url)
     await ctx.ops.sync_sources(ctx.sources, ctx.clock.now())
@@ -109,13 +109,26 @@ async def _run(
     return 0
 
 
-async def _db(action: str) -> int:
+async def _db(action: str, keep: int) -> int:
     ctx = build_context()
-    if action == "upgrade":
-        await upgrade(ctx.db.url)
-        print("database upgraded")
-    await ctx.close()
-    return 0
+    try:
+        if action == "upgrade":
+            await upgrade(ctx.db.url)
+            print("database upgraded")
+            return 0
+        from gold_agent.storage.backup import backup_sqlite, sqlite_file
+
+        database = sqlite_file(ctx.db.url)
+        if database is None:
+            print("PostgreSQL: pakai scripts/backup.sh (pg_dump), lihat docs/runbook.md.")
+            return 2
+        target = await asyncio.to_thread(
+            backup_sqlite, database, PROJECT_ROOT / "backups", now=ctx.clock.now(), keep=keep
+        )
+        print(f"backup: {target}")
+        return 0
+    finally:
+        await ctx.close()
 
 
 async def _healthcheck(service: str, max_age: float) -> int:
@@ -220,7 +233,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _run(args.services, args.bus, not args.no_migrate, args.dashboard_host)
             )
         case "db":
-            return asyncio.run(_db(args.action))
+            return asyncio.run(_db(args.action, args.keep))
         case "healthcheck":
             return asyncio.run(_healthcheck(args.service, args.max_age))
         case "telegram-login":

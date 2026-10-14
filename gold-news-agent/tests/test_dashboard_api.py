@@ -16,7 +16,7 @@ from gold_agent.core.clock import ManualClock
 from gold_agent.dashboard.app import create_app
 from gold_agent.dashboard.auth import COOKIE, SessionSigner
 from gold_agent.dashboard.live import LiveHub
-from gold_agent.services.dashboard import UnsafeBind, check_bind
+from gold_agent.services.dashboard import UnsafeBind, check_bind, listen
 from tests.dashboard_seed import HOSTILE, NOW, seed_dashboard
 
 PASSWORD = "rahasia-uji"  # noqa: S105 - test-only password
@@ -47,6 +47,15 @@ def test_open_bind_without_password_is_refused() -> None:
     check_bind("0.0.0.0", "pw")  # noqa: S104 - the point of the test
     with pytest.raises(UnsafeBind):
         check_bind("0.0.0.0", None)  # noqa: S104
+
+
+def test_a_second_instance_cannot_take_the_dashboard_port() -> None:
+    first = listen("127.0.0.1", 0)
+    try:
+        with pytest.raises(OSError, match=r"(?i)address already in use|only one usage"):
+            listen("127.0.0.1", first.getsockname()[1]).close()
+    finally:
+        first.close()
 
 
 def test_session_tokens_expire_and_cannot_be_forged() -> None:

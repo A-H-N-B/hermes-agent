@@ -123,6 +123,15 @@ def test_time_zones_and_clock_times_are_validated() -> None:
         Settings.model_validate(raw)
 
 
+def test_the_ntp_fallback_is_a_host_name_or_explicitly_off() -> None:
+    raw = _settings_dict()
+    raw["watchdog"]["ntp_server"] = ""
+    with pytest.raises(ValidationError):
+        Settings.model_validate(raw)
+    raw["watchdog"]["ntp_server"] = None
+    assert Settings.model_validate(raw).watchdog.ntp_server is None
+
+
 def test_secrets_expose_only_non_empty_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FRED_API_KEY", "fred-secret")
     monkeypatch.setenv("FINNHUB_API_KEY", "")

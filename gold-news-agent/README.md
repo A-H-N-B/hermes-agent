@@ -51,6 +51,9 @@ Semua angka di atas ada di `config/settings.yaml` dan bisa diubah tanpa mengubah
 
 ## Setup
 
+Pasang di komputer sendiri (Windows/macOS/Linux, tanpa Docker, langkah demi langkah):
+**`docs/pasang_di_komputer.md`**. Di VPS dengan Docker Compose: `docs/runbook.md`.
+
 ```bash
 uv sync
 cp .env.example .env        # isi key yang kamu punya; .env tidak pernah di-commit
@@ -84,6 +87,7 @@ uv run gold-agent db upgrade          # migrasi database (DATABASE_URL di .env; 
 uv run gold-agent run all             # semua service dalam satu proses (bus memori)
 uv run gold-agent run collector market calendar analyzer signal paper evaluator notifier dashboard watchdog --bus redis
 uv run gold-agent healthcheck signal                 # exit 0 bila heartbeat < 3 menit
+uv run gold-agent db backup                          # salinan SQLite ke backups/ (14 terbaru)
 uv run gold-agent labels export --limit 150          # headline arsip -> data/labels/todo.jsonl
 uv run gold-agent labels import data/labels/todo.jsonl --labeler kamu
 uv run gold-agent eval-triage [--llm]                # presisi/recall triage -> docs/eval_triage.md

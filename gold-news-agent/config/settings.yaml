@@ -18,6 +18,9 @@ infra:
 logging:
   level: INFO
   format: json # json | console
+  # Native runs without a log collector (Windows Task Scheduler, launchd): also write here,
+  # rotated at 10 MB x 5, e.g. data/logs/gold-agent.log. Docker and systemd keep stdout.
+  file: null
 
 http:
   # Some official sources (BLS) reject requests without a contact address in the UA.
@@ -255,8 +258,10 @@ watchdog:
   heartbeat_stale_seconds: 180 # a service that stopped reporting
   clock_offset_alert_ms: 100 # C4.1: |chrony offset| above this raises an alert
   # Docker: a host timer writes the chrony offset (seconds) here (scripts/clock_offset.sh);
-  # natively the watchdog asks `chronyc` itself.
+  # natively the watchdog asks `chronyc` itself, and without chrony (Windows, macOS) it sends
+  # one SNTP query to ntp_server per check. null = never ask an NTP server.
   clock_offset_file: /run/gold/clock_offset
+  ntp_server: pool.ntp.org
   disk_free_min_pct: 10
   tick_retention_days: 30 # older archived ticks are deleted nightly (~9 MB/day at 1 tick/s)
   context_retention_days: 180
