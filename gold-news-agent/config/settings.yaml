@@ -75,6 +75,8 @@ risk:
   max_open_positions: 1
   max_signals_per_day: 6
   max_spread_usd: 0.50 # Q2/Q9: tune to the broker's normal XAUUSD spread
+  contract_size: null # ounces per lot at YOUR broker (MT5 reports it); never assumed
+  volume_step: 0.01
 
 budget:
   llm_daily_usd: 3.0 # Q4: above this, only impact >= deep_min_impact goes to the LLM
@@ -103,6 +105,10 @@ signal_engine:
   reversal_min_minutes: 15
   cooldown_minutes: 10
   event_blackout_minutes: 15
+  conflict_threshold: 0.5 # news and price both beyond this but opposite -> WAIT
+  validity_minutes: { scalping: 30, intraday: 120, swing: 1440 }
+  publish_state_seconds: 60
+  evaluate_seconds: 5
   levels:
     sl_atr_multiple: 1.2
     sl_atr_timeframe: M15
@@ -189,8 +195,21 @@ sessions:
   holiday_factor: 0.7 # US or UK holiday: thin liquidity
 
 outlook:
-  conditional_beyond_hours: 4
+  conditional_beyond_hours: 4 # rows further out are written as scenarios (11.3)
   refresh_minute: 0
+  refresh_on_moments: [tokyo_open, london_open, ny_open] # session opens also rebuild it
+  refresh_debounce_minutes: 5 # high-impact news bursts rebuild at most this often
+  use_llm: true # narrative by the outlook model; the table itself is always rule-based
+  weekend_outlook: { zone: Asia/Jakarta, weekday: sunday, local: "16:00" } # "outlook pembukaan Senin"
+  near_confidence_decay_per_hour: 0.15 # hour h ahead shows confidence x (1 - 0.15 h)
+  conditional_confidence_cap: 40
+  # Initial guess for a high-impact hour's range vs a normal one; the event study (Phase 6)
+  # replaces it with measured moves per event once enough releases are recorded.
+  event_range_multiplier: 1.8
+  profile_min_samples: 20 # hourly_profile buckets with fewer bars are ignored
+  profile_days: 365 # H1 history used to rebuild hourly_profile (weekly)
+  playbook_build_minutes: 60 # 11.4: build the scenario table at T-60
+  playbook_send_minutes: 30 # and send it at T-30
 
 watchdog:
   default_source_silence_minutes: 30

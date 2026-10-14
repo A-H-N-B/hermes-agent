@@ -77,5 +77,17 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   analysis (Sonnet), price-led spikes → alert + targeted `collector.poll_now`, analyzer service.
   `gold-agent labels export/import` + `gold-agent eval-triage [--llm]` measure the Phase 3 bar
   (precision ≥ 0.9 on ≥ 100 labelled headlines, p95 < 5 s) — needs the real archive to run.
-- Phases 4–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
+- **Phase 4 (done).** `signals/scoring.py` (N/M/T/P, decay, priced-in, novelty, confirmed-only
+  composite whose price check is anchored on confirmed news), `levels.py` (SL beyond swing or
+  1.2 ATR, TP 1R/2R/structure, lots only with equity + broker contract size), `engine.py` (WAIT
+  filters, event blackout + post-release confirm, hysteresis, cooldown, daily loss/count limits,
+  kill switch, full 10.5 schema, `EngineState` in kv `signal_engine`), `outlook.py` (24 WIB rows,
+  TUNGGU DATA + playbook thresholds on release hours, conditional rows > 4 h, confidence decay,
+  Monday-open notes with PAXG gap estimate, optional LLM narrative that never edits the table),
+  `profile.py` (hourly_profile per WIB / London / New York hour so DST does not smear buckets;
+  rebuilt weekly from stored H1). Calendar service now builds playbooks at T-60 and publishes them
+  at T-30 (`calendar.playbooks`). `services/signal.py` publishes `signals`, `signals.state`,
+  `signals.outlook`; `/stop` = `{"type": "signal.halt"}` on `app.events`, persisted in kv
+  `trading_halt`; the paper tracker reports `signal.closed` and `paper.daily`.
+- Phases 5–7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
   after ≥ 2–4 weeks of recorded paper trading.

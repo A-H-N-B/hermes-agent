@@ -61,6 +61,7 @@ class MarketService:
         self.yields: YieldSnapshot | None = None
         self.weekend = WeekendTracker()
         self.contract_size: float | None = None
+        self.volume_step: float | None = None
         self._last_store: datetime | None = None
         self._last_publish: datetime | None = None
         self._last_context_store: datetime | None = None
@@ -126,6 +127,7 @@ class MarketService:
             self.builder.source = h1[-1].source
         try:
             self.contract_size = await adapter.contract_size()
+            self.volume_step = await adapter.volume_step()
         except Exception as exc:
             log.warning("market.contract_size_failed", error=repr(exc)[:200])
         log.info(
@@ -136,7 +138,7 @@ class MarketService:
     # ------------------------------------------------------------------ context
 
     def context(self, now: datetime) -> MarketContext:
-        return build_market_context(
+        snapshot = build_market_context(
             now=now,
             tick=self.last_tick,
             builder=self.builder,
@@ -146,6 +148,9 @@ class MarketService:
             usd=self.usd,
             yields=self.yields,
             weekend=self.weekend,
+        )
+        return snapshot.model_copy(
+            update={"contract_size": self.contract_size, "volume_step": self.volume_step}
         )
 
     async def publish_context(self) -> MarketContext:

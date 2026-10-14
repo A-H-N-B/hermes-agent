@@ -216,6 +216,8 @@ class RiskSettings(StrictModel):
     max_open_positions: int = Field(ge=0)
     max_signals_per_day: int = Field(ge=1)
     max_spread_usd: float = Field(gt=0)
+    contract_size: float | None = Field(default=None, gt=0)
+    volume_step: float = Field(gt=0)
 
 
 class BudgetSettings(StrictModel):
@@ -268,6 +270,10 @@ class SignalEngineSettings(StrictModel):
     reversal_min_minutes: int = Field(ge=0)
     cooldown_minutes: int = Field(ge=0)
     event_blackout_minutes: int = Field(ge=0)
+    conflict_threshold: float = Field(gt=0, le=1)
+    validity_minutes: dict[Literal["scalping", "intraday", "swing"], int]
+    publish_state_seconds: float = Field(gt=0)
+    evaluate_seconds: float = Field(gt=0)
     levels: LevelSettings
 
     @model_validator(mode="after")
@@ -370,6 +376,23 @@ class SessionSettings(StrictModel):
 class OutlookSettings(StrictModel):
     conditional_beyond_hours: int = Field(gt=0)
     refresh_minute: int = Field(ge=0, le=59)
+    refresh_on_moments: tuple[str, ...]
+    refresh_debounce_minutes: int = Field(ge=0)
+    use_llm: bool
+    weekend_outlook: WeeklyMoment
+    near_confidence_decay_per_hour: float = Field(ge=0, le=1)
+    conditional_confidence_cap: int = Field(ge=0, le=100)
+    event_range_multiplier: float = Field(ge=1)
+    profile_min_samples: int = Field(gt=0)
+    profile_days: int = Field(gt=0)
+    playbook_build_minutes: int = Field(gt=0)
+    playbook_send_minutes: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _playbook_order(self) -> OutlookSettings:
+        if self.playbook_send_minutes > self.playbook_build_minutes:
+            raise ValueError("playbook_send_minutes must not exceed playbook_build_minutes")
+        return self
 
 
 class MarketSettings(StrictModel):

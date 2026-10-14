@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import holidays
 
-from gold_agent.config import SessionSettings
+from gold_agent.config import SessionSettings, WeeklyMoment
 
 NEW_YORK = ZoneInfo("America/New_York")
 LONDON = ZoneInfo("Europe/London")
@@ -41,9 +41,28 @@ def to_wib(moment: datetime) -> datetime:
     return moment.astimezone(WIB)
 
 
+_DAYS_ID = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+_MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+
 def fmt_wib(moment: datetime, with_date: bool = False) -> str:
+    """'19:30' or 'Selasa 13 Okt 19:30' (Indonesian day/month names, WIB)."""
     local = to_wib(moment)
-    return local.strftime("%a %d %b %H:%M") if with_date else local.strftime("%H:%M")
+    if not with_date:
+        return local.strftime("%H:%M")
+    return f"{_DAYS_ID[local.weekday()]} {local.day} {_MONTHS_ID[local.month - 1]} {local:%H:%M}"
+
+
+def last_weekly(spec: WeeklyMoment, moment: datetime) -> datetime:
+    """Latest occurrence (UTC) of a weekly wall-clock moment at or before `moment`."""
+    zone = ZoneInfo(spec.zone)
+    weekday = _WEEKDAYS.index(spec.weekday)
+    local_day = moment.astimezone(zone).date()
+    day = local_day - timedelta(days=(local_day.weekday() - weekday) % 7)
+    candidate = local_to_utc(day, spec.local, zone)
+    if candidate > moment:  # same weekday but later today: use last week's (own DST)
+        candidate = local_to_utc(day - timedelta(days=7), spec.local, zone)
+    return candidate
 
 
 @lru_cache(maxsize=16)
@@ -114,13 +133,8 @@ class SessionClock:
         return ZoneInfo(spec.zone), _WEEKDAYS.index(spec.weekday), spec.local
 
     def _weekly_last(self, which: Literal["open", "close"], moment: datetime) -> datetime:
-        zone, weekday, hhmm = self._weekly_spec(which)
-        local_day = moment.astimezone(zone).date()
-        day = local_day - timedelta(days=(local_day.weekday() - weekday) % 7)
-        candidate = local_to_utc(day, hhmm, zone)
-        if candidate > moment:  # same weekday but later today: use last week's (own DST)
-            candidate = local_to_utc(day - timedelta(days=7), hhmm, zone)
-        return candidate
+        spec = self._settings.weekly_open if which == "open" else self._settings.weekly_close
+        return last_weekly(spec, moment)
 
     def last_weekly_open(self, moment: datetime) -> datetime:
         return self._weekly_last("open", moment)

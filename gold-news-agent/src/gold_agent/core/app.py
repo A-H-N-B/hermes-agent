@@ -21,6 +21,7 @@ from gold_agent.storage.db import DEFAULT_SQLITE_URL, Database
 from gold_agent.storage.market_repo import MarketRepo
 from gold_agent.storage.news_repo import NewsRepo
 from gold_agent.storage.ops_repo import OpsRepo
+from gold_agent.storage.signal_repo import SignalRepo
 
 DATA_DIR = PROJECT_ROOT / "data"
 TELEGRAM_SESSION = DATA_DIR / "telegram" / "gold_agent"
@@ -40,12 +41,14 @@ class AppContext:
     ops: OpsRepo = field(init=False)
     market: MarketRepo = field(init=False)
     calendar: CalendarRepo = field(init=False)
+    signals: SignalRepo = field(init=False)
 
     def __post_init__(self) -> None:
         self.news = NewsRepo(self.db)
         self.ops = OpsRepo(self.db)
         self.market = MarketRepo(self.db)
         self.calendar = CalendarRepo(self.db)
+        self.signals = SignalRepo(self.db)
 
     async def close(self) -> None:
         await self.bus.close()

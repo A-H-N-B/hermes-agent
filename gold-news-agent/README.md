@@ -8,9 +8,38 @@ BUY / SELL / WAIT beserta outlook per jam (WIB). Hasilnya dikirim ke Telegram da
 
 ## Status
 
-**Fase 0 (discovery), menunggu persetujuan.** Isinya: scaffold project, config tervalidasi, skrip
-verifikasi sumber, dan keputusan arsitektur. Detail per fase ada di `CLAUDE.md`. Spesifikasi lengkap
-ada di `PROMPT_XAUUSD_NEWS_AGENT.md`, dan bagian C berisi tambahan hasil review Fase 0.
+| Fase | Isi | Status |
+|---|---|---|
+| 0 | Scaffold, config tervalidasi, verifikasi sumber, keputusan arsitektur | selesai |
+| 1 | Ingestion: collector RSS/JSON/Telegram, dedup, arsip, latensi | selesai |
+| 2 | Harga & waktu: sesi/DST, feed harga, candle, indikator, kalender ekonomi | selesai |
+| 3 | Analisis: prefilter, fast path rilis data, triage LLM, verifikasi, lonjakan harga | selesai |
+| 4 | Sinyal BUY/SELL/WAIT, outlook 24 jam per jam WIB, playbook event, mode akhir pekan | selesai |
+| 5–7 | Telegram + dashboard, evaluasi paper trading, deploy 24/7 | dikerjakan |
+| 8 | Eksekusi order MT5 | **tidak dibangun** (butuh persetujuan + paper trading ≥ 2–4 minggu) |
+
+Semua sumber di `config/sources.yaml` masih `candidate`: belum ada yang diverifikasi dari jaringan
+produksi, jadi collector belum menarik berita sampai `verify-sources` dijalankan di VPS. Detail per
+fase ada di `CLAUDE.md`. Spesifikasi lengkap ada di `PROMPT_XAUUSD_NEWS_AGENT.md` (bagian C berisi
+tambahan hasil review Fase 0).
+
+## Cara kerja sinyal (ringkas)
+
+- Skor gabungan `S = 0,35·Berita + 0,20·Makro + 0,25·Teknikal + 0,20·Konfirmasi harga`, dikali
+  faktor likuiditas sesi. BUY/SELL hanya jika |S| ≥ 0,35 dan confidence ≥ 60.
+- Selalu WAIT jika: pasar tutup/jeda harian, harga basi, spread lebar, 15 menit sebelum rilis
+  high-impact sampai 60 detik sesudahnya, batas rugi harian / jumlah sinyal tercapai, berita dan
+  harga bertentangan kuat, atau `/stop`.
+- Berita `needs_confirmation` (sumber tunggal) tidak pernah menjadi dasar sinyal: skor tanpa berita
+  itu juga harus lolos ambang.
+- Pembalikan arah butuh |S| ≥ 0,50 dan ≥ 15 menit sejak sinyal terakhir (hysteresis); ada cooldown
+  10 menit antar-sinyal.
+- Lot hanya dihitung jika `risk.account_equity` dan contract size broker diketahui. Tidak pernah
+  ditebak.
+- Outlook 24 jam dibuat tiap jam (dan saat berita penting); jam > 4 jam ke depan ditulis bersyarat.
+  Minggu 16:00 WIB ada "outlook pembukaan Senin" dengan estimasi gap dari PAXG.
+
+Semua angka di atas ada di `config/settings.yaml` dan bisa diubah tanpa mengubah kode.
 
 ## Prasyarat
 
@@ -46,6 +75,17 @@ Hasilnya ditulis ke `docs/source_report.md` dan `docs/source_report.json`. Sumbe
 -nya sudah dibaca diubah menjadi `status: verified` di `config/sources.yaml`. Collector hanya
 menjalankan sumber `verified`.
 
+## Menjalankan
+
+```bash
+uv run gold-agent db upgrade          # migrasi database (DATABASE_URL di .env; default SQLite)
+uv run gold-agent run all             # semua service dalam satu proses (bus memori)
+uv run gold-agent run collector market calendar analyzer signal --bus redis   # proses terpisah
+uv run gold-agent labels export --limit 150          # headline arsip -> data/labels/todo.jsonl
+uv run gold-agent labels import data/labels/todo.jsonl --labeler kamu
+uv run gold-agent eval-triage [--llm]                # presisi/recall triage -> docs/eval_triage.md
+```
+
 ## Test & kualitas kode
 
 ```bash
@@ -54,14 +94,29 @@ uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```
 
+Test integrasi PostgreSQL/Redis ikut berjalan jika `GOLD_TEST_POSTGRES_URL` dan
+`GOLD_TEST_REDIS_URL` di-set.
+
 ## Struktur
 
 ```
 config/      settings.yaml (perilaku), sources.yaml (registry sumber), keywords.yaml,
-             gold_drivers.yaml (knowledge base), fed_officials.yaml (diisi dari situs resmi)
+             gold_drivers.yaml (knowledge base), events.yaml (rilis data AS), fed_officials.yaml
+prompts/     system prompt LLM (triage, deep, outlook, brief), berversi
 src/gold_agent/
-  config.py  pemuat + validasi config dan .env
-  ops/       source_check.py (verifikasi), source_report.py (laporan)
+  config.py        pemuat + validasi config dan .env
+  core/            bus (Redis Streams / memori), clock, supervisi service, logging
+  collectors/      RSS/JSON poller, Telegram (Telethon)
+  processing/      normalisasi, dedup/cluster, prefilter kata kunci
+  analysis/        triage LLM, aturan fallback, verifikasi silang, lonjakan harga
+  econ_calendar/   kalender (FF + FOMC), parser rilis (fast path), playbook, kalibrasi surprise
+  market/          adapter harga (Binance PAXG, Twelve Data, MT5), candle, indikator, level
+  timeutils/       sesi pasar & DST, jam rawan
+  signals/         skor gabungan, SL/TP & lot, mesin sinyal, outlook 24 jam, profil per jam
+  services/        collector, market, calendar, analyzer, signal
+  storage/         SQLAlchemy async + migrasi Alembic
+  evaluation/      label headline, evaluasi triage
+  ops/             verifikasi sumber, health, metrik, redaksi secret
 scripts/     verify_sources.py
 tests/       test perilaku
 docs/        architecture.md (keputusan), source_report.md (hasil verifikasi)

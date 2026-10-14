@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
@@ -28,7 +27,8 @@ from gold_agent.core.bus import (
     Message,
     consume,
 )
-from gold_agent.econ_calendar.events import EventSpec, load_events
+from gold_agent.econ_calendar.calibration import SurpriseCalibration
+from gold_agent.econ_calendar.events import load_events
 from gold_agent.econ_calendar.fomc import FomcMeeting, in_blackout
 from gold_agent.econ_calendar.release_parser import ReleaseParser
 from gold_agent.econ_calendar.sync import load_fomc_meetings
@@ -44,8 +44,6 @@ from gold_agent.models import (
 from gold_agent.processing.prefilter import Prefilter
 
 log = structlog.get_logger(__name__)
-
-MIN_CALIBRATION_SAMPLES = 12
 
 
 @dataclass
@@ -88,24 +86,9 @@ class AnalyzerService:
         self.recent: dict[str, Analysis] = {}
         self.pending: list[_PendingSpike] = []
         self.fomc: list[FomcMeeting] = []
-        self._std: dict[str, tuple[float, Literal["calibrated", "prior"]]] = {}
+        self.calibration = SurpriseCalibration(self.catalog, ctx.news)
         self._tasks: set[asyncio.Task[None]] = set()
         self._llm_state: str | None = None
-
-    # ------------------------------------------------------------------ calibration
-
-    async def refresh_calibration(self) -> None:
-        """Replace prior surprise s.d. with measured ones once enough releases are recorded."""
-        for spec in self.catalog.events:
-            readings = await self._ctx.news.releases_for(spec.key, limit=200)
-            surprises = [r.surprise for r in readings if r.surprise is not None]
-            if len(surprises) >= MIN_CALIBRATION_SAMPLES:
-                std = statistics.pstdev(surprises)
-                if std > 0:
-                    self._std[spec.key] = (std, "calibrated")
-
-    def std_for(self, spec: EventSpec) -> tuple[float, Literal["calibrated", "prior"]]:
-        return self._std.get(spec.key, (spec.surprise_std, "prior"))
 
     # ------------------------------------------------------------------ news
 
@@ -175,7 +158,7 @@ class AnalyzerService:
                 calendar=events,
                 cluster_id=cluster.id,
                 source_id=cluster.lead_source_id,
-                std_provider=self.std_for,
+                std_provider=self.calibration.std_for,
             )
             if reading is not None:
                 return reading
@@ -185,6 +168,7 @@ class AnalyzerService:
         ctx = self._ctx
         await ctx.bus.publish(STREAM_RELEASES, release)
         await ctx.news.save_release(release)
+        await self.calibration.refresh()
         await ctx.ops.record_latency(
             LatencyStage(
                 ref_id=release.cluster_id or release.event_key,
@@ -404,7 +388,7 @@ class AnalyzerService:
 
     async def run(self, stop: asyncio.Event) -> None:
         self.fomc = await load_fomc_meetings(self._ctx)
-        await self.refresh_calibration()
+        await self.calibration.refresh()
         bus = self._ctx.bus
         tasks = [
             asyncio.create_task(

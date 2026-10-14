@@ -32,9 +32,16 @@ def _analyzer(ctx: AppContext) -> Service:
     return AnalyzerService(ctx)
 
 
+def _signal(ctx: AppContext) -> Service:
+    from gold_agent.services.signal import SignalService
+
+    return SignalService(ctx)
+
+
 SERVICE_FACTORIES: dict[str, Callable[[AppContext], Service]] = {
     "collector": _collector,
     "market": _market,
     "calendar": _calendar,
     "analyzer": _analyzer,
+    "signal": _signal,
 }

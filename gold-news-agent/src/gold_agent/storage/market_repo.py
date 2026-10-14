@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 
 from gold_agent.models import Candle, MarketContext, Tick
 from gold_agent.storage.db import Database
@@ -104,6 +104,16 @@ class MarketRepo:
                 )
                 for r in rows
             ]
+
+    async def candle_sources(self, tf: str, since: datetime) -> dict[str, int]:
+        """Bars stored per source for a timeframe (to pick one consistent history)."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(CandleRow.source, func.count())
+                .where(CandleRow.tf == tf, CandleRow.open_time >= since)
+                .group_by(CandleRow.source)
+            )
+            return {source: int(count) for source, count in rows}
 
     async def latest_candles(
         self, tf: str, limit: int, *, source: str | None = None
