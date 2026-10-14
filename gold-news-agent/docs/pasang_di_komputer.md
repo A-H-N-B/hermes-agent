@@ -19,6 +19,9 @@ Perkiraan waktu: ±45 menit, ditambah 2 jam menunggu pengukuran sumber di langka
 
 ## Langkah 0 — Siapkan akun dan key
 
+Panduan lengkap langkah demi langkah (BotFather, chat ID, API Claude + saldo + batas biaya,
+Telethon, FRED, MT5) ada di **`docs/siapkan_akun.md`**. Ringkasannya:
+
 | Apa | Wajib? | Cara dapat |
 |---|---|---|
 | Bot Telegram | wajib (untuk notifikasi) | Di Telegram buka **@BotFather** → `/newbot` → ikuti petunjuk → salin **token**. Pakai bot khusus untuk sistem ini |
