@@ -172,6 +172,7 @@ tidak ada informasi dari masa depan yang ikut terpakai.
 
 ```bash
 uv run pytest -q
+uv run pytest -q -m slow          # replay satu hari penuh end-to-end (±2 menit)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```

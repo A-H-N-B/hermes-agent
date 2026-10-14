@@ -16,6 +16,7 @@ LLM triage → signal engine → Telegram + dashboard, with paper-trading evalua
 ```bash
 uv sync                                              # create/refresh .venv (Python 3.12)
 uv run pytest -q                                     # tests
+uv run pytest -q -m slow                             # + whole-day replay E2E (~2 min)
 uv run ruff check . && uv run ruff format --check .  # lint/format
 uv run pyright                                       # strict type check
 uv run gold-agent verify-sources                     # one verification pass -> docs/source_report.md

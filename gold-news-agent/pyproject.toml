@@ -89,4 +89,5 @@ reportUnknownLambdaType = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m 'not slow'"
+markers = ["slow: minutes-long end-to-end runs, e.g. a whole replayed day (`pytest -m slow`)"]

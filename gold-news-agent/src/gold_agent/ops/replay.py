@@ -43,7 +43,7 @@ log = structlog.get_logger(__name__)
 
 WARMUP = timedelta(days=10)  # bars before the day so indicators are warm at its start
 STARTUP_SECONDS = 120.0  # real seconds the services get to come up (history load included)
-SETTLED_TURNS = 3  # consecutive quiet event-loop turns that mean start-up is over
+SETTLE_QUIET_SECONDS = 0.05  # real time without DB or bus activity that means start-up is over
 
 
 @dataclass
@@ -211,14 +211,17 @@ class DbActivity:
 
 async def settled(bus: PacedBus, db: DbActivity) -> None:
     """Return once the services are parked: no DB connection in use, nothing queued on the
-    bus, and no new DB or bus activity for a few event-loop turns (a task that was still
-    runnable would have touched one of them)."""
-    quiet, last = 0, (-1, -1)
-    while quiet < SETTLED_TURNS:
-        await asyncio.sleep(0.001)
+    bus, and no new DB or bus activity for a while (a task that was still starting up would
+    have touched one of them; the window also covers opening a new connection)."""
+    loop = asyncio.get_running_loop()
+    last, quiet_since = (-1, -1), loop.time()
+    while True:
+        await asyncio.sleep(0.005)
         mark = (db.checkouts, bus.activity)
-        quiet = quiet + 1 if mark == last and db.in_use == 0 and bus.idle else 0
-        last = mark
+        if mark != last or db.in_use or not bus.idle:
+            last, quiet_since = mark, loop.time()
+        elif loop.time() - quiet_since >= SETTLE_QUIET_SECONDS:
+            return
 
 
 class ReplayPriceAdapter:
