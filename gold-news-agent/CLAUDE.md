@@ -21,6 +21,8 @@ uv run pyright                                       # strict type check
 uv run gold-agent verify-sources                     # one verification pass -> docs/source_report.md
 uv run gold-agent verify-sources --watch-minutes 120 --note "VPS <region>"  # + source lag
 uv run gold-agent run all                            # every service in one process (memory bus)
+uv run gold-agent replay 2026-10-13 --from 19:00 --to 22:00  # deterministic replay of a day
+docker compose build && docker compose up -d         # production stack (docs/runbook.md)
 uv run gold-agent db upgrade                         # Alembic migrations (DATABASE_URL)
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
@@ -117,5 +119,20 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   test now diffs Alembic head against the models on SQLite and PostgreSQL. First report
   produced on the empty archive ("sampel belum cukup"): weights stay at their configured priors
   until ≥ 100 closed paper signals exist (C3.2 takes precedence over "bobot awal dikalibrasi").
-- Phase 7 in progress. Phase 8 (order execution) is NOT built: it needs explicit approval
-  after ≥ 2–4 weeks of recorded paper trading.
+- **Phase 7 (done in code; the 72 h burn-in needs the VPS).** `ops/watchdog.py` +
+  `services/watchdog.py` (alerts on state transitions: source down/silent, heartbeat stale, bus
+  backlog, clock offset from chrony or a host-written offset file that goes "unknown" after
+  10 min, low disk; nightly retention 04:15 WIB). MT5 bridge (`mt5-bridge` on Windows → Redis;
+  `market/bridge_publisher.py`). Deterministic replay (`ops/replay.py`, `ReplayClock`,
+  ADR-017): identical results across runs and speeds; periodic loops use `Clock.wait` and wait
+  one period first. Deploy (ADR-016): `Dockerfile` (non-root, editable install so config/ and
+  prompts/ resolve), `docker-compose.yml` (one container per service, healthchecks on
+  heartbeats, only the dashboard published on host loopback via `run --dashboard-host 0.0.0.0`
+  + required password), `docker-compose.mt5-bridge.yml`, `scripts/backup.sh` /
+  `restore_check.sh` / `clock_offset.sh` (tested against PostgreSQL 16), `deploy/systemd/`.
+  `docs/runbook.md` (Indonesian): VPS choice from data, install, alert table, fire drill,
+  backup/restore, burn-in checklist. Tests: fire drill (`test_fire_drill.py`), deploy invariants
+  (`test_deploy.py`), replay clock and replay E2E. Dropped unused pandas/apscheduler; vectorised
+  Bollinger; multi-row candle upserts.
+- Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
+  recorded paper trading.

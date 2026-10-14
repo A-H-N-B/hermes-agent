@@ -17,7 +17,7 @@ BUY / SELL / WAIT beserta outlook per jam (WIB). Hasilnya dikirim ke Telegram da
 | 4 | Sinyal BUY/SELL/WAIT, outlook 24 jam per jam WIB, playbook event, mode akhir pekan | selesai |
 | 5 | Telegram (notifikasi + perintah bot) dan dashboard web | selesai |
 | 6 | Paper trading otomatis, event study, backtest walk-forward, laporan harian/mingguan | selesai |
-| 7 | Deploy 24/7 (Docker Compose, watchdog, replay, backup, runbook) | dikerjakan |
+| 7 | Deploy 24/7 (Docker Compose, watchdog, replay, backup, runbook) | selesai di kode; burn-in 72 jam menunggu VPS |
 | 8 | Eksekusi order MT5 | **tidak dibangun** (butuh persetujuan + paper trading ≥ 2–4 minggu) |
 
 Semua sumber di `config/sources.yaml` masih `candidate`: belum ada yang diverifikasi dari jaringan
@@ -82,11 +82,35 @@ menjalankan sumber `verified`.
 ```bash
 uv run gold-agent db upgrade          # migrasi database (DATABASE_URL di .env; default SQLite)
 uv run gold-agent run all             # semua service dalam satu proses (bus memori)
-uv run gold-agent run collector market calendar analyzer signal paper evaluator notifier dashboard --bus redis
+uv run gold-agent run collector market calendar analyzer signal paper evaluator notifier dashboard watchdog --bus redis
+uv run gold-agent healthcheck signal                 # exit 0 bila heartbeat < 3 menit
 uv run gold-agent labels export --limit 150          # headline arsip -> data/labels/todo.jsonl
 uv run gold-agent labels import data/labels/todo.jsonl --labeler kamu
 uv run gold-agent eval-triage [--llm]                # presisi/recall triage -> docs/eval_triage.md
+uv run gold-agent replay 2026-10-13 --from 19:00 --to 22:00   # putar ulang satu hari rekaman
+uv run gold-agent mt5-bridge                         # di Windows: MT5 -> Redis core (opsional)
 ```
+
+## Deploy 24/7
+
+Produksi memakai Docker Compose di satu VPS Linux: satu container per service, PostgreSQL 16,
+Redis (AOF), migrasi sekali jalan, healthcheck heartbeat, dan `restart: unless-stopped`. Hanya
+dashboard yang dipublikasikan, dan hanya di `127.0.0.1` host. Langkah lengkap ada di
+**`docs/runbook.md`**: memilih lokasi VPS dari data, instalasi, tabel alert dan tindakannya,
+fire drill, backup/restore, MT5 bridge, replay, dan checklist burn-in 72 jam.
+
+```bash
+cp .env.example .env && chmod 600 .env    # isi key + POSTGRES/REDIS/DASHBOARD password
+docker compose build && docker compose up -d
+docker compose ps
+```
+
+Watchdog mengirim alert ke Telegram bila sumber mati, service berhenti, antrian menumpuk, jam
+melenceng > 100 ms, atau disk hampir penuh, dan mengirim kabar saat pulih. Tiap malam ia
+membersihkan tick > 30 hari dan snapshot konteks > 180 hari.
+
+**Replay** memutar arsip satu hari melewati pipeline sungguhan ke database terpisah. Hasilnya
+deterministik dan sama pada kecepatan berapa pun: jam replay berhenti selama pipeline bekerja.
 
 ## Telegram
 
@@ -174,14 +198,17 @@ src/gold_agent/
   notify/          template Telegram, kebijakan prioritas, dispatcher, perintah bot
   dashboard/       FastAPI + WebSocket, halaman statis (JS polos, CSP ketat), grafik vendored
   services/        collector, market, calendar, analyzer, signal, paper, evaluator, notifier,
-                   dashboard
+                   dashboard, watchdog
   storage/         SQLAlchemy async + migrasi Alembic
   evaluation/      label & evaluasi triage, paper trading, performa, event study, reliabilitas,
                    kalibrasi bobot, backtest walk-forward, laporan
-  ops/             verifikasi sumber, health, metrik, redaksi secret
-scripts/     verify_sources.py
+  ops/             verifikasi sumber, health, metrik, redaksi secret, watchdog, offset jam,
+                   replay
+scripts/     verify_sources.py, backup.sh, restore_check.sh, clock_offset.sh
+deploy/      unit systemd: offset jam, backup malam, mode native tanpa Docker
 tests/       test perilaku
-docs/        architecture.md (keputusan), source_report.md (hasil verifikasi)
+docs/        architecture.md (keputusan), runbook.md (operasional), source_report.md
+Dockerfile, docker-compose.yml, docker-compose.mt5-bridge.yml
 ```
 
 ## Troubleshooting

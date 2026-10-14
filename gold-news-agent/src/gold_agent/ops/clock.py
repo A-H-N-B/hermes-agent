@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import time
 from pathlib import Path
+
+OFFSET_FILE_MAX_AGE = 600.0  # seconds; the host timer writes every minute
 
 
 def parse_tracking(csv_line: str) -> float | None:
@@ -41,8 +44,11 @@ async def chrony_offset(executable: str | None = None) -> float | None:
     return parse_tracking(stdout.decode(errors="replace")) if process.returncode == 0 else None
 
 
-def file_offset(path: Path) -> float | None:
+def file_offset(path: Path, *, max_age_seconds: float = OFFSET_FILE_MAX_AGE) -> float | None:
+    """The offset the host timer wrote, unless it stopped writing: then nobody can tell."""
     try:
+        if time.time() - path.stat().st_mtime > max_age_seconds:
+            return None
         return float(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None

@@ -3,6 +3,7 @@ the nightly retention clean-up."""
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -126,6 +127,9 @@ def test_chrony_output_and_offset_file(tmp_path: Path) -> None:
     offset.write_text("0.0042\n", encoding="utf-8")
     assert file_offset(offset) == pytest.approx(0.0042)
     assert file_offset(tmp_path / "missing") is None
+    written = offset.stat().st_mtime - 20 * 60
+    os.utime(offset, (written, written))  # the host timer stopped 20 minutes ago
+    assert file_offset(offset) is None  # a stale offset is unknown, not "fine"
 
 
 async def test_service_publishes_alerts_and_prunes_old_data_nightly(

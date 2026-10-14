@@ -41,13 +41,18 @@ Collector hanya memakai sumber `enabled: true` **dan** `status: verified`
 (`SourceRegistry.production()`). Status berubah dari `candidate` ke `verified` hanya setelah
 `verify_sources.py` lulus dan ToS dibaca manusia.
 
-### ADR-004 Database: PostgreSQL sejak Fase 1 — Usulan
+### ADR-004 Database: PostgreSQL sejak Fase 1 — Diterapkan (TimescaleDB opsional, Fase 7)
 
 Prompt mengusulkan SQLite untuk MVP, tetapi arsitekturnya multi-proses (collector, analyzer,
 signal_engine, notifier, api, scheduler). SQLite hanya mengizinkan satu penulis, sehingga muncul
 lock contention atau perlu service penulis tunggal. Docker Compose sudah memuat Postgres, jadi
-pakai PostgreSQL (+TimescaleDB untuk tick/candle) sejak Fase 1. Ini juga menghindari migrasi data di
-tengah jalan. SQLite tetap dipakai untuk test dan replay.
+pakai PostgreSQL sejak Fase 1. Ini juga menghindari migrasi data di tengah jalan. SQLite tetap
+dipakai untuk test dan replay.
+
+Fase 7: PostgreSQL 16 biasa + retensi malam oleh watchdog (tick 30 hari, snapshot konteks 180
+hari, candle disimpan). Pada 1 tick/dtk, tick tumbuh ±9 MB/hari, jadi TimescaleDB belum perlu.
+Kompresinya baru bernilai bila laju tick jauh lebih tinggi. Skema tidak memakai fitur khusus
+Timescale, jadi beralih nanti tetap mudah.
 
 ### ADR-005 Output terstruktur LLM — Diterapkan di config, implementasi Fase 3
 
@@ -183,6 +188,46 @@ Dashboard menampilkan teks dari sumber luar (judul berita), jadi XSS adalah risi
   (holdout) yang dipisah menurut waktu, dan diterapkan manusia lewat config.
 - **Reliabilitas sumber** dipelajari dari event study dengan shrinkage ke nilai awal
   (20 pseudo-observasi), minimal 10 berita berarah.
+
+### ADR-016 Deploy satu VPS dengan Docker Compose — Diterapkan (Fase 7)
+
+- **Satu image, satu container per service** (`gold-agent run <service> --bus redis`). Service
+  yang crash di-restart oleh supervisor di dalam proses (backoff), lalu oleh Docker
+  (`restart: unless-stopped`). Healthcheck membaca heartbeat di database, bukan sekadar "proses
+  hidup".
+- **Hanya dashboard yang dipublikasikan, dan hanya di loopback host.** Di dalam container ia
+  harus mendengarkan di `0.0.0.0`, jadi aturan ADR-014 berlaku: `DASHBOARD_PASSWORD` wajib.
+  PostgreSQL dan Redis tidak punya port di host. Redis memakai password. Untuk MT5 bridge, Redis
+  dibuka hanya di IP Tailscale lewat file override.
+- **Config di-mount read-only.** Perubahan perilaku cukup restart, tanpa build ulang. `.env`
+  dibaca saat run, tidak pernah masuk image (`.dockerignore`). Container berjalan sebagai user
+  non-root.
+- **Jam:** container tidak punya chrony. Timer di host menulis offset ke `/run/gold`, dan
+  watchdog menganggap file yang lebih tua dari 10 menit sebagai "tidak diketahui". Tanpa cek ini,
+  timer yang mati akan menyembunyikan jam yang melenceng.
+- **Watchdog bekerja per transisi status** (bermasalah → pulih): satu alert per kejadian, bukan
+  per pemeriksaan. Fire drill otomatis (`tests/test_fire_drill.py`) membuktikan rantai sumber
+  mati → alert → Telegram → pulih.
+
+### ADR-017 Replay deterministik — Diterapkan (Fase 7)
+
+Replay versi pertama mempercepat jam dinding (mis. 1200×). Setiap milidetik proses menjadi detik
+virtual, dan beban CPU memperparahnya: berita tiba 28–34 menit virtual terlambat, flash CPI
+dibuang penjaga umur, dan hasil berubah tiap kali dijalankan. Solusinya, `ReplayClock` berhenti
+selama pipeline bekerja:
+
+- ditahan sampai semua service selesai start (tidak ada koneksi DB terpakai, bus kosong,
+  beberapa putaran event loop tanpa aktivitas);
+- ditahan saat input dipancarkan (`at()`), saat bus masih punya pesan yang belum di-ack
+  (`PacedBus`), dan saat siklus periodik berjalan (`wait()`);
+- tidak pernah melewati deadline yang menunggu; sleeper pada saat yang sama bergiliran menurut
+  urutan; dan tunggu periodik memakai grid tetap dari awal replay.
+
+Hasilnya identik antar-run dan antar-kecepatan (diuji 300× s/d 1.000.000×). `--speed` hanya
+batas atas. Trade-off: replay tidak mengukur latensi (proses tidak memakan waktu virtual), dan
+deep analysis LLM di latar belakang (`--llm`) tetap berjalan di waktu nyata. Loop periodik kini
+memakai `Clock.wait` dan menunggu satu periode sebelum siklus pertama. Di produksi artinya siklus
+pertama bergeser 5–30 detik, tanpa efek lain.
 
 ## Estimasi biaya LLM (untuk Q4)
 

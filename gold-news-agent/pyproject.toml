@@ -8,14 +8,12 @@ dependencies = [
     "aiosqlite>=0.20,<1",
     "alembic>=1.14,<2",
     "anthropic>=1.13,<2",
-    "apscheduler>=3.11,<4",
     "asyncpg>=0.30,<1",
     "fastapi>=0.115,<1",
     "feedparser>=6.0.11,<7",
     "holidays>=0.60,<1",
     "httpx>=0.28,<1",
     "numpy>=2.1,<3",
-    "pandas>=2.2,<4",
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.10,<3",
     "python-telegram-bot>=22,<23",
@@ -25,7 +23,9 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36,<3",
     "structlog>=25.4,<27",
     "telethon>=1.40,<2",
-    "tzdata>=2024.1; sys_platform == 'win32'",
+    # zoneinfo fallback where the OS has no tz database (Windows, slim/distroless images);
+    # calendar-versioned and must stay current for DST rules, so no upper bound.
+    "tzdata>=2024.1",
     "uvicorn[standard]>=0.32,<1",
     "websockets>=15,<18",
 ]
@@ -41,7 +41,6 @@ gold-agent = "gold_agent.cli:main"
 [dependency-groups]
 dev = [
     "fakeredis>=2.26,<3",
-    "pandas-stubs>=2.2,<4",
     "playwright>=1.49,<2",
     "pre-commit>=4.2,<5",
     "pyright>=1.1.400,<2",

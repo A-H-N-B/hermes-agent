@@ -45,5 +45,5 @@ def configure_logging(level: str = "INFO", fmt: str = "json", secrets: Iterable[
     logging.basicConfig(
         level=getattr(logging, level.upper()), stream=sys.stdout, format="%(message)s"
     )
-    for noisy in ("httpx", "httpcore", "telethon", "apscheduler", "telegram"):
+    for noisy in ("httpx", "httpcore", "telethon", "telegram"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

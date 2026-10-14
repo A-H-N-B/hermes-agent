@@ -28,6 +28,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("services", nargs="+", choices=[*SERVICE_FACTORIES, "all"])
     run.add_argument("--bus", choices=["memory", "redis"], help="override settings.infra.bus")
     run.add_argument("--no-migrate", action="store_true", help="skip `db upgrade` at start")
+    run.add_argument(
+        "--dashboard-host",
+        help="override dashboard.host (Docker: 0.0.0.0, published on the host's 127.0.0.1; "
+        "needs DASHBOARD_PASSWORD)",
+    )
 
     db = sub.add_parser("db", help="database maintenance")
     db.add_argument("action", choices=["upgrade"])
@@ -72,8 +77,13 @@ async def _prepare(ctx: AppContext, *, migrate: bool) -> None:
     await ctx.ops.sync_sources(ctx.sources, ctx.clock.now())
 
 
-async def _run(names: Sequence[str], bus: str | None, migrate: bool) -> int:
+async def _run(
+    names: Sequence[str], bus: str | None, migrate: bool, dashboard_host: str | None
+) -> int:
     ctx = build_context(bus_kind=bus)
+    if dashboard_host:
+        dashboard = ctx.settings.dashboard.model_copy(update={"host": dashboard_host})
+        ctx.settings = ctx.settings.model_copy(update={"dashboard": dashboard})
     await _prepare(ctx, migrate=migrate)
     selected = list(SERVICE_FACTORIES) if "all" in names else list(dict.fromkeys(names))
     if (
@@ -206,7 +216,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     match args.command:
         case "run":
-            return asyncio.run(_run(args.services, args.bus, not args.no_migrate))
+            return asyncio.run(
+                _run(args.services, args.bus, not args.no_migrate, args.dashboard_host)
+            )
         case "db":
             return asyncio.run(_db(args.action))
         case "healthcheck":

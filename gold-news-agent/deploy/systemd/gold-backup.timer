@@ -1,0 +1,11 @@
+[Unit]
+Description=Gold News Agent: nightly backup at 04:30 WIB
+
+[Timer]
+# 21:30 UTC = 04:30 WIB: inside the quiet hours, after the 04:15 WIB retention clean-up.
+OnCalendar=*-*-* 21:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
