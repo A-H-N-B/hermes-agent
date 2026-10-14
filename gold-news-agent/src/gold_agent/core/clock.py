@@ -48,9 +48,9 @@ class ReplayClock:
     pipeline is busy, so processing time never eats into the recording.
 
     It is held while any `hold()` is outstanding (the replay holds it until the services are
-    up and while its bus has unread or unacknowledged messages), while an `at()` block runs (a
-    replay input being emitted) and while a periodic loop woken by `wait()` runs its cycle,
-    until that task calls the clock again or ends. It never passes a pending deadline (a
+    up and while its bus has unread or unacknowledged messages), and from the moment a task
+    woken by `at()` or `wait()` (a replay input, a periodic loop) starts its work until that
+    task calls the clock again, `leave()`s or ends. It never passes a pending deadline (a
     sleeper wakes at exactly its virtual time however late the event loop runs it), sleepers
     due at the same instant take turns in deadline-then-registration order, each once the
     previous one's work has settled, and periodic waits run on a fixed grid from the replay
@@ -75,6 +75,7 @@ class ReplayClock:
         self._deadlines: list[tuple[float, int]] = []  # heap of (virtual seconds, seq)
         self._seq = itertools.count()
         self._turn = asyncio.Event()  # set (and replaced) whenever a sleeper leaves the heap
+        self._halt = asyncio.Event()  # stop(): every sleeper returns, time stands still for good
         self._cycles: set[asyncio.Task[Any]] = set()
 
     def _paced(self) -> float:
@@ -101,22 +102,36 @@ class ReplayClock:
             self._anchor_wall = time.monotonic()
             self._running.set()
 
+    def stop(self) -> None:
+        """End of the replay (or a failed start): time stands still from here on and every
+        sleeper returns at once, so the services can shut down whatever state they are in."""
+        if not self._halt.is_set():
+            self.hold()
+            self._halt.set()
+
+    def leave(self) -> None:
+        """The calling task is done driving time (e.g. a replay input ran out of data)."""
+        self._end_cycle()
+
     async def sleep(self, seconds: float) -> None:
         deadline = self._elapsed() + max(0.0, seconds)  # read while this task's cycle holds
         self._end_cycle()
         await self._until(deadline, None, hold=False)
 
     @contextlib.asynccontextmanager
-    async def at(self, moment: datetime) -> AsyncGenerator[None]:
+    async def at(self, moment: datetime) -> AsyncGenerator[bool]:
         """Wait until `moment` (a moment already past only waits for its turn) and keep the
-        clock exactly there while the block runs."""
+        clock exactly there, through the block and until this task's next clock call, so the
+        gap before its next `at()` takes no time either. Yields False when the clock was
+        stopped instead."""
         deadline = max(self._elapsed(), (moment - self._start).total_seconds())
         self._end_cycle()
-        await self._until(deadline, None, hold=True)
+        reached = await self._until(deadline, None, hold=True)
         try:
-            yield
+            yield reached
         finally:
-            self.release()
+            if reached:
+                self._begin_cycle()
 
     async def wait(self, event: asyncio.Event, seconds: float) -> bool:
         now = self._elapsed()
@@ -131,10 +146,10 @@ class ReplayClock:
 
     async def _until(self, deadline: float, event: asyncio.Event | None, *, hold: bool) -> bool:
         """True at the deadline (holding the clock there when `hold`), False once `event` is
-        set."""
+        set or the clock is stopped."""
         entry = (deadline, next(self._seq))
         heapq.heappush(self._deadlines, entry)
-        events = () if event is None else (event,)
+        events = (self._halt,) if event is None else (self._halt, event)
         reached = False
         try:
             await asyncio.sleep(0)
@@ -142,12 +157,10 @@ class ReplayClock:
                 remaining = deadline - self._elapsed()
                 if self._holds:
                     await _first_set(self._running, *events)
-                elif remaining > 0 and event is not None:
+                elif remaining > 0:
                     with contextlib.suppress(TimeoutError):
                         async with asyncio.timeout(remaining / self._speed):
-                            await event.wait()
-                elif remaining > 0:
-                    await asyncio.sleep(remaining / self._speed)
+                            await _first_set(*events)
                 elif self._deadlines[0] == entry:
                     reached = True
                     if hold:

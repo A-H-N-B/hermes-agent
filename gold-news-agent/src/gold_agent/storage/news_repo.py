@@ -215,6 +215,17 @@ class NewsRepo:
                 )
             )
 
+    async def releases_before(self, before: datetime, limit: int) -> list[ReleaseReading]:
+        """The newest `limit` releases first seen before `before`, newest first."""
+        async with self._db.session() as session:
+            rows = await session.scalars(
+                select(ReleaseRow)
+                .where(ReleaseRow.first_seen_at < before)
+                .order_by(desc(ReleaseRow.first_seen_at))
+                .limit(limit)
+            )
+            return [ReleaseReading.model_validate(r.payload) for r in rows]
+
     async def releases_for(self, event_key: str, limit: int = 100) -> list[ReleaseReading]:
         async with self._db.session() as session:
             rows = await session.scalars(

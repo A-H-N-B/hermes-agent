@@ -13,6 +13,12 @@ caps how fast it may go), and processing lag never trips the age guards (stale f
 story). It shows what the system decides, not how fast: latency is measured live. Background
 deep analyses (`--llm`) are the exception: they run in real time, so keep `--speed` low when
 judging their timing.
+
+The scratch database starts with what production knew at the window's start: the warm-up
+bars production loads (`market.history_bars`), the FOMC calendar and the data releases recorded
+before it. Calendar actuals not yet published at the start are blanked (the triage prompt shows
+them). Learned source reliability, typical event moves and engine state start from their
+configured priors: today's values were learned from days after the replayed one.
 """
 
 from __future__ import annotations
@@ -34,15 +40,17 @@ from gold_agent.core.app import AppContext, build_context
 from gold_agent.core.bus import MemoryBus, Message, StartAt
 from gold_agent.core.clock import ReplayClock
 from gold_agent.core.service import Service, supervise
+from gold_agent.econ_calendar.sync import FOMC_KV_KEY
 from gold_agent.market.adapters.base import TickSink
-from gold_agent.models import CalendarEvent, Candle, NewsItem, Tick
+from gold_agent.models import CalendarEvent, Candle, NewsItem, ReleaseReading, Tick
 from gold_agent.models.common import Timeframe
 from gold_agent.timeutils.sessions import WIB
 
 log = structlog.get_logger(__name__)
 
-WARMUP = timedelta(days=10)  # bars before the day so indicators are warm at its start
 STARTUP_SECONDS = 120.0  # real seconds the services get to come up (history load included)
+SHUTDOWN_SECONDS = 10.0  # real seconds the services get to stop before they are cancelled
+RELEASE_HISTORY = 5000  # earlier releases copied for the surprise calibration (200 per event)
 SETTLE_QUIET_SECONDS = 0.05  # real time without DB or bus activity that means start-up is over
 
 
@@ -56,6 +64,8 @@ class ReplayPlan:
     history: dict[Timeframe, list[Candle]] = field(
         default_factory=lambda: dict[Timeframe, list[Candle]]()
     )
+    fomc: dict[str, Any] | None = None
+    releases: list[ReleaseReading] = field(default_factory=lambda: list[ReleaseReading]())
 
     @property
     def source(self) -> str | None:
@@ -116,8 +126,9 @@ async def load_plan(
     ticks = [t for t in ticks if t.source == main]
     history: dict[Timeframe, list[Candle]] = {}
     if main is not None:
-        for tf in source.settings.market.history_bars:
-            history[tf] = await source.market.candles(tf, start - WARMUP, start, source=main)
+        for tf, count in source.settings.market.history_bars.items():
+            history[tf] = await source.market.latest_candles(tf, count, source=main, before=start)
+    events = await source.calendar.between(start - timedelta(days=1), end + timedelta(days=1))
     return ReplayPlan(
         start=start,
         end=end,
@@ -125,8 +136,12 @@ async def load_plan(
             await source.news.items_between(start, end), key=lambda item: item.first_seen_at
         ),
         ticks=ticks,
-        events=await source.calendar.between(start - timedelta(days=1), end + timedelta(days=1)),
+        events=[
+            e if e.scheduled_at < start else e.model_copy(update={"actual": None}) for e in events
+        ],
         history=history,
+        fomc=await source.ops.kv_get(FOMC_KV_KEY),
+        releases=await source.news.releases_before(start, limit=RELEASE_HISTORY),
     )
 
 
@@ -242,11 +257,12 @@ class ReplayPriceAdapter:
         ticks = self._plan.ticks
         while self._next < len(ticks):
             tick = ticks[self._next]
-            async with self._clock.at(tick.ts):
-                if stop.is_set():
+            async with self._clock.at(tick.ts) as reached:
+                if not reached or stop.is_set():
                     return
                 await emit(tick.model_copy(update={"received_at": self._clock.now()}))
             self._next += 1
+        self._clock.leave()
         await stop.wait()
 
     async def history(self, tf: Timeframe, count: int) -> list[Candle]:
@@ -276,11 +292,12 @@ class ReplayNewsFeeder:
         clock = self._clock
         while self._next < len(self._items):
             item = self._items[self._next]
-            async with clock.at(item.first_seen_at):
-                if stop.is_set():
+            async with clock.at(item.first_seen_at) as reached:
+                if not reached or stop.is_set():
                     return
                 await self._collector.ingest(item)
             self._next += 1
+        clock.leave()
         await stop.wait()
 
 
@@ -321,6 +338,10 @@ async def run_replay(
         await ctx.calendar.upsert_events(plan.events, plan.start)
         for candles in plan.history.values():  # as in production: history is already stored
             await ctx.market.upsert_candles(candles)
+        if plan.fomc is not None:
+            await ctx.ops.kv_set(FOMC_KV_KEY, plan.fomc, plan.start)
+        for reading in plan.releases:
+            await ctx.news.save_release(reading)
         feeder = ReplayNewsFeeder(ctx, clock, plan.items)
         prices = ReplayPriceAdapter(plan, clock)
         log.info(
@@ -343,18 +364,31 @@ async def _play(
     started: asyncio.Event,
 ) -> None:
     """Run the services until the replay clock reaches `end`. The clock starts once every
-    service has finished starting up, so start-up timing never shows in the results."""
+    service has finished starting up, so start-up timing never shows in the results; it stops
+    for good at `end`, after a failed start-up or on Ctrl+C, so shutdown never waits on it."""
     stop = asyncio.Event()
     runner = asyncio.create_task(supervise(services, stop))
+
+    async def finish() -> None:
+        async with clock.at(end):  # registered before release: nothing runs past `end`
+            stop.set()
+            clock.stop()
+
     try:
         async with asyncio.timeout(STARTUP_SECONDS):
             await started.wait()  # the market service loaded its history and reads the ticks
             await settled(bus, db)
+        finisher = asyncio.create_task(finish())
+        await asyncio.sleep(0)  # its first step registers `end` while start-up still holds
         clock.release()
-        await clock.sleep((end - clock.now()).total_seconds())
+        await finisher
     finally:
         stop.set()
-        await runner
+        clock.stop()
+        try:
+            await asyncio.wait_for(runner, timeout=SHUTDOWN_SECONDS)
+        except TimeoutError:
+            log.warning("replay.shutdown_timeout", seconds=SHUTDOWN_SECONDS)
 
 
 def _services(

@@ -115,12 +115,15 @@ class MarketRepo:
             return {source: int(count) for source, count in rows}
 
     async def latest_candles(
-        self, tf: str, limit: int, *, source: str | None = None
+        self, tf: str, limit: int, *, source: str | None = None, before: datetime | None = None
     ) -> list[Candle]:
+        """The newest `limit` bars (oldest first), optionally only those opened before `before`."""
         async with self._db.session() as session:
             query = select(CandleRow).where(CandleRow.tf == tf)
             if source:
                 query = query.where(CandleRow.source == source)
+            if before is not None:
+                query = query.where(CandleRow.open_time < before)
             rows = list(
                 await session.scalars(query.order_by(desc(CandleRow.open_time)).limit(limit))
             )
