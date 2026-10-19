@@ -15,6 +15,23 @@ ikut dipindah.
 
 Perkiraan waktu: ±45 menit, ditambah 2 jam menunggu pengukuran sumber di langkah 7.
 
+## Cara cepat (Windows): satu perintah
+
+Siapkan dulu token bot Telegram dan (opsional) API key Claude (`docs/siapkan_akun.md`). Buka
+**Windows PowerShell biasa** (bukan Administrator), tempel, lalu Enter:
+
+```powershell
+irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/install_windows.ps1 | iex
+```
+
+`scripts/install_windows.ps1` mengerjakan langkah 1–10 di bawah: memasang git dan uv, mengunduh
+folder project ke `C:\hermes-agent\gold-news-agent`, meminta token dan key (input tersembunyi,
+dicek ke Telegram/Anthropic sebelum disimpan), mencari Chat ID sendiri setelah kamu menekan
+START di bot, mengaktifkan sumber publik yang lolos `verify-sources` dari komputer itu (yang
+ditolak robots.txt tidak pernah diaktifkan), memasang nyala otomatis lewat folder Startup, lalu
+membuka dashboard. Aman dijalankan ulang. Sumber lain (FinancialJuice, FXStreet, Kitco, ...)
+tetap `candidate` sampai syarat penggunaannya kamu baca sendiri (langkah 7).
+
 ---
 
 ## Langkah 0 — Siapkan akun dan key
@@ -215,6 +232,12 @@ muncul jendela konsol gold-agent: **minimize saja, jangan ditutup**, karena menu
 menghentikan program. Service yang crash di-restart oleh program itu sendiri. Log ada di
 `data\logs\gold-agent.log` (langkah 5.4). Menghentikan: `Stop-ScheduledTask -TaskName
 "GoldNewsAgent"`. Menghapus: `Unregister-ScheduledTask -TaskName "GoldNewsAgent"`.
+
+Bila `Get-ScheduledTaskInfo -TaskName "GoldNewsAgent"` menunjukkan `LastTaskResult` `267011`
+(tugas tidak pernah jalan, terjadi di sebagian laptop), hapus tugas itu dan pakai folder Startup
+seperti installer cepat: file `GoldNewsAgent.cmd` di `shell:startup` yang menjalankan
+`.venv\Scripts\gold-agent.exe run all` dalam loop (menyala lagi 60 detik setelah berhenti).
+Menyalakan: dobel-klik file itu. Mematikan nyala otomatis: hapus file itu.
 
 **[macOS]** Buat `~/Library/LaunchAgents/com.gold-news-agent.plist` (ganti `NAMA` dengan nama
 user dan sesuaikan folder):
