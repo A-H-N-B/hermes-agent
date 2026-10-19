@@ -21,7 +21,7 @@ Siapkan dulu token bot Telegram dan (opsional) API key Claude (`docs/siapkan_aku
 **Windows PowerShell biasa** (bukan Administrator), tempel, lalu Enter:
 
 ```powershell
-irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/install_windows.ps1 | iex
+powershell -NoExit -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/install_windows.ps1 | iex"
 ```
 
 `scripts/install_windows.ps1` mengerjakan langkah 1–10 di bawah: memasang git dan uv, mengunduh

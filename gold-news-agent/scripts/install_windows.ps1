@@ -1,7 +1,8 @@
 # Gold News Agent - one-command installer for a fresh Windows laptop.
 #
 # Run in a normal (not Administrator) Windows PowerShell:
-#   irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/install_windows.ps1 | iex
+#   powershell -NoExit -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/install_windows.ps1 | iex"
+# (-NoExit keeps the window open after an error so it can be read.)
 #
 # Installs git + uv when missing, downloads only the gold-news-agent folder, asks for the
 # Telegram bot token and Claude API key (hidden input, checked against both services before
@@ -53,7 +54,9 @@ function Install-GoldNewsAgent {
 
     Step 2 'Pasang uv (pengelola Python)'
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+        # In a child process: the uv installer calls `exit 1` on any error (e.g. the Restricted
+        # execution policy of a fresh Windows), which would close this window mid-install.
+        powershell -NoProfile -ExecutionPolicy Bypass -Command 'irm https://astral.sh/uv/install.ps1 | iex'
         $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
     }
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Fail 'uv belum terbaca. Tutup PowerShell, buka lagi, jalankan ulang.'; return }
