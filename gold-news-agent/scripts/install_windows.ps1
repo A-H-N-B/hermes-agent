@@ -194,7 +194,8 @@ function Install-GoldNewsAgent {
         $link.WorkingDirectory = $Root
         $link.Save()
     }
-    Ok 'Shortcut di Desktop: "Jalankan Gold News Agent" dan "Matikan Gold News Agent"'
+    [IO.File]::WriteAllText((Join-Path $desktop 'Dashboard XAUUSD.url'), "[InternetShortcut]`r`nURL=http://127.0.0.1:8787/`r`n", [Text.Encoding]::ASCII)
+    Ok 'Shortcut di Desktop: "Jalankan Gold News Agent", "Matikan Gold News Agent", "Dashboard XAUUSD"'
 
     Step 9 'Menyalakan program dan membuka dashboard'
     # The call operator, not Start-Process -Wait: that would also wait for the agent it starts.

@@ -34,7 +34,7 @@ tetap `candidate` sampai syarat penggunaannya kamu baca sendiri (langkah 7).
 
 Installer juga membuat dua shortcut di Desktop: **Jalankan Gold News Agent** (menyalakan program
 bila belum jalan, lalu membuka dashboard; tidak pernah menyalakan dua salinan) dan **Matikan Gold
-News Agent**. Keduanya memanggil `scripts\windows\jalankan.cmd` / `matikan.cmd`.
+News Agent**, plus **Dashboard XAUUSD** (langsung membuka `http://127.0.0.1:8787/`). Dua yang pertama memanggil `scripts\windows\jalankan.cmd` / `matikan.cmd`.
 
 ---
 
