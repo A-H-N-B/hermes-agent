@@ -138,6 +138,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   Windows first): SQLite by default (empty `DATABASE_URL`), clock offset via one SNTP query to
   `watchdog.ntp_server` at most every 15 min when there is no chrony, optional rotating
   `logging.file`, `gold-agent db backup` (SQLite online backup), dashboard port bound
-  exclusively on Windows.
+  exclusively on Windows. `scripts/install_windows.ps1` (`irm | iex`) does the whole Windows
+  install in one command. Dashboard page **TradingView** (official embed widget,
+  `dashboard.tradingview_symbol`, default `OANDA:XAUUSD`; CSP admits only its script + frame
+  hosts, `null` turns it off; ADR-014).
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

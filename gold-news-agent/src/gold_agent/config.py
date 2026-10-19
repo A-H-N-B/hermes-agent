@@ -451,6 +451,12 @@ class DashboardSettings(StrictModel):
     chart_timeframe: Timeframe
     chart_bars: int = Field(gt=10, le=5000)
     tick_push_per_second: float = Field(gt=0, le=20)
+    # TradingView chart page (official embed widget); None hides the page and keeps the CSP
+    # first-party only. A default rather than a settings.yaml line, so installs whose
+    # settings.yaml was edited in place still fast-forward on `git pull`.
+    tradingview_symbol: str | None = Field(
+        default="OANDA:XAUUSD", pattern=r"^[A-Z0-9_]+:[A-Z0-9_.!]+$"
+    )
 
 
 class InfraSettings(StrictModel):

@@ -425,7 +425,36 @@ const loaders = {
   kalender: async () => renderCalendar(await api("/api/calendar")),
   performa: async () => renderPerformance(await api("/api/performance")),
   kesehatan: async () => renderHealth(await api("/api/health")),
+  tradingview: async () => renderTradingView(await api("/api/state")),
 };
+
+// Official TradingView embed widget, loaded only when this page is first opened so the
+// third-party script never runs for anyone who does not use it.
+let tradingViewLoaded = false;
+function renderTradingView(state) {
+  const symbol = state.tradingview_symbol;
+  if (!symbol) return;
+  $("#tv-symbol").textContent = symbol;
+  $("#tv-open").href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`;
+  if (tradingViewLoaded) return;
+  tradingViewLoaded = true;
+  const script = document.createElement("script");
+  script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+  script.async = true;
+  script.textContent = JSON.stringify({
+    autosize: true,
+    symbol,
+    interval: "15",
+    timezone: "Asia/Jakarta",
+    theme: "dark",
+    style: "1",
+    locale: "id",
+    allow_symbol_change: true,
+    calendar: false,
+    support_host: "https://www.tradingview.com",
+  });
+  $("#tv-widget").appendChild(script);
+}
 
 let currentPage = "live";
 
@@ -474,6 +503,9 @@ function connect(delay = 1000) {
 window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 window.addEventListener("DOMContentLoaded", () => {
   show(location.hash.slice(1) || "live");
+  api("/api/state").then((state) => {
+    $("nav a[data-page=tradingview]").hidden = !state.tradingview_symbol;
+  }).catch(() => {});
   connect();
   setInterval(tickCountdown, 1000);
 });

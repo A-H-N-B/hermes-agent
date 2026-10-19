@@ -1,4 +1,4 @@
-"""FastAPI dashboard (section 16): five pages in one static app, JSON APIs, a live WebSocket.
+"""FastAPI dashboard (section 16): six pages in one static app, JSON APIs, a live WebSocket.
 
 Security (C2.4): bind to localhost unless a password is set; HMAC session cookie (HttpOnly,
 SameSite=Strict, Secure behind HTTPS); failed-login rate limit; strict CSP (the front end has no
@@ -30,11 +30,17 @@ PAGES_DIR = Path(__file__).parent / "pages"  # HTML shells, served by the routes
 MAX_LOGIN_BODY = 4096
 
 
-def _csp(host: str) -> str:
+# The TradingView embed script, and the iframe it creates (both hosts it has used).
+TRADINGVIEW_SCRIPT = "https://s3.tradingview.com"
+TRADINGVIEW_FRAMES = "https://www.tradingview-widget.com https://s.tradingview.com"
+
+
+def _csp(host: str, *, tradingview: bool) -> str:
     return "; ".join(
         [
             "default-src 'self'",
-            "script-src 'self'",
+            f"script-src 'self' {TRADINGVIEW_SCRIPT}" if tradingview else "script-src 'self'",
+            f"frame-src {TRADINGVIEW_FRAMES}" if tradingview else "frame-src 'none'",
             "style-src 'self'",
             "img-src 'self' data:",
             f"connect-src 'self' ws://{host} wss://{host}",
@@ -61,6 +67,7 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
         settings.login_attempts_per_window, timedelta(minutes=settings.login_window_minutes)
     )
     data = DashboardData(ctx)
+    tradingview = settings.tradingview_symbol is not None
     app = FastAPI(title="Gold News Agent", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -68,7 +75,9 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = _csp(request.headers.get("host", "localhost"))
+        response.headers["Content-Security-Policy"] = _csp(
+            request.headers.get("host", "localhost"), tradingview=tradingview
+        )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"

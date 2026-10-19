@@ -164,6 +164,13 @@ Dashboard menampilkan teks dari sumber luar (judul berita), jadi XSS adalah risi
   atribusi di dalam grafik dimatikan karena menyisipkan `<style>` inline; atribusi TradingView ada
   di footer.
 - Library grafik (lightweight-charts) di-vendor dengan checksum, tidak memakai CDN pihak ketiga.
+- Satu pengecualian yang disengaja: halaman **TradingView** memakai widget embed resmi
+  TradingView (grafik XAUUSD spot, `dashboard.tradingview_symbol`, default `OANDA:XAUUSD`).
+  CSP hanya menambah `script-src https://s3.tradingview.com` dan `frame-src` untuk host iframe
+  widget itu, tanpa `unsafe-*`. Skripnya dimuat baru saat halaman itu dibuka, dan grafiknya
+  berjalan di iframe origin lain sehingga tidak bisa membaca data dashboard. Widget tidak memakai
+  login TradingView; indikator dan layout akun berbayar dibuka lewat tombol ke tradingview.com.
+  `tradingview_symbol: null` menghapus halaman itu dan mengembalikan CSP ke first-party saja.
 - Bind default `127.0.0.1`. Bind ke alamat lain ditolak tanpa `DASHBOARD_PASSWORD`. Session
   memakai cookie HMAC (HttpOnly, SameSite=Strict, Secure di balik HTTPS). Ganti password berarti
   semua sesi lama mati. Login gagal dibatasi per alamat. WebSocket menolak origin lain.

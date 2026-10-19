@@ -93,6 +93,7 @@ class DashboardData:
             "context": context_view(await ctx.market.latest_context()),
             "halted": bool(halt and halt.get("halted")),
             "next_event": event_view(upcoming, now) if upcoming else None,
+            "tradingview_symbol": ctx.settings.dashboard.tradingview_symbol,
         }
 
     async def candles(self, tf: str, limit: int) -> list[JSON]:

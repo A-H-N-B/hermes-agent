@@ -22,6 +22,7 @@
     <a href="#kalender" data-page="kalender">Kalender</a>
     <a href="#performa" data-page="performa">Performa</a>
     <a href="#kesehatan" data-page="kesehatan">Kesehatan</a>
+    <a href="#tradingview" data-page="tradingview" hidden>TradingView</a>
   </nav>
   <main>
     <section id="page-live" class="page">
@@ -74,6 +75,18 @@
       <div id="perf-groups" class="grid"></div>
     </section>
 
+    <section id="page-tradingview" class="page" hidden>
+      <article class="card">
+        <h2>TradingView <span id="tv-symbol" class="muted"></span></h2>
+        <p class="muted">Grafik dari TradingView (harga spot, bukan proxy PAXG). Indikator dan
+          layout akun Anda ada di tombol di bawah.</p>
+        <p><a id="tv-open" class="button" rel="noopener noreferrer" target="_blank">Buka di akun
+          TradingView saya</a></p>
+        <div id="tv-widget" class="tradingview-widget-container tv-frame">
+          <div class="tradingview-widget-container__widget"></div>
+        </div>
+      </article>
+    </section>
     <section id="page-kesehatan" class="page" hidden>
       <div id="health-tiles" class="tiles"></div>
       <article class="card">

@@ -1,5 +1,6 @@
-"""Dashboard in a real browser (Playwright + Chromium): login, the five pages, live push over
-WebSocket, hostile news text rendered inert, strict CSP without violations, phone width."""
+"""Dashboard in a real browser (Playwright + Chromium): login, the six pages (TradingView via a
+stubbed embed), live push over WebSocket, hostile news text rendered inert, strict CSP without
+violations, phone width."""
 
 from __future__ import annotations
 
@@ -57,6 +58,26 @@ async def launch(p: Any) -> Any:
         return await p.chromium.launch(executable_path=str(FALLBACK_CHROMIUM))
 
 
+# Stand-in for TradingView's embed script (the real one is a network fetch): it reads its config
+# the way the real one does and opens the widget iframe, so a CSP that blocked either shows up.
+TRADINGVIEW_STUB = """(() => {
+  const script = document.currentScript;
+  const config = JSON.parse(script.textContent);
+  const frame = document.createElement("iframe");
+  frame.src = "https://www.tradingview-widget.com/embed-widget/advanced-chart/";
+  frame.dataset.symbol = config.symbol;
+  script.parentElement.querySelector(".tradingview-widget-container__widget").appendChild(frame);
+})();"""
+
+
+async def _fake_tradingview_script(route: Any) -> None:
+    await route.fulfill(status=200, content_type="text/javascript", body=TRADINGVIEW_STUB)
+
+
+async def _fake_tradingview_frame(route: Any) -> None:
+    await route.fulfill(status=200, content_type="text/html", body="<p>chart</p>")
+
+
 async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService) -> None:
     base = f"http://127.0.0.1:{dashboard.port}"
     problems: list[str] = []
@@ -65,6 +86,8 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         page = await browser.new_page(viewport={"width": 390, "height": 844})
         page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: problems.append(str(e)))
+        await page.route("https://s3.tradingview.com/**", _fake_tradingview_script)
+        await page.route("https://www.tradingview-widget.com/**", _fake_tradingview_frame)
 
         await page.goto(base + "/")
         assert page.url.endswith("/login")
@@ -121,6 +144,13 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         await page.wait_for_selector("#sources-table tbody tr")
         sources = await page.text_content("#sources-table") or ""
         assert "bls_latest" in sources and "down" in sources and "HTTP 403" in sources
+
+        await page.click("nav a[data-page=tradingview]")
+        frame = await page.wait_for_selector("#tv-widget iframe")
+        assert await frame.get_attribute("data-symbol") == "OANDA:XAUUSD"
+        assert await page.get_attribute("#tv-open", "href") == (
+            "https://www.tradingview.com/chart/?symbol=OANDA%3AXAUUSD"
+        )
 
         await browser.close()
     assert problems == [], problems  # includes any Content-Security-Policy violation
