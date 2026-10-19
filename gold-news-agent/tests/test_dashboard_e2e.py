@@ -83,7 +83,10 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
     problems: list[str] = []
     async with playwright_api.async_playwright() as p:
         browser = await launch(p)
-        page = await browser.new_page(viewport={"width": 390, "height": 844})
+        page = await browser.new_page(
+            viewport={"width": 390, "height": 844},
+            permissions=["clipboard-read", "clipboard-write"],
+        )
         page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: problems.append(str(e)))
         await page.route("https://s3.tradingview.com/**", _fake_tradingview_script)
@@ -100,6 +103,8 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         await page.wait_for_selector("#signal-card .action.BUY")
         card = await page.text_content("#signal-card") or ""
         assert "2649.60–2650.40" in card and "2643.60" in card and "Batal jika" in card
+        code = await page.text_content("#signal-card .tv-code code") or ""
+        assert code.startswith("GNA1|BUY|") and "|2643.60|" in code
         await page.wait_for_selector("#chart canvas")
         news = await page.text_content("#news") or ""
         assert HOSTILE in news  # shown literally ...
@@ -151,6 +156,10 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         assert await page.get_attribute("#tv-open", "href") == (
             "https://www.tradingview.com/chart/?symbol=OANDA%3AXAUUSD"
         )
+        await page.click("#tv-copy-script")
+        await page.wait_for_selector("#tv-copy-status:has-text('Tersalin')")
+        copied = await page.evaluate("navigator.clipboard.readText()")
+        assert copied.startswith("// Gold News Agent") and "//@version=6" in copied
 
         await browser.close()
     assert problems == [], problems  # includes any Content-Security-Policy violation

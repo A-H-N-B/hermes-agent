@@ -12,6 +12,7 @@ from gold_agent.evaluation.performance import summarize
 from gold_agent.models import Analysis, CalendarEvent, MarketContext
 from gold_agent.ops.metrics import summarize as latency_summary
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT, EngineState
+from gold_agent.signals.tvcode import tradingview_code
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
 
 JSON = dict[str, Any]
@@ -94,6 +95,7 @@ class DashboardData:
             "halted": bool(halt and halt.get("halted")),
             "next_event": event_view(upcoming, now) if upcoming else None,
             "tradingview_symbol": ctx.settings.dashboard.tradingview_symbol,
+            "tradingview_code": tradingview_code(active) if active else None,
         }
 
     async def candles(self, tf: str, limit: int) -> list[JSON]:

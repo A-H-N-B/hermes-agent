@@ -114,6 +114,13 @@ function renderSignalCard(payload) {
     const cancel = el("ul", { class: "notes warn" });
     for (const item of active.invalidation) cancel.append(el("li", { text: item }));
     card.append(el("h2", { text: "Batal jika" }), cancel);
+    if (payload.tradingview_code) {
+      const status = el("span", { class: "muted", role: "status" });
+      const copy = el("button", { type: "button", class: "button", text: "Salin" });
+      copy.addEventListener("click", () => copyText(payload.tradingview_code, status));
+      card.append(el("h2", { text: "Kode TradingView" }),
+        el("p", { class: "tv-code" }, el("code", { text: payload.tradingview_code }), copy, status));
+    }
   } else if (state) {
     const waits = el("ul", { class: "notes warn" });
     for (const reason of state.wait_reasons) waits.append(el("li", { text: reason }));
@@ -428,6 +435,25 @@ const loaders = {
   tradingview: async () => renderTradingView(await api("/api/state")),
 };
 
+async function copyText(text, status) {
+  try {
+    await navigator.clipboard.writeText(text);
+    status.textContent = "Tersalin.";
+  } catch {
+    status.textContent = "Gagal menyalin otomatis: blok teksnya lalu tekan Ctrl+C.";
+  }
+}
+
+async function copyIndicatorScript() {
+  const status = $("#tv-copy-status");
+  const response = await fetch("/static/gold_news_agent.pine", { credentials: "same-origin" });
+  if (!response.ok) {
+    status.textContent = "Script tidak bisa diambil.";
+    return;
+  }
+  await copyText(await response.text(), status);
+}
+
 // Official TradingView embed widget, loaded only when this page is first opened so the
 // third-party script never runs for anyone who does not use it.
 let tradingViewLoaded = false;
@@ -503,6 +529,7 @@ function connect(delay = 1000) {
 window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 window.addEventListener("DOMContentLoaded", () => {
   show(location.hash.slice(1) || "live");
+  $("#tv-copy-script").addEventListener("click", copyIndicatorScript);
   api("/api/state").then((state) => {
     $("nav a[data-page=tradingview]").hidden = !state.tradingview_symbol;
   }).catch(() => {});

@@ -80,8 +80,24 @@
         <h2>TradingView <span id="tv-symbol" class="muted"></span></h2>
         <p class="muted">Grafik dari TradingView (harga spot, bukan proxy PAXG). Indikator dan
           layout akun Anda ada di tombol di bawah.</p>
-        <p><a id="tv-open" class="button" rel="noopener noreferrer" target="_blank">Buka di akun
-          TradingView saya</a></p>
+        <p class="actions">
+          <a id="tv-open" class="button" rel="noopener noreferrer" target="_blank">Buka di akun
+            TradingView saya</a>
+          <button id="tv-copy-script" type="button" class="button">Salin script indikator</button>
+          <a href="/static/gold_news_agent.pine" target="_blank" rel="noopener">lihat script</a>
+          <span id="tv-copy-status" class="muted" role="status"></span>
+        </p>
+        <details>
+          <summary>Cara memasang indikator "Gold News Agent" di TradingView</summary>
+          <ol class="notes">
+            <li>Klik <b>Salin script indikator</b> di atas.</li>
+            <li>Di TradingView buka <b>Pine Editor</b> (tab di bawah grafik), pilih
+              <b>Open &rarr; New indicator</b>, hapus isinya, tempel (Ctrl+V).</li>
+            <li>Klik <b>Save</b> (beri nama Gold News Agent), lalu <b>Add to chart</b>.</li>
+            <li>Saat ada sinyal, salin <b>Kode TradingView</b> dari Telegram atau menu Live,
+              lalu di grafik: ikon roda gigi indikator &rarr; <b>Kode sinyal</b> &rarr; tempel &rarr; OK.</li>
+          </ol>
+        </details>
         <div id="tv-widget" class="tradingview-widget-container tv-frame">
           <div class="tradingview-widget-container__widget"></div>
         </div>

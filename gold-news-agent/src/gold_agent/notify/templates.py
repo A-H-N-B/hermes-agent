@@ -31,6 +31,7 @@ from gold_agent.notify.format import (
     signed,
     wib_clock,
 )
+from gold_agent.signals.tvcode import tradingview_code
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
 
 BUCKET_ID = {
@@ -101,6 +102,9 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
             f"ℹ️ Harga dari proxy ({esc(signal.price_source)}), bukan XAUUSD broker: "
             "sesuaikan level dengan harga brokermu"
         )
+    lines.append(
+        f"📋 Kode TradingView (ketuk untuk salin): <code>{tradingview_code(signal)}</code>"
+    )
     lines.append(DISCLAIMER)
     return "\n".join(lines)
 
