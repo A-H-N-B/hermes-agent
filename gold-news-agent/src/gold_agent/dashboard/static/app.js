@@ -181,12 +181,14 @@ function prependNews(item) {
 
 // ------------------------------------------------------------------ chart
 
-const chartState = { chart: null, series: null, markers: null, last: null };
+// One builder for both candle charts: Live, and the "Gold News Agent" indicator chart on the
+// TradingView page, which adds the indicator's session bands and 08:30 New York data marks.
+const charts = {};
 
-function initChart() {
+function makeChart(name, container, indicator) {
   const lib = window.LightweightCharts;
-  if (!lib || chartState.chart) return;
-  const chart = lib.createChart($("#chart"), {
+  if (!lib || charts[name]) return charts[name];
+  const chart = lib.createChart(container, {
     autoSize: true,
     // The logo injects an inline <style> the CSP forbids; the footer carries the attribution
     // notice and the tradingview.com link the library's license asks for instead.
@@ -195,22 +197,50 @@ function initChart() {
     timeScale: { timeVisible: true, secondsVisible: false },
     rightPriceScale: { borderColor: "#262e3f" },
   });
-  chartState.chart = chart;
-  chartState.series = chart.addSeries(lib.CandlestickSeries, {
+  // Full-height bars on a hidden scale, drawn first so the candles stay on top.
+  const sessions = indicator ? chart.addSeries(lib.HistogramSeries, {
+    priceScaleId: "sessions", priceLineVisible: false, lastValueVisible: false,
+  }) : null;
+  if (sessions) chart.priceScale("sessions").applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } });
+  const series = chart.addSeries(lib.CandlestickSeries, {
     upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
     wickUpColor: "#26a69a", wickDownColor: "#ef5350",
   });
-  chartState.markers = lib.createSeriesMarkers(chartState.series, []);
+  charts[name] = { chart, series, sessions, markers: lib.createSeriesMarkers(series, []), last: null, lines: [] };
+  return charts[name];
 }
 
-async function loadChart() {
-  initChart();
-  if (!chartState.series) return;
+function localMinutes(zone) {
+  const format = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  return (unix) => {
+    const parts = Object.fromEntries(format.formatToParts(new Date(unix * 1000)).map((p) => [p.type, p.value]));
+    return Number(parts.hour) * 60 + Number(parts.minute);
+  };
+}
+const londonMinutes = localMinutes("Europe/London");
+const newYorkMinutes = localMinutes("America/New_York");
+
+// Same windows as the agent (config/settings.yaml sessions) and the Pine indicator:
+// London 08:00-16:00 London, New York 08:00-17:00 New York, daily break 17:00-18:00 New York.
+function sessionColor(unix) {
+  const london = londonMinutes(unix);
+  const ny = newYorkMinutes(unix);
+  const inLondon = london >= 480 && london < 960;
+  const inNy = ny >= 480 && ny < 1020;
+  if (ny >= 1020 && ny < 1080) return "rgba(138, 147, 166, 0.22)";
+  if (inLondon && inNy) return "rgba(245, 176, 65, 0.14)";
+  if (inLondon) return "rgba(93, 173, 226, 0.10)";
+  if (inNy) return "rgba(155, 89, 182, 0.12)";
+  return "rgba(0, 0, 0, 0)";
+}
+
+async function loadChart(state) {
+  if (!state) return;
   const [bars, marks] = await Promise.all([
     api(`/api/candles?tf=${CHART_TF}`), api("/api/markers?hours=24")]);
   const shifted = bars.map((b) => ({ ...b, time: b.time + WIB_OFFSET }));
-  chartState.series.setData(shifted);
-  chartState.last = shifted.length ? { ...shifted[shifted.length - 1] } : null;
+  state.series.setData(shifted);
+  state.last = shifted.length ? { ...shifted[shifted.length - 1] } : null;
   const step = TF_SECONDS[CHART_TF];
   const snap = (t) => Math.floor((t + WIB_OFFSET) / step) * step;
   const markers = [
@@ -228,21 +258,112 @@ async function loadChart() {
       color: s.action === "BUY" ? "#26a69a" : "#ef5350",
       text: s.action,
     })),
-  ].sort((a, b) => a.time - b.time);
-  chartState.markers.setMarkers(markers);
+  ];
+  if (state.sessions) {
+    state.sessions.setData(bars.map((b) => ({ time: b.time + WIB_OFFSET, value: 1, color: sessionColor(b.time) })));
+    for (const b of bars) {
+      const ny = newYorkMinutes(b.time);
+      if (ny <= 510 && ny + step / 60 > 510) {
+        markers.push({ time: b.time + WIB_OFFSET, position: "aboveBar", shape: "square", color: "#f5b041", text: "Data AS" });
+      }
+    }
+  }
+  state.markers.setMarkers(markers.sort((a, b) => a.time - b.time));
+}
+
+// The active signal as price lines: entry zone, stop loss, TP1-TP3. Levels come from the same
+// price feed as these candles, so they need no shifting (unlike the Pine indicator).
+function drawSignal(state, active) {
+  if (!state) return;
+  for (const line of state.lines) state.series.removePriceLine(line);
+  state.lines = [];
+  if (!active) return;
+  const side = active.action === "BUY" ? "#26a69a" : "#ef5350";
+  const levels = [
+    [active.entry_high, `${active.action} ${num(active.entry_low)}–${num(active.entry_high)}`, side, 2],
+    [active.entry_low, `${active.action} zona bawah`, side, 2],
+    [active.stop_loss, `SL ${num(active.stop_loss)}`, "#ef5350", 0],
+    [active.tp1, `TP1 ${num(active.tp1)}`, "#2ecc71", 1],
+    [active.tp2, `TP2 ${num(active.tp2)}`, "#2ecc71", 1],
+    [active.tp3, `TP3 ${num(active.tp3)}`, "#2ecc71", 3],
+  ];
+  for (const [price, title, color, lineStyle] of levels) {
+    state.lines.push(state.series.createPriceLine({ price, title, color, lineStyle, lineWidth: 2, axisLabelVisible: true }));
+  }
+}
+
+// "Rencana trading": the active signal spelled out as the exact numbers to act on, or, while the
+// engine waits, why there is no number yet and what the next hours' scenarios say.
+const ENTRY_HOW = {
+  market: (a) => `${a} sekarang di harga pasar, selama harga masih di dalam zona`,
+  limit: (a) => `pasang ${a} Limit di dalam zona (tunggu harga kembali ke zona)`,
+  stop: (a) => `pasang ${a} Stop di dalam zona (masuk saat harga menembus zona)`,
+};
+
+function planRow(label, value, note) {
+  return el("tr", {}, el("th", { text: label }), el("td", { class: "num", text: value }),
+    el("td", { class: "muted", text: note || "" }));
+}
+
+function renderPlan(state, outlook) {
+  const box = clear($("#gna-plan"));
+  const active = state.active;
+  if (active) {
+    const risk = Math.abs(active.entry_high - active.stop_loss);
+    box.append(el("p", { class: `plan-head ${active.action}`,
+      text: `${active.action} XAUUSD · confidence ${active.confidence}/100 · berlaku s/d ${active.valid_until_wib}` }));
+    const table = el("table", { class: "plan" },
+      planRow("Masuk (entry)", `${num(active.entry_low)} – ${num(active.entry_high)}`, ENTRY_HOW[active.entry_type](active.action)),
+      planRow("Stop loss", num(active.stop_loss), `cut loss di sini (±${num(risk)} $ dari entry = 1R)`),
+      planRow("TP1", num(active.tp1), "ambil 50%, lalu geser SL ke harga entry"),
+      planRow("TP2", num(active.tp2), "tutup sisa posisi"),
+      planRow("TP3", num(active.tp3), active.tp3_source ? `target lanjutan (${active.tp3_source})` : "target lanjutan"),
+      planRow("Lot", active.lot_size !== null ? String(active.lot_size) : "–", active.lot_note || `risiko ${active.risk_pct}% per posisi`));
+    box.append(el("div", { class: "table-wrap" }, table));
+    if (active.trigger_summary) {
+      box.append(el("p", {}, el("b", { text: "Dasar berita: " }), `${active.trigger_summary} (${active.trigger_source || "-"})`));
+    }
+    const reasons = el("ul", { class: "notes" });
+    for (const reason of active.top_reasons) reasons.append(el("li", { text: reason }));
+    const cancel = el("ul", { class: "notes warn" });
+    for (const item of active.invalidation) cancel.append(el("li", { text: item }));
+    box.append(el("h2", { text: "Alasan" }), reasons, el("h2", { text: "Batalkan rencana jika" }), cancel);
+    if (active.proxy_price) {
+      box.append(el("p", { class: "muted",
+        text: `Angka dari harga ${active.price_source} (proxy). Di broker, tambahkan selisih harga broker − ${num((active.bid + active.ask) / 2)} saat sinyal dibuat ke semua angka, atau pakai indikator TradingView yang menggeser otomatis.` }));
+    }
+  } else {
+    const current = state.state;
+    box.append(el("p", { class: "plan-head WAIT", text: "TUNGGU · belum ada angka BUY/SELL yang layak" }));
+    const waits = el("ul", { class: "notes warn" });
+    for (const reason of current ? current.wait_reasons : []) waits.append(el("li", { text: reason }));
+    if (waits.childElementCount) box.append(el("h2", { text: "Kenapa menunggu" }), waits);
+    const rows = outlook ? outlook.rows.slice(0, 3) : [];
+    if (rows.length) {
+      const table = el("table", { class: "plan" });
+      for (const row of rows) table.append(planRow(row.label_wib, row.bias, row.scenario));
+      box.append(el("h2", { text: "Skenario 3 jam ke depan (Outlook)" }), el("div", { class: "table-wrap" }, table));
+    }
+    box.append(el("p", { class: "muted", text: "Angka masuk, SL dan TP muncul di sini dan di grafik begitu alat berita mengeluarkan sinyal BUY/SELL." }));
+  }
+  box.append(el("p", { class: "muted", text: "Bukan saran keuangan. Keputusan & risiko di tanganmu." }));
 }
 
 function onTick(tick) {
-  if (!chartState.series) return;
   const step = TF_SECONDS[CHART_TF];
   const time = Math.floor((tick.time + WIB_OFFSET) / step) * step;
-  const last = chartState.last;
-  const bar = last && last.time === time
-    ? { ...last, high: Math.max(last.high, tick.mid), low: Math.min(last.low, tick.mid), close: tick.mid }
-    : { time, open: tick.mid, high: tick.mid, low: tick.mid, close: tick.mid };
-  if (last && time < last.time) return; // late tick
-  chartState.series.update(bar);
-  chartState.last = bar;
+  for (const state of Object.values(charts)) {
+    const last = state.last;
+    if (last && time < last.time) continue; // late tick
+    const bar = last && last.time === time
+      ? { ...last, high: Math.max(last.high, tick.mid), low: Math.min(last.low, tick.mid), close: tick.mid }
+      : { time, open: tick.mid, high: tick.mid, low: tick.mid, close: tick.mid };
+    state.series.update(bar);
+    if (state.sessions && (!last || last.time !== time)) {
+      state.sessions.update({ time, value: 1, color: sessionColor(time - WIB_OFFSET) });
+    }
+    state.last = bar;
+  }
 }
 
 // ------------------------------------------------------------------ outlook
@@ -423,7 +544,9 @@ const loaders = {
     renderSignalCard(state);
     renderPrice(state.context);
     renderNews(news);
-    await loadChart();
+    const chart = makeChart("live", $("#chart"), false);
+    await loadChart(chart);
+    drawSignal(chart, state.active);
   },
   outlook: async () => {
     const [outlook, state] = await Promise.all([api("/api/outlook"), api("/api/state")]);
@@ -432,7 +555,14 @@ const loaders = {
   kalender: async () => renderCalendar(await api("/api/calendar")),
   performa: async () => renderPerformance(await api("/api/performance")),
   kesehatan: async () => renderHealth(await api("/api/health")),
-  tradingview: async () => renderTradingView(await api("/api/state")),
+  tradingview: async () => {
+    const [state, outlook] = await Promise.all([api("/api/state"), api("/api/outlook")]);
+    renderTradingView(state);
+    renderPlan(state, outlook);
+    const chart = makeChart("gna", $("#gna-chart"), true);
+    await loadChart(chart);
+    drawSignal(chart, state.active);
+  },
 };
 
 async function copyText(text, status) {
@@ -504,6 +634,7 @@ function refreshSoon() { // coalesce bursts of state/signal events into one fetc
       const state = await api("/api/state");
       renderSignalCard(state);
       renderPrice(state.context);
+      drawSignal(charts.live, state.active);
     }
   }, 500);
 }

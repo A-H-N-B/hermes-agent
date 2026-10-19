@@ -4,6 +4,23 @@ Sinyal dari alat berita bisa digambar di grafik TradingView milikmu: kotak zona 
 TP1, TP2, TP3, sampai jam berlakunya habis, plus warna sesi London/New York, jeda harian
 17:00–18:00 New York, dan garis rilis data AS 08:30 New York (sama dengan aturan alat ini).
 
+## Langsung di dashboard (tanpa salin-tempel)
+
+Menu **TradingView** di dashboard (`http://127.0.0.1:8787/#tradingview`) menampilkan:
+
+1. **Rencana trading**: angka persis untuk sinyal aktif. Arah (BUY/SELL), zona masuk, cara
+   masuk (harga pasar / Limit / Stop), stop loss (= 1R), TP1 (ambil 50% lalu SL ke entry),
+   TP2, TP3, lot, berita yang menjadi dasar, dan kapan rencana batal. Saat tidak ada sinyal
+   tertulis **TUNGGU** beserta alasannya dan skenario 3 jam ke depan dari Outlook.
+2. **Grafik indikator Gold News Agent**: grafik yang sama dengan menu Live (TradingView
+   Lightweight Charts) dengan indikator digambar langsung: garis BUY/SELL, SL, TP1–TP3 berikut
+   angkanya, warna sesi, tanda *Data AS* 08:30 New York, serta penanda berita dan sinyal.
+3. Di bawahnya grafik XAUUSD dari TradingView (widget resmi) dan tombol ke akun TradingView-mu.
+
+Widget TradingView yang ditanam di website tidak bisa memuat indikator buatan sendiri (aturan
+TradingView: hanya indikator bawaan). Karena itu indikator kita digambar di grafik nomor 2, dan
+untuk aplikasi TradingView-mu sendiri dipakai script Pine di bawah.
+
 ## Batasnya (jujur)
 
 Pine Script (bahasa indikator TradingView) **tidak bisa mengambil data dari luar TradingView**.

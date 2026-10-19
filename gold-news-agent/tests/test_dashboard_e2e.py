@@ -70,6 +70,15 @@ TRADINGVIEW_STUB = """(() => {
 })();"""
 
 
+async def _until(page: Any, expression: str) -> None:
+    """Poll a page expression (wait_for_function evals strings, which the strict CSP refuses)."""
+    for _ in range(100):
+        if await page.evaluate(expression):
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"never true: {expression}")
+
+
 async def _fake_tradingview_script(route: Any) -> None:
     await route.fulfill(status=200, content_type="text/javascript", body=TRADINGVIEW_STUB)
 
@@ -103,6 +112,7 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         await page.wait_for_selector("#signal-card .action.BUY")
         card = await page.text_content("#signal-card") or ""
         assert "2649.60–2650.40" in card and "2643.60" in card and "Batal jika" in card
+        await _until(page, "charts.live && charts.live.lines.length === 6")  # entry x2, SL, TP1-3
         code = await page.text_content("#signal-card .tv-code code") or ""
         assert code.startswith("GNA1|BUY|") and "|2643.60|" in code
         await page.wait_for_selector("#chart canvas")
@@ -152,6 +162,21 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
 
         await page.click("nav a[data-page=tradingview]")
         frame = await page.wait_for_selector("#tv-widget iframe")
+        await _until(page, "charts.gna && charts.gna.lines.length === 6")
+        titles = await page.evaluate("charts.gna.lines.map((l) => l.options().title)")
+        assert titles == [
+            "BUY 2649.60–2650.40",
+            "BUY zona bawah",
+            "SL 2643.60",
+            "TP1 2656.60",
+            "TP2 2663.10",
+            "TP3 2668.00",
+        ]
+        plan = await page.text_content("#gna-plan") or ""
+        assert "BUY XAUUSD" in plan and "2649.60 – 2650.40" in plan and "2643.60" in plan
+        assert "ambil 50%" in plan and "Batalkan rencana jika" in plan
+        bands = await page.evaluate("charts.gna.sessions.data().map((b) => b.color)")
+        assert bands and len(set(bands)) > 1  # session shading follows the bar times
         assert await frame.get_attribute("data-symbol") == "OANDA:XAUUSD"
         assert await page.get_attribute("#tv-open", "href") == (
             "https://www.tradingview.com/chart/?symbol=OANDA%3AXAUUSD"
