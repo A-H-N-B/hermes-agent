@@ -207,6 +207,17 @@ function makeChart(name, container, indicator) {
     wickUpColor: "#26a69a", wickDownColor: "#ef5350",
   });
   charts[name] = { chart, series, sessions, markers: lib.createSeriesMarkers(series, []), last: null, lines: [] };
+  if (indicator) {
+    // Forecast layer to the right of the last candle: centre path + expected-range band.
+    const line = (width, style) => chart.addSeries(lib.LineSeries, {
+      lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const centre = line(2, 2);
+    charts[name].projection = {
+      centre, upper: line(1, 0), lower: line(1, 0), marks: lib.createSeriesMarkers(centre, []),
+    };
+  }
   return charts[name];
 }
 
@@ -269,6 +280,59 @@ async function loadChart(state) {
     }
   }
   state.markers.setMarkers(markers.sort((a, b) => a.time - b.time));
+}
+
+// ------------------------------------------------------------------ forecast (Proyeksi 24 jam)
+// Drawn AHEAD of the last candle from what the agent already computed: each outlook hour's bias
+// (BUY/SELL/condong naik/turun), its confidence and the expected range for that hour; while a
+// signal is active the centre heads for its TP1 by the signal's expiry. Nothing here is a
+// candle: it is the agent's forecast, redrawn from the latest close on every new bar.
+function biasDirection(bias) {
+  if (/BUY|naik/i.test(bias)) return 1;
+  if (/SELL|turun/i.test(bias)) return -1;
+  return 0;
+}
+
+const PROJECTION_COLORS = { 1: "38, 166, 154", "-1": "239, 83, 80", 0: "138, 147, 166" };
+
+function projectionPath(rows, start, close, active, step) {
+  const hours = rows.map((row) => ({ ...row, from: Date.parse(row.hour_start_utc) / 1000 + WIB_OFFSET }));
+  const expiry = active ? Date.parse(active.valid_until_utc) / 1000 + WIB_OFFSET : null;
+  const points = [];
+  let centre = close;
+  let lastRow = null;
+  for (let t = start + step; t <= start + 24 * 3600; t += step) {
+    const row = hours.find((h) => t >= h.from && t < h.from + 3600);
+    if (!row || row.bias === "PASAR TUTUP") {
+      points.push({ time: t, row: null });
+      continue;
+    }
+    const direction = active && t <= expiry ? (active.action === "BUY" ? 1 : -1) : biasDirection(row.bias);
+    const range = row.expected_range_usd;
+    if (active && t <= expiry) {
+      centre = close + (active.tp1 - close) * Math.min(1, (t - start) / (expiry - start));
+    } else if (range !== null) {
+      centre += direction * ((row.confidence ?? 0) / 100) * range * 0.5 * (step / 3600);
+    }
+    points.push({ time: t, row, centre, half: range !== null ? range / 2 : null, direction, first: row !== lastRow });
+    lastRow = row;
+  }
+  return points;
+}
+
+function drawProjection(state) {
+  const proj = state && state.projection;
+  if (!proj || !state.outlook || !state.last) return;
+  const points = projectionPath(state.outlook.rows, state.last.time, state.last.close, state.active, TF_SECONDS[CHART_TF]);
+  const colour = (p, alpha) => `rgba(${PROJECTION_COLORS[p.direction]}, ${p.row.conditional ? alpha / 2 : alpha})`;
+  const empty = (p) => ({ time: p.time });
+  proj.centre.setData(points.map((p) => (p.row ? { time: p.time, value: p.centre, color: colour(p, 0.95) } : empty(p))));
+  proj.upper.setData(points.map((p) => (p.row && p.half !== null ? { time: p.time, value: p.centre + p.half, color: colour(p, 0.5) } : empty(p))));
+  proj.lower.setData(points.map((p) => (p.row && p.half !== null ? { time: p.time, value: p.centre - p.half, color: colour(p, 0.5) } : empty(p))));
+  proj.marks.setMarkers(points.filter((p) => p.row && p.first && p.row.events.length).map((p) => ({
+    time: p.time, position: "aboveBar", shape: "circle", color: "#f5b041", text: p.row.events[0].slice(0, 24),
+  })));
+  state.chart.timeScale().setVisibleRange({ from: state.last.time - 6 * 3600, to: state.last.time + 24 * 3600 });
 }
 
 // The active signal as price lines: entry zone, stop loss, TP1-TP3. Levels come from the same
@@ -335,6 +399,11 @@ function renderPlan(state, outlook) {
   } else {
     const current = state.state;
     box.append(el("p", { class: "plan-head WAIT", text: "TUNGGU · belum ada angka BUY/SELL yang layak" }));
+    if (current) {
+      const c = current.components;
+      box.append(el("p", {}, el("b", { text: "Hitungan alat berita saat ini: " }),
+        `skor ${signed(current.composite_score)} (Berita ${signed(c.N)} · Makro ${signed(c.M)} · Teknikal ${signed(c.T)} · Harga ${signed(c.P)}) · confidence ${current.confidence}`));
+    }
     const waits = el("ul", { class: "notes warn" });
     for (const reason of current ? current.wait_reasons : []) waits.append(el("li", { text: reason }));
     if (waits.childElementCount) box.append(el("h2", { text: "Kenapa menunggu" }), waits);
@@ -359,10 +428,12 @@ function onTick(tick) {
       ? { ...last, high: Math.max(last.high, tick.mid), low: Math.min(last.low, tick.mid), close: tick.mid }
       : { time, open: tick.mid, high: tick.mid, low: tick.mid, close: tick.mid };
     state.series.update(bar);
-    if (state.sessions && (!last || last.time !== time)) {
+    const newBar = !last || last.time !== time;
+    if (state.sessions && newBar) {
       state.sessions.update({ time, value: 1, color: sessionColor(time - WIB_OFFSET) });
     }
     state.last = bar;
+    if (newBar) drawProjection(state);
   }
 }
 
@@ -562,6 +633,9 @@ const loaders = {
     const chart = makeChart("gna", $("#gna-chart"), true);
     await loadChart(chart);
     drawSignal(chart, state.active);
+    chart.outlook = outlook;
+    chart.active = state.active;
+    drawProjection(chart);
   },
 };
 
@@ -653,7 +727,8 @@ function connect(delay = 1000) {
     else if (message.type === "context") renderPrice(message.data);
     else if (message.type === "news" && currentPage === "live") prependNews(message.data);
     else if (message.type === "state" || message.type === "signal") refreshSoon();
-    else if (message.type === "outlook" && currentPage === "outlook") show("outlook");
+    else if (message.type === "outlook" && (currentPage === "outlook" || currentPage === "tradingview")) show(currentPage);
+    else if (message.type === "signal" && currentPage === "tradingview") show("tradingview");
   });
 }
 

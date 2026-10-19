@@ -15,6 +15,12 @@ Menu **TradingView** di dashboard (`http://127.0.0.1:8787/#tradingview`) menampi
 2. **Grafik indikator Gold News Agent**: grafik yang sama dengan menu Live (TradingView
    Lightweight Charts) dengan indikator digambar langsung: garis BUY/SELL, SL, TP1–TP3 berikut
    angkanya, warna sesi, tanda *Data AS* 08:30 New York, serta penanda berita dan sinyal.
+   Di kanan candle terakhir ada **Proyeksi 24 jam**: ramalan alat berita yang digambar *di depan*
+   harga. Arah tiap jam = bias Outlook (hijau naik, merah turun, abu-abu netral/TUNGGU DATA)
+   dikali confidence; lebar pita = perkiraan rentang gerak jam itu (melebar di jam rilis data);
+   selama ada sinyal aktif garisnya menuju TP1 sampai sinyal kedaluwarsa. Digambar ulang dari
+   harga terakhir setiap candle baru dan setiap Outlook diperbarui. Ini perkiraan, bukan harga:
+   menu Performa mencatat seberapa sering ramalan itu benar.
 3. Di bawahnya grafik XAUUSD dari TradingView (widget resmi) dan tombol ke akun TradingView-mu.
 
 Widget TradingView yang ditanam di website tidak bisa memuat indikator buatan sendiri (aturan

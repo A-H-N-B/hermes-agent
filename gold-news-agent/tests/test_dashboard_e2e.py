@@ -175,6 +175,13 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         plan = await page.text_content("#gna-plan") or ""
         assert "BUY XAUUSD" in plan and "2649.60 – 2650.40" in plan and "2643.60" in plan
         assert "ambil 50%" in plan and "Batalkan rencana jika" in plan
+        ahead = await page.evaluate(
+            "(() => { const pts = charts.gna.projection.centre.data().filter((p) => 'value' in p);"
+            " return { first: pts[0].time, last: charts.gna.last.time, n: pts.length,"
+            " up: pts[12].value > charts.gna.last.close }; })()"
+        )
+        assert ahead["n"] > 0 and ahead["first"] > ahead["last"]  # forecast starts after the price
+        assert ahead["up"]  # the active BUY's forecast heads for its TP1
         bands = await page.evaluate("charts.gna.sessions.data().map((b) => b.color)")
         assert bands and len(set(bands)) > 1  # session shading follows the bar times
         assert await frame.get_attribute("data-symbol") == "OANDA:XAUUSD"

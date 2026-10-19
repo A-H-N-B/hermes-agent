@@ -144,6 +144,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   hosts, `null` turns it off; ADR-014). TradingView indicator `dashboard/static/gold_news_agent.pine`
   (Pine v6, draws only): Pine cannot fetch external data, so each signal carries a one-line code
   (`signals/tvcode.py`, `GNA1|...` 13 fields, levels shifted by chart-minus-reference price) shown
-  in Telegram and on the Live card; user guide `docs/tradingview_indikator.md`.
+  in Telegram and on the Live card; user guide `docs/tradingview_indikator.md`. The TradingView
+  page also draws the indicator itself (Lightweight Charts: signal price lines, session bands,
+  08:30 NY marks), a "Rencana trading" table, and a 24 h forecast ahead of the last candle
+  (outlook bias × confidence × expected range; heads to TP1 while a signal is active).
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.
