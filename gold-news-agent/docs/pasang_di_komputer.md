@@ -32,6 +32,10 @@ ditolak robots.txt tidak pernah diaktifkan), memasang nyala otomatis lewat folde
 membuka dashboard. Aman dijalankan ulang. Sumber lain (FinancialJuice, FXStreet, Kitco, ...)
 tetap `candidate` sampai syarat penggunaannya kamu baca sendiri (langkah 7).
 
+Installer juga membuat dua shortcut di Desktop: **Jalankan Gold News Agent** (menyalakan program
+bila belum jalan, lalu membuka dashboard; tidak pernah menyalakan dua salinan) dan **Matikan Gold
+News Agent**. Keduanya memanggil `scripts\windows\jalankan.cmd` / `matikan.cmd`.
+
 ---
 
 ## Langkah 0 — Siapkan akun dan key

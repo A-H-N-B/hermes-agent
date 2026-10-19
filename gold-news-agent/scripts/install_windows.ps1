@@ -182,20 +182,24 @@ function Install-GoldNewsAgent {
         Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', 'w32tm /config /manualpeerlist:pool.ntp.org /syncfromflags:manual /update; net stop w32time; net start w32time; w32tm /resync'
         Ok 'Jam disinkronkan'
     } catch { Warn 'Jam tidak disetel (izin ditolak). Tidak fatal.' }
+    $Win = Join-Path $Root 'scripts\windows'
     $Startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'GoldNewsAgent.cmd'
-    $cmd = "@echo off`r`ntitle Gold News Agent - JANGAN DITUTUP (minimize saja)`r`ncd /d $Root`r`n:loop`r`n.venv\Scripts\gold-agent.exe run all`r`necho Program berhenti, menyala lagi dalam 60 detik...`r`ntimeout /t 60`r`ngoto loop`r`n"
-    [IO.File]::WriteAllText($Startup, $cmd, [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText($Startup, "@start `"Gold News Agent`" /min `"$Win\gold_agent_loop.cmd`"`r`n", [Text.Encoding]::ASCII)
     Ok "Nyala otomatis saat login: $Startup"
+    $shell = New-Object -ComObject WScript.Shell
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    foreach ($pair in @(@('Jalankan Gold News Agent', 'jalankan.cmd'), @('Matikan Gold News Agent', 'matikan.cmd'))) {
+        $link = $shell.CreateShortcut((Join-Path $desktop "$($pair[0]).lnk"))
+        $link.TargetPath = Join-Path $Win $pair[1]
+        $link.WorkingDirectory = $Root
+        $link.Save()
+    }
+    Ok 'Shortcut di Desktop: "Jalankan Gold News Agent" dan "Matikan Gold News Agent"'
 
     Step 9 'Menyalakan program dan membuka dashboard'
-    Start-Process $Startup -WindowStyle Minimized
-    $up = $false
-    foreach ($i in 1..45) {
-        Start-Sleep -Seconds 2
-        try { Invoke-WebRequest 'http://127.0.0.1:8787/healthz' -UseBasicParsing -TimeoutSec 2 | Out-Null; $up = $true; break } catch { }
-    }
-    if (-not $up) { Fail 'Dashboard belum menyala. Buka jendela "Gold News Agent" di taskbar dan lihat tulisan merahnya.'; return }
-    Start-Process 'http://127.0.0.1:8787'
+    # The call operator, not Start-Process -Wait: that would also wait for the agent it starts.
+    & (Join-Path $Win 'jalankan.cmd')
+    if ($LASTEXITCODE -ne 0) { Fail 'Dashboard belum menyala. Buka jendela "Gold News Agent" di taskbar dan lihat tulisan merahnya.'; return }
     Write-Host ''
     Write-Host '==================== SELESAI ====================' -ForegroundColor Green
     Write-Host ' Dashboard : http://127.0.0.1:8787 (hanya di laptop ini)'
