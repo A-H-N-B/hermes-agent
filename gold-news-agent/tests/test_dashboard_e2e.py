@@ -122,7 +122,16 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         assert "BUY SEKARANG" in timing and "2649.60 – 2650.40" in timing and "2643.60" in timing
         assert "sampai 21:35 WIB" in timing
         assert "Semua jadwal peluang" in (await page.text_content("#timing-details") or "")
+        assert "Hitungan alat berita sekarang" in (
+            await page.text_content("#timing .gauge-wrap") or ""
+        )
+        # The chart opens bare: no indicator until the user ticks one.
+        assert await page.evaluate("Object.keys(charts.live.ind.groups).length") == 0
+        assert await page.evaluate("charts.live.chart.panes().length") == 1
+        await page.click("#ind-toggles input[data-ind=sar]")
+        await page.click("#ind-toggles input[data-ind=stoch]")
         assert await page.evaluate("charts.live.ind.groups.sar.sar.data().length") > 0
+        assert await page.evaluate("charts.live.chart.panes().length") == 2  # Stoch's own pane
         await page.wait_for_selector("#tf-forecast .forecast-head")
         await page.click("#tf-button")
         await page.click(".tf-item[data-tf=M1]")
@@ -138,13 +147,16 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         )
         await _until(page, "charts.live.lines.length === 6")
         assert await page.evaluate("charts.live.ind.groups.stoch.stoch_k.data().length") > 0
+        await page.click("#ind-toggles input[data-ind=stoch]")
+        assert await page.evaluate("charts.live.chart.panes().length") == 1  # pane goes with it
         await page.wait_for_selector("#ind-chips .chip")
         height = await page.evaluate("document.documentElement.scrollHeight")
         await page.wait_for_timeout(1500)
         assert await page.evaluate("document.documentElement.scrollHeight") == height  # no growth
-        assert await page.evaluate("charts.live.ind.groups.ema.ema200.options().visible")
         await page.click("#ind-toggles input[data-ind=ema]")
-        assert not await page.evaluate("charts.live.ind.groups.ema.ema200.options().visible")
+        assert await page.evaluate("charts.live.ind.groups.ema.ema20.data().length") > 0
+        await page.click("#ind-toggles input[data-ind=ema]")
+        assert await page.evaluate("charts.live.ind.groups.ema === undefined")
         code = await page.text_content("#signal-card .tv-code code") or ""
         assert code.startswith("GNA1|BUY|") and "|2643.60|" in code
         await page.wait_for_selector("#chart canvas")

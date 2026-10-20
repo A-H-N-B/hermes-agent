@@ -87,3 +87,29 @@ def test_daily_bars_roll_up_into_weeks_and_months() -> None:
     assert weeks[0].high == 140 and weeks[0].low == 91
     months = aggregate(daily, "MN")
     assert [(m.open, m.close) for m in months] == [(128, 135), (101, 110)]
+
+
+def _mirror(bars: list[Candle], pivot: float = 2600.0) -> list[Candle]:
+    """The same market upside down: every price reflected around `pivot`."""
+    return [
+        b.model_copy(
+            update={
+                "open": 2 * pivot - b.open,
+                "close": 2 * pivot - b.close,
+                "high": 2 * pivot - b.low,
+                "low": 2 * pivot - b.high,
+            }
+        )
+        for b in bars
+    ]
+
+
+def test_buy_and_sell_are_symmetric_a_falling_market_with_bearish_news_reads_down(
+    settings: Settings,
+) -> None:
+    threshold = settings.signal_engine.entry_threshold
+    up_bars = history("M5", T0, 260)
+    up = _run(settings, bars=up_bars, state=_state(threshold * 0.5))
+    down = _run(settings, bars=_mirror(up_bars), state=_state(-threshold * 0.5))
+    assert (up["direction"], down["direction"]) == ("NAIK", "TURUN")
+    assert down["score"] == -up["score"] and down["strength"] == up["strength"]

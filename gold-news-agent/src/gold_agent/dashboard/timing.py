@@ -51,6 +51,7 @@ def _now_block(active: Signal | None, state: SignalState | None, now: datetime) 
             "until_utc": _iso(active.valid_until_utc),
             "until_wib": fmt_wib(active.valid_until_utc),
             "confidence": active.confidence,
+            "score": state.composite_score if state else None,
         }
     return {
         "mode": "wait",
@@ -144,6 +145,7 @@ def timing_view(
     return {
         "now_utc": _iso(now),
         "now": _now_block(active, state, now),
+        "threshold": settings.signal_engine.entry_threshold,
         "blackout": _blackout(events, now, settings),
         "windows": _windows(outlook, now),
         "triggers": _triggers(context),

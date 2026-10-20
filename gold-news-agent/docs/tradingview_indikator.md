@@ -29,6 +29,13 @@ TP1, TP2, TP3, sampai jam berlakunya habis, plus warna sesi London/New York, jed
   + 40% indikator timeframe itu (tren, EMA, RSI, Stoch, SAR); rentang = ATR(14) timeframe itu.
   Kekuatan adalah skor, belum peluang yang dikalibrasi: menu Performa yang menilai. W1 dan MN
   dibangun dari candle harian yang tersimpan, jadi riwayatnya pendek di awal.
+- **Pengukur hitungan berita** di bawah papan: garis dari ◀ SELL (merah) ke BUY ▶ (hijau) dengan
+  penanda posisi skor alat berita sekarang. Sinyal BUY muncul bila penanda melewati ujung kanan
+  (≥ +0.35), SELL bila melewati ujung kiri (≤ −0.35). Papan, ringkasan indikator dan prediksi
+  diperbarui tiap 30 detik, tiap candle baru, dan tiap ada sinyal/outlook baru. Rumusnya simetris:
+  pasar dan berita yang dibalik menghasilkan jawaban yang dibalik (diuji otomatis), jadi SELL
+  yang terus muncul berarti data memang sedang condong turun.
+- **Indikator awalnya kosong**: centang sendiri yang ingin ditampilkan; pilihan diingat browser.
 - **Grafik** dengan EMA 20/50/200, Bollinger (20, 2), VWAP, support/resistance, Parabolic SAR
   (0.02, 0.20) sebagai titik hijau/merah, RSI 14 dan Stoch (5, 3, 3) di panel bawah, plus garis entry/SL/TP sinyal aktif; tiap indikator bisa dimatikan lewat centang.
 - **Ringkasan indikator** per timeframe (M5, M15, H1, H4): BUY/SELL/NETRAL dari tren, posisi

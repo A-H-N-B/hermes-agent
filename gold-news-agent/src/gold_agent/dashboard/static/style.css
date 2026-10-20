@@ -222,9 +222,9 @@ details.more summary { cursor: pointer; color: var(--info); }
 .credit.SELL { color: var(--down); border-color: var(--down); }
 #credit-input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: .35rem .5rem; width: 9rem; }
 .chart-wrap { position: relative; }
-.tf-button { position: absolute; top: .5rem; left: .5rem; z-index: 5; width: 3.2rem; height: 3.2rem; border-radius: 50%;
+.tf-button { position: absolute; top: .5rem; left: .5rem; z-index: 90; width: 3.2rem; height: 3.2rem; border-radius: 50%;
   border: 0; background: #1e6fe0; color: #fff; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .4); }
-.tf-ring { position: absolute; z-index: 6; top: 50%; left: 50%; width: 300px; height: 300px; margin: -150px 0 0 -150px;
+.tf-ring { position: absolute; z-index: 100; top: 50%; left: 50%; width: 300px; height: 300px; margin: -150px 0 0 -150px;
   border-radius: 50%; border: 52px solid #1e6fe0; box-sizing: border-box; box-shadow: 0 4px 18px rgba(0, 0, 0, .5); }
 .tf-item { position: absolute; transform: translate(-50%, -50%); background: none; border: 0; color: #fff;
   font-weight: 700; font-size: 1rem; cursor: pointer; padding: .2rem .3rem; border-radius: 6px; }
@@ -236,3 +236,11 @@ details.more summary { cursor: pointer; color: var(--info); }
 .forecast-head.BUY { color: var(--up); }
 .forecast-head.SELL { color: var(--down); }
 .forecast-head.WAIT { color: var(--warn); }
+.gauge-wrap { margin-top: .8rem; }
+.gauge-labels { display: flex; justify-content: space-between; font-size: .8rem; font-weight: 700; }
+.gauge-labels .BUY { color: var(--up); }
+.gauge-labels .SELL { color: var(--down); }
+.gauge { position: relative; height: 12px; border-radius: 6px; margin: .25rem 0;
+  background: linear-gradient(90deg, var(--down), var(--panel-2) 50%, var(--up)); }
+.gauge-marker { position: absolute; top: -4px; width: 6px; height: 20px; margin-left: -3px; border-radius: 3px;
+  background: var(--text); box-shadow: 0 0 0 2px var(--bg); }

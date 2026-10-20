@@ -158,6 +158,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   MT5-style timeframe ring on the Live chart (M1..MN; W1/MN aggregated from D1 by NY trading
   date) with a next-candle forecast (`dashboard/forecast.py`, `/api/forecast`): 0.6 × engine score
   (active signal = ±1) + 0.4 × that TF's indicator vote, range = TF ATR14, TUNGGU DATA when a
-  high-impact release falls inside the horizon. Not a calibrated probability.
+  high-impact release falls inside the horizon. Not a calibrated probability. Live indicators
+  start unticked (created on tick, removed with their pane on untick; choice kept in
+  localStorage); the board shows a SELL↔BUY gauge of the engine score vs entry_threshold and
+  refreshes every 30 s; a mirrored-market test pins BUY/SELL symmetry of the forecast.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

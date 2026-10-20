@@ -295,40 +295,76 @@ async function loadChart(state) {
 // ------------------------------------------------------------------ indicators (Live chart)
 // EMA 20/50/200 and Bollinger(20, 2) over the candles, RSI 14 in its own pane, VWAP and
 // support/resistance as price lines; each group can be switched off with the checkboxes.
+// Indicators start switched off: each group is created when its box is ticked and removed (with
+// its pane, for RSI and Stoch) when unticked, so an empty chart really is empty.
 function makeIndicatorSeries(lib, chart) {
   const line = (color, width, style = 0, pane = 0) => chart.addSeries(lib.LineSeries, {
     color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false,
     crosshairMarkerVisible: false,
   }, pane);
-  const rsi = line("#b39ddb", 1, 0, 1);
-  rsi.createPriceLine({ price: 70, color: "#ef5350", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "70" });
-  rsi.createPriceLine({ price: 30, color: "#26a69a", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "30" });
-  const stochK = line("#5dade2", 1, 0, 2);
-  const stochD = line("#f5b041", 1, 0, 2);
-  stochK.createPriceLine({ price: 80, color: "#ef5350", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "80" });
-  stochK.createPriceLine({ price: 20, color: "#26a69a", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "20" });
-  const sar = chart.addSeries(lib.LineSeries, {
-    lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2, priceLineVisible: false,
-    lastValueVisible: false, crosshairMarkerVisible: false,
-  });
-  const panes = chart.panes();
-  for (const index of [1, 2]) if (panes[index] && panes[index].setHeight) panes[index].setHeight(100);
-  return {
-    groups: {
-      ema: { ema20: line("#f5b041", 1), ema50: line("#5dade2", 1), ema200: line("#e74c3c", 2) },
-      bb: { bb_upper: line("rgba(155, 89, 182, 0.8)", 1, 2), bb_mid: line("rgba(155, 89, 182, 0.5)", 1, 1), bb_lower: line("rgba(155, 89, 182, 0.8)", 1, 2) },
-      rsi: { rsi14: rsi },
-      stoch: { stoch_k: stochK, stoch_d: stochD },
-      sar: { sar },
-    },
-    lines: { vwap: [], levels: [] },
-    summary: null,
+  const newPane = () => chart.panes().length;
+  const bounds = (series, high, low) => {
+    series.createPriceLine({ price: high, color: "#ef5350", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: String(high) });
+    series.createPriceLine({ price: low, color: "#26a69a", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: String(low) });
   };
+  const factories = {
+    ema: () => ({ ema20: line("#f5b041", 1), ema50: line("#5dade2", 1), ema200: line("#e74c3c", 2) }),
+    bb: () => ({ bb_upper: line("rgba(155, 89, 182, 0.8)", 1, 2), bb_mid: line("rgba(155, 89, 182, 0.5)", 1, 1), bb_lower: line("rgba(155, 89, 182, 0.8)", 1, 2) }),
+    sar: () => ({ sar: chart.addSeries(lib.LineSeries, {
+      lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2, priceLineVisible: false,
+      lastValueVisible: false, crosshairMarkerVisible: false,
+    }) }),
+    rsi: () => {
+      const rsi = line("#b39ddb", 1, 0, newPane());
+      bounds(rsi, 70, 30);
+      return { rsi14: rsi };
+    },
+    stoch: () => {
+      const pane = newPane();
+      const k = line("#5dade2", 1, 0, pane);
+      bounds(k, 80, 20);
+      return { stoch_k: k, stoch_d: line("#f5b041", 1, 0, pane) };
+    },
+  };
+  return { chart, factories, groups: {}, rows: [], lines: { vwap: [], levels: [] }, summary: null };
+}
+
+const TOGGLES_KEY = "gna.indicators";
+
+function restoreToggles() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(TOGGLES_KEY) || "[]"); } catch { saved = []; }
+  for (const box of document.querySelectorAll("#ind-toggles input")) box.checked = saved.includes(box.dataset.ind);
+}
+
+function saveToggles() {
+  const on = [...document.querySelectorAll("#ind-toggles input:checked")].map((box) => box.dataset.ind);
+  try { localStorage.setItem(TOGGLES_KEY, JSON.stringify(on)); } catch { /* not remembered */ }
 }
 
 function indicatorOn(key) {
   const box = document.querySelector(`#ind-toggles input[data-ind=${key}]`);
-  return !box || box.checked;
+  return Boolean(box && box.checked);
+}
+
+function fillGroup(group, rows) {
+  for (const [field, series] of Object.entries(group)) {
+    series.setData(rows.map((row) => {
+      if (row[field] === null) return { time: row.time + WIB_OFFSET };
+      const point = { time: row.time + WIB_OFFSET, value: row[field] };
+      // SAR dots: green below price (uptrend), red above (downtrend).
+      if (field === "sar") point.color = row.sar_up ? "#26a69a" : "#ef5350";
+      return point;
+    }));
+  }
+}
+
+function removeEmptyPanes(chart) {
+  const panes = chart.panes();
+  for (let i = panes.length - 1; i > 0; i -= 1) {
+    if (panes[i].getSeries && panes[i].getSeries().length === 0) chart.removePane(i);
+  }
+  for (const pane of chart.panes().slice(1)) if (pane.setHeight) pane.setHeight(100);
 }
 
 function drawIndicatorLines(state) {
@@ -354,26 +390,26 @@ function drawIndicatorLines(state) {
 
 function applyIndicatorToggles(state) {
   if (!state || !state.ind) return;
-  for (const [key, group] of Object.entries(state.ind.groups)) {
-    for (const series of Object.values(group)) series.applyOptions({ visible: indicatorOn(key) });
+  const ind = state.ind;
+  for (const [key, make] of Object.entries(ind.factories)) {
+    const on = indicatorOn(key);
+    if (on && !ind.groups[key]) {
+      ind.groups[key] = make();
+      fillGroup(ind.groups[key], ind.rows);
+    } else if (!on && ind.groups[key]) {
+      for (const series of Object.values(ind.groups[key])) ind.chart.removeSeries(series);
+      delete ind.groups[key];
+    }
   }
+  removeEmptyPanes(ind.chart);
   drawIndicatorLines(state);
 }
 
 async function loadIndicators(state) {
   if (!state || !state.ind) return;
   const payload = await api(`/api/indicators?tf=${state.tf}`);
-  for (const group of Object.values(state.ind.groups)) {
-    for (const [field, series] of Object.entries(group)) {
-      series.setData(payload.series.map((row) => {
-        if (row[field] === null) return { time: row.time + WIB_OFFSET };
-        const point = { time: row.time + WIB_OFFSET, value: row[field] };
-        // SAR dots: green below price (uptrend), red above (downtrend).
-        if (field === "sar") point.color = row.sar_up ? "#26a69a" : "#ef5350";
-        return point;
-      }));
-    }
-  }
+  state.ind.rows = payload.series;
+  for (const group of Object.values(state.ind.groups)) fillGroup(group, payload.series);
   state.ind.summary = payload.summary;
   applyIndicatorToggles(state);
   renderIndicatorSummary(payload.summary);
@@ -456,6 +492,27 @@ function renderTiming(t) {
 
 // The board answers three questions at a glance: what to do now, when the next chance is
 // (with a countdown against the WIB clock), and whether the chart's indicators agree.
+// Where the news calculation stands right now, from SELL (left) to BUY (right): a signal fires
+// when the marker passes either end, so the user can watch it move both ways.
+function scoreGauge(t) {
+  const n = t.now;
+  const fallback = n.mode === "signal" ? (n.action === "BUY" ? t.threshold : -t.threshold) : null;
+  const score = n.score ?? fallback;
+  const wrap = el("div", { class: "gauge-wrap" });
+  if (score === null || score === undefined) {
+    wrap.append(el("p", { class: "muted", text: "Hitungan alat berita belum tersedia." }));
+    return wrap;
+  }
+  const position = Math.max(-1, Math.min(1, score / t.threshold));
+  const marker = el("span", { class: `gauge-marker ${position > 0 ? "BUY" : position < 0 ? "SELL" : ""}` });
+  marker.style.left = `${50 + 50 * position}%`; // CSSOM: the CSP forbids inline styles
+  wrap.append(
+    el("div", { class: "gauge-labels" }, el("span", { class: "SELL", text: "◀ SELL" }), el("span", { class: "muted", text: "netral" }), el("span", { class: "BUY", text: "BUY ▶" })),
+    el("div", { class: "gauge" }, marker),
+    el("p", { class: "muted", text: `Hitungan alat berita sekarang ${signed(score)} · sinyal BUY bila ≥ +${num(t.threshold)}, SELL bila ≤ −${num(t.threshold)} · diperbarui ${headerClock.format(new Date())} WIB` }));
+  return wrap;
+}
+
 function renderBoard() {
   const t = lastTiming;
   const box = clear($("#timing"));
@@ -493,6 +550,7 @@ function renderBoard() {
     }
   }
   box.append(boxes);
+  box.append(scoreGauge(t));
   if (lastSummary && lastSummary.overall && lastSummary.overall.of) {
     const o = lastSummary.overall;
     const agree = direction && o.verdict === direction;
@@ -1156,10 +1214,13 @@ window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 window.addEventListener("DOMContentLoaded", () => {
   show(location.hash.slice(1) || "live");
   $("#tv-copy-script").addEventListener("click", copyIndicatorScript);
-  $("#ind-toggles").addEventListener("change", () => applyIndicatorToggles(charts.live));
+  restoreToggles();
+  $("#ind-toggles").addEventListener("change", () => { saveToggles(); applyIndicatorToggles(charts.live); });
   $("#credit-form").addEventListener("submit", saveCredit);
   buildRing();
-  setInterval(() => { if (currentPage === "live") refreshForecast().catch(console.error); }, 30000);
+  // The board, indicator read and forecast follow the agent: refresh every 30 s even when no bar,
+  // signal or outlook event arrives.
+  setInterval(() => { if (currentPage === "live") refreshLiveExtras(); }, 30000);
   refreshCredit();
   setInterval(refreshCredit, 60000);
   tickClock();
