@@ -46,7 +46,14 @@
             <label><input type="checkbox" data-ind="rsi" checked> RSI 14</label>
             <label><input type="checkbox" data-ind="stoch" checked> Stoch (5, 3, 3)</label>
           </div>
-          <div id="chart"></div>
+          <div id="tf-forecast" class="tf-forecast"><p class="muted">Memuat prediksi…</p></div>
+          <div class="chart-wrap">
+            <div id="chart"></div>
+            <button id="tf-button" type="button" class="tf-button" title="pilih timeframe">M5</button>
+            <div id="tf-ring" class="tf-ring" hidden>
+              <button id="tf-close" type="button" class="tf-close" title="tutup">✕</button>
+            </div>
+          </div>
         </article>
       </div>
       <article class="card">

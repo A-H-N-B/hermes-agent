@@ -3,8 +3,9 @@
 // Every string that came from a news source or the API is written with textContent.
 
 const WIB_OFFSET = 7 * 3600; // the chart library shows UTC; shift bars so the axis reads WIB
-const TF_SECONDS = { M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400 };
-const CHART_TF = "M5";
+const TF_SECONDS = { M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400, W1: 604800, MN: 2592000 };
+const RING_TFS = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN"];
+const DEFAULT_TF = "M5";
 
 const wibFormat = new Intl.DateTimeFormat("id-ID", {
   timeZone: "Asia/Jakarta", weekday: "short", day: "numeric", month: "short",
@@ -206,8 +207,16 @@ function makeChart(name, container, indicator) {
     upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
     wickUpColor: "#26a69a", wickDownColor: "#ef5350",
   });
-  charts[name] = { chart, series, sessions, markers: lib.createSeriesMarkers(series, []), last: null, lines: [] };
-  if (name === "live") charts[name].ind = makeIndicatorSeries(lib, chart);
+  charts[name] = { chart, series, sessions, markers: lib.createSeriesMarkers(series, []), last: null, lines: [], tf: DEFAULT_TF };
+  if (name === "live") {
+    charts[name].ind = makeIndicatorSeries(lib, chart);
+    charts[name].tf = savedTf();
+    const forecastLine = (style) => chart.addSeries(lib.LineSeries, {
+      lineWidth: 2, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      pointMarkersVisible: true, pointMarkersRadius: 3,
+    });
+    charts[name].forecast = { target: forecastLine(2), high: forecastLine(1), low: forecastLine(1) };
+  }
   if (indicator) {
     // Forecast layer to the right of the last candle: centre path + expected-range band.
     const line = (width, style) => chart.addSeries(lib.LineSeries, {
@@ -249,11 +258,11 @@ function sessionColor(unix) {
 async function loadChart(state) {
   if (!state) return;
   const [bars, marks] = await Promise.all([
-    api(`/api/candles?tf=${CHART_TF}`), api("/api/markers?hours=24")]);
+    api(`/api/candles?tf=${state.tf}`), api("/api/markers?hours=24")]);
   const shifted = bars.map((b) => ({ ...b, time: b.time + WIB_OFFSET }));
   state.series.setData(shifted);
   state.last = shifted.length ? { ...shifted[shifted.length - 1] } : null;
-  const step = TF_SECONDS[CHART_TF];
+  const step = TF_SECONDS[state.tf];
   const snap = (t) => Math.floor((t + WIB_OFFSET) / step) * step;
   const markers = [
     ...marks.news.map((n) => ({
@@ -353,7 +362,7 @@ function applyIndicatorToggles(state) {
 
 async function loadIndicators(state) {
   if (!state || !state.ind) return;
-  const payload = await api(`/api/indicators?tf=${CHART_TF}`);
+  const payload = await api(`/api/indicators?tf=${state.tf}`);
   for (const group of Object.values(state.ind.groups)) {
     for (const [field, series] of Object.entries(group)) {
       series.setData(payload.series.map((row) => {
@@ -371,6 +380,7 @@ async function loadIndicators(state) {
 }
 
 let lastSummary = null;
+let lastState = null;
 let lastTiming = null;
 
 function renderIndicatorSummary(summary) {
@@ -578,6 +588,95 @@ function tickClock() {
   $("#clock").textContent = `${parts.weekday} ${parts.day} ${parts.month} · ${headerClock.format(now)} WIB`;
 }
 
+// ------------------------------------------------------------------ timeframe ring + next-candle forecast
+// MT5-style ring: picking a timeframe redraws the Live chart on it and asks the agent what it
+// expects for the NEXT candle of that timeframe (M1 = the next minute, H4 = the next 4 hours...).
+function savedTf() {
+  try {
+    const tf = localStorage.getItem("gna.tf");
+    return RING_TFS.includes(tf) ? tf : DEFAULT_TF;
+  } catch {
+    return DEFAULT_TF;
+  }
+}
+
+function buildRing() {
+  const ring = $("#tf-ring");
+  const first = -125;
+  const stepDeg = 250 / (RING_TFS.length - 1);
+  RING_TFS.forEach((tf, i) => {
+    const angle = ((first + i * stepDeg) * Math.PI) / 180;
+    const button = el("button", { type: "button", class: "tf-item", "data-tf": tf, text: tf });
+    // CSSOM, not a style attribute: the CSP forbids inline styles.
+    button.style.left = `${50 + 63 * Math.sin(angle)}%`;
+    button.style.top = `${50 - 63 * Math.cos(angle)}%`;
+    button.addEventListener("click", () => chooseTf(tf));
+    ring.append(button);
+  });
+  $("#tf-button").addEventListener("click", () => { ring.hidden = !ring.hidden; });
+  $("#tf-close").addEventListener("click", () => { ring.hidden = true; });
+}
+
+async function chooseTf(tf) {
+  $("#tf-ring").hidden = true;
+  const state = charts.live;
+  if (!state) return;
+  state.tf = tf;
+  try { localStorage.setItem("gna.tf", tf); } catch { /* private window: just not remembered */ }
+  markTf(tf);
+  await loadChart(state);
+  drawSignal(state, lastState ? lastState.active : null);
+  await loadIndicators(state);
+  state.chart.timeScale().fitContent();
+  await refreshForecast();
+}
+
+function markTf(tf) {
+  $("#tf-button").textContent = tf;
+  for (const item of document.querySelectorAll(".tf-item")) item.classList.toggle("active", item.dataset.tf === tf);
+}
+
+const FORECAST_CLASS = { NAIK: "BUY", TURUN: "SELL" };
+const FORECAST_ICON = { NAIK: "▲", TURUN: "▼", NETRAL: "◆", "TUNGGU DATA": "⏸", "PASAR TUTUP": "■" };
+
+async function refreshForecast() {
+  const state = charts.live;
+  if (!state) return;
+  const f = await api(`/api/forecast?tf=${state.tf}`);
+  const box = clear($("#tf-forecast"));
+  const cls = FORECAST_CLASS[f.direction] || "WAIT";
+  box.append(el("p", { class: `forecast-head ${cls}` },
+    `${f.tf} · ${f.horizon} ke depan: ${FORECAST_ICON[f.direction] || ""} ${f.direction}`,
+    f.strength !== undefined ? el("span", { class: "muted", text: ` · kekuatan ${f.strength}/100` }) : null));
+  if (f.expected) {
+    box.append(el("p", {}, `Perkiraan candle berikutnya ${num(f.expected.low)} – ${num(f.expected.high)} (target ${num(f.expected.target)}) · sampai ${f.until_wib} WIB `,
+      liveCountdown(f.until_utc, "·", "candle baru")));
+  }
+  box.append(el("p", { class: "muted", text: f.reasons.join(" · ") }));
+  drawForecast(state, f);
+  tickLiveCountdowns();
+}
+
+function drawForecast(state, f) {
+  const lines = state.forecast;
+  if (!lines) return;
+  const clearAll = () => { for (const line of Object.values(lines)) line.setData([]); };
+  if (!f.expected || !state.last) {
+    clearAll();
+    return;
+  }
+  const from = state.last.time;
+  const to = from + TF_SECONDS[state.tf];
+  const colour = f.direction === "NAIK" ? "#26a69a" : f.direction === "TURUN" ? "#ef5350" : "#8a93a6";
+  const pair = (value) => [{ time: from, value: state.last.close }, { time: to, value }];
+  lines.target.applyOptions({ color: colour });
+  lines.high.applyOptions({ color: "rgba(138, 147, 166, 0.6)" });
+  lines.low.applyOptions({ color: "rgba(138, 147, 166, 0.6)" });
+  lines.target.setData(pair(f.expected.target));
+  lines.high.setData(pair(f.expected.high));
+  lines.low.setData(pair(f.expected.low));
+}
+
 // ------------------------------------------------------------------ forecast (Proyeksi 24 jam)
 // Drawn AHEAD of the last candle from what the agent already computed: each outlook hour's bias
 // (BUY/SELL/condong naik/turun), its confidence and the expected range for that hour; while a
@@ -619,7 +718,7 @@ function projectionPath(rows, start, close, active, step) {
 function drawProjection(state) {
   const proj = state && state.projection;
   if (!proj || !state.outlook || !state.last) return;
-  const points = projectionPath(state.outlook.rows, state.last.time, state.last.close, state.active, TF_SECONDS[CHART_TF]);
+  const points = projectionPath(state.outlook.rows, state.last.time, state.last.close, state.active, TF_SECONDS[state.tf]);
   const colour = (p, alpha) => `rgba(${PROJECTION_COLORS[p.direction]}, ${p.row.conditional ? alpha / 2 : alpha})`;
   const empty = (p) => ({ time: p.time });
   proj.centre.setData(points.map((p) => (p.row ? { time: p.time, value: p.centre, color: colour(p, 0.95) } : empty(p))));
@@ -715,11 +814,15 @@ function renderPlan(state, outlook) {
 }
 
 function onTick(tick) {
-  const step = TF_SECONDS[CHART_TF];
-  const time = Math.floor((tick.time + WIB_OFFSET) / step) * step;
+  const display = tick.time + WIB_OFFSET;
   for (const state of Object.values(charts)) {
+    const step = TF_SECONDS[state.tf];
     const last = state.last;
-    if (last && time < last.time) continue; // late tick
+    let time;
+    if (!last) time = Math.floor(display / step) * step;
+    else if (display < last.time) continue; // late tick
+    else if (state.tf === "MN" || display < last.time + step) time = last.time; // same bar
+    else time = last.time + Math.floor((display - last.time) / step) * step; // keep the bar anchor
     const bar = last && last.time === time
       ? { ...last, high: Math.max(last.high, tick.mid), low: Math.min(last.low, tick.mid), close: tick.mid }
       : { time, open: tick.mid, high: tick.mid, low: tick.mid, close: tick.mid };
@@ -909,14 +1012,17 @@ function renderHealth(health) {
 const loaders = {
   live: async () => {
     const [state, news] = await Promise.all([api("/api/state"), api("/api/news")]);
+    lastState = state;
     renderSignalCard(state);
     renderPrice(state.context);
     renderNews(news);
     const chart = makeChart("live", $("#chart"), false);
+    markTf(chart.tf);
     await loadChart(chart);
     drawSignal(chart, state.active);
     await loadIndicators(chart);
     renderTiming(await api("/api/timing"));
+    await refreshForecast();
   },
   outlook: async () => {
     const [outlook, state] = await Promise.all([api("/api/outlook"), api("/api/state")]);
@@ -1008,6 +1114,7 @@ function refreshLiveExtras() { // new bar: indicators move and the timing window
     extrasTimer = null;
     await loadIndicators(charts.live);
     renderTiming(await api("/api/timing"));
+    await refreshForecast();
   }, 1500);
 }
 
@@ -1051,6 +1158,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#tv-copy-script").addEventListener("click", copyIndicatorScript);
   $("#ind-toggles").addEventListener("change", () => applyIndicatorToggles(charts.live));
   $("#credit-form").addEventListener("submit", saveCredit);
+  buildRing();
+  setInterval(() => { if (currentPage === "live") refreshForecast().catch(console.error); }, 30000);
   refreshCredit();
   setInterval(refreshCredit, 60000);
   tickClock();

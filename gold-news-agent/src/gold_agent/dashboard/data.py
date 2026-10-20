@@ -8,6 +8,7 @@ from typing import Any
 
 from gold_agent.analysis.llm_client import wib_day_start
 from gold_agent.core.app import AppContext
+from gold_agent.dashboard.forecast import aggregate, forecast_next
 from gold_agent.dashboard.indicators_view import (
     SUMMARY_TFS,
     WARMUP_BARS,
@@ -17,7 +18,7 @@ from gold_agent.dashboard.indicators_view import (
 )
 from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
-from gold_agent.models import Analysis, CalendarEvent, MarketContext
+from gold_agent.models import Analysis, CalendarEvent, Candle, MarketContext
 from gold_agent.ops.metrics import summarize as latency_summary
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT, EngineState
 from gold_agent.signals.tvcode import tradingview_code
@@ -107,7 +108,7 @@ class DashboardData:
         }
 
     async def candles(self, tf: str, limit: int) -> list[JSON]:
-        bars = await self._ctx.market.latest_candles(tf, limit, source=await self._source())
+        bars = await self.bars(tf, limit)
         return [
             {
                 "time": int(bar.open_time.timestamp()),
@@ -119,10 +120,40 @@ class DashboardData:
             for bar in bars
         ]
 
+    async def bars(self, tf: str, limit: int) -> list[Candle]:
+        """Stored bars for M1..D1; W1 and MN built from D1."""
+        source = await self._source()
+        if tf in ("W1", "MN"):
+            per = 7 if tf == "W1" else 31
+            daily = await self._ctx.market.latest_candles(
+                "D1", min(5000, limit * per), source=source
+            )
+            return aggregate(daily, tf)[-limit:]
+        return await self._ctx.market.latest_candles(tf, limit, source=source)
+
+    async def forecast(self, tf: str) -> JSON:
+        ctx = self._ctx
+        now = ctx.clock.now()
+        stored = await ctx.ops.kv_get(KV_ENGINE)
+        engine = EngineState.from_json(stored) if stored else EngineState()
+        span_days = 40 if tf in ("W1", "MN") else 2
+        return forecast_next(
+            tf=tf,
+            bars=await self.bars(tf, 260),
+            now=now,
+            settings=ctx.settings,
+            state=await ctx.signals.latest_state(),
+            active=engine.active(now),
+            events=await ctx.calendar.between(
+                now - timedelta(hours=1), now + timedelta(days=span_days)
+            ),
+            context=await ctx.market.latest_context(),
+        )
+
     async def indicators(self, tf: str, limit: int) -> JSON:
         ctx = self._ctx
         source = await self._source()
-        bars = await ctx.market.latest_candles(tf, limit + WARMUP_BARS, source=source)
+        bars = await self.bars(tf, limit + WARMUP_BARS)
         extras = {
             name: momentum(await ctx.market.latest_candles(name, 120, source=source))
             for name in SUMMARY_TFS

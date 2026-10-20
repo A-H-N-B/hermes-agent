@@ -155,17 +155,29 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
 
     @app.get("/api/candles", dependencies=guard)
     async def api_candles(
-        tf: str = Query(default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1)$"),
+        tf: str = Query(
+            default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1|W1|MN)$"
+        ),
         limit: int = Query(default=settings.chart_bars, gt=0, le=5000),
     ) -> list[dict[str, Any]]:
         return await data.candles(tf, limit)
 
     @app.get("/api/indicators", dependencies=guard)
     async def api_indicators(
-        tf: str = Query(default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1)$"),
+        tf: str = Query(
+            default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1|W1|MN)$"
+        ),
         limit: int = Query(default=settings.chart_bars, gt=0, le=5000),
     ) -> dict[str, Any]:
         return await data.indicators(tf, limit)
+
+    @app.get("/api/forecast", dependencies=guard)
+    async def api_forecast(
+        tf: str = Query(
+            default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1|W1|MN)$"
+        ),
+    ) -> dict[str, Any]:
+        return await data.forecast(tf)
 
     @app.get("/api/timing", dependencies=guard)
     async def api_timing() -> dict[str, Any]:

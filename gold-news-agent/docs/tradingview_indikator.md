@@ -19,6 +19,16 @@ TP1, TP2, TP3, sampai jam berlakunya habis, plus warna sesi London/New York, jed
   data penting (15 menit sebelum sampai konfirmasi setelah rilis, sama dengan mesin sinyal),
   **jadwal peluang berikutnya** dari Outlook (jam WIB, arah, confidence, hitung mundur), dan
   **konfirmasi harga** (BUY bila tembus ke atas level X, SELL bila tembus ke bawah level Y).
+- **Lingkaran timeframe** (tombol biru bulat di pojok kiri atas grafik, seperti MT5): pilih M1,
+  M5, M15, M30, H1, H4, D1, W1 atau MN. Grafik pindah ke timeframe itu, dan di atas grafik muncul
+  **prediksi candle berikutnya**: M1 = 1 menit ke depan, H4 = 4 jam ke depan, dan seterusnya.
+  Isinya arah (▲ NAIK / ▼ TURUN / ◆ NETRAL / ⏸ TUNGGU DATA saat ada rilis data di dalam rentang
+  itu), kekuatan 0–100, perkiraan rentang dan target candle berikutnya, serta hitung mundur
+  sampai candle itu selesai. Di grafik tergambar garis dari harga terakhir ke target dan batas
+  atas/bawahnya. Rumusnya terbuka: 60% hitungan berita (skor mesin sinyal; sinyal aktif = penuh)
+  + 40% indikator timeframe itu (tren, EMA, RSI, Stoch, SAR); rentang = ATR(14) timeframe itu.
+  Kekuatan adalah skor, belum peluang yang dikalibrasi: menu Performa yang menilai. W1 dan MN
+  dibangun dari candle harian yang tersimpan, jadi riwayatnya pendek di awal.
 - **Grafik** dengan EMA 20/50/200, Bollinger (20, 2), VWAP, support/resistance, Parabolic SAR
   (0.02, 0.20) sebagai titik hijau/merah, RSI 14 dan Stoch (5, 3, 3) di panel bawah, plus garis entry/SL/TP sinyal aktif; tiap indikator bisa dimatikan lewat centang.
 - **Ringkasan indikator** per timeframe (M5, M15, H1, H4): BUY/SELL/NETRAL dari tren, posisi

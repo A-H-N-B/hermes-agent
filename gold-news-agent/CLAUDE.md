@@ -155,5 +155,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   0.2) in `market/indicators.py` (chart + per-TF votes). Claude credit (`dashboard/credit.py`,
   `/api/credit`, kv `llm_credit`): no API returns a prepaid balance for a normal key, so the user
   enters it once and `llm_usage` costs since then are subtracted; the POST is same-origin JSON only.
+  MT5-style timeframe ring on the Live chart (M1..MN; W1/MN aggregated from D1 by NY trading
+  date) with a next-candle forecast (`dashboard/forecast.py`, `/api/forecast`): 0.6 × engine score
+  (active signal = ±1) + 0.4 × that TF's indicator vote, range = TF ATR14, TUNGGU DATA when a
+  high-impact release falls inside the horizon. Not a calibrated probability.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

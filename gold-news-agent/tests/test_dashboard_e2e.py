@@ -123,6 +123,20 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         assert "sampai 21:35 WIB" in timing
         assert "Semua jadwal peluang" in (await page.text_content("#timing-details") or "")
         assert await page.evaluate("charts.live.ind.groups.sar.sar.data().length") > 0
+        await page.wait_for_selector("#tf-forecast .forecast-head")
+        await page.click("#tf-button")
+        await page.click(".tf-item[data-tf=M1]")
+        await page.wait_for_selector(
+            "#tf-forecast .forecast-head:has-text('M1 · 1 menit ke depan')"
+        )
+        assert await page.evaluate("charts.live.tf") == "M1"
+        assert await page.is_hidden("#tf-ring")
+        await page.click("#tf-button")
+        await page.click(".tf-item[data-tf=M5]")
+        await page.wait_for_selector(
+            "#tf-forecast .forecast-head:has-text('M5 · 5 menit ke depan')"
+        )
+        await _until(page, "charts.live.lines.length === 6")
         assert await page.evaluate("charts.live.ind.groups.stoch.stoch_k.data().length") > 0
         await page.wait_for_selector("#ind-chips .chip")
         height = await page.evaluate("document.documentElement.scrollHeight")
