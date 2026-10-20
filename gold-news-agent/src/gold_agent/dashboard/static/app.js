@@ -207,6 +207,7 @@ function makeChart(name, container, indicator) {
     wickUpColor: "#26a69a", wickDownColor: "#ef5350",
   });
   charts[name] = { chart, series, sessions, markers: lib.createSeriesMarkers(series, []), last: null, lines: [] };
+  if (name === "live") charts[name].ind = makeIndicatorSeries(lib, chart);
   if (indicator) {
     // Forecast layer to the right of the last candle: centre path + expected-range band.
     const line = (width, style) => chart.addSeries(lib.LineSeries, {
@@ -280,6 +281,176 @@ async function loadChart(state) {
     }
   }
   state.markers.setMarkers(markers.sort((a, b) => a.time - b.time));
+}
+
+// ------------------------------------------------------------------ indicators (Live chart)
+// EMA 20/50/200 and Bollinger(20, 2) over the candles, RSI 14 in its own pane, VWAP and
+// support/resistance as price lines; each group can be switched off with the checkboxes.
+function makeIndicatorSeries(lib, chart) {
+  const line = (color, width, style = 0, pane = 0) => chart.addSeries(lib.LineSeries, {
+    color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  }, pane);
+  const rsi = line("#b39ddb", 1, 0, 1);
+  rsi.createPriceLine({ price: 70, color: "#ef5350", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "70" });
+  rsi.createPriceLine({ price: 30, color: "#26a69a", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "30" });
+  const panes = chart.panes();
+  if (panes[1] && panes[1].setHeight) panes[1].setHeight(110);
+  return {
+    groups: {
+      ema: { ema20: line("#f5b041", 1), ema50: line("#5dade2", 1), ema200: line("#e74c3c", 2) },
+      bb: { bb_upper: line("rgba(155, 89, 182, 0.8)", 1, 2), bb_mid: line("rgba(155, 89, 182, 0.5)", 1, 1), bb_lower: line("rgba(155, 89, 182, 0.8)", 1, 2) },
+      rsi: { rsi14: rsi },
+    },
+    lines: { vwap: [], levels: [] },
+    summary: null,
+  };
+}
+
+function indicatorOn(key) {
+  const box = document.querySelector(`#ind-toggles input[data-ind=${key}]`);
+  return !box || box.checked;
+}
+
+function drawIndicatorLines(state) {
+  const ind = state.ind;
+  if (!ind || !ind.summary) return;
+  for (const key of ["vwap", "levels"]) {
+    for (const line of ind.lines[key]) state.series.removePriceLine(line);
+    ind.lines[key] = [];
+  }
+  const summary = ind.summary;
+  if (indicatorOn("vwap") && summary.vwap !== null && summary.vwap !== undefined) {
+    ind.lines.vwap.push(state.series.createPriceLine({ price: summary.vwap, color: "#00bcd4", lineStyle: 1, lineWidth: 1,
+      axisLabelVisible: true, title: summary.vwap_is_twap ? "TWAP" : "VWAP" }));
+  }
+  if (indicatorOn("levels")) {
+    for (const level of summary.levels) {
+      const color = level.kind === "support" ? "#26a69a" : level.kind === "resistance" ? "#ef5350" : "#8a93a6";
+      ind.lines.levels.push(state.series.createPriceLine({ price: level.price, color, lineStyle: 3, lineWidth: 1,
+        axisLabelVisible: false, title: level.name }));
+    }
+  }
+}
+
+function applyIndicatorToggles(state) {
+  if (!state || !state.ind) return;
+  for (const [key, group] of Object.entries(state.ind.groups)) {
+    for (const series of Object.values(group)) series.applyOptions({ visible: indicatorOn(key) });
+  }
+  drawIndicatorLines(state);
+}
+
+async function loadIndicators(state) {
+  if (!state || !state.ind) return;
+  const payload = await api(`/api/indicators?tf=${CHART_TF}`);
+  for (const group of Object.values(state.ind.groups)) {
+    for (const [field, series] of Object.entries(group)) {
+      series.setData(payload.series.map((row) => (row[field] === null
+        ? { time: row.time + WIB_OFFSET } : { time: row.time + WIB_OFFSET, value: row[field] })));
+    }
+  }
+  state.ind.summary = payload.summary;
+  applyIndicatorToggles(state);
+  renderIndicatorSummary(payload.summary);
+}
+
+function renderIndicatorSummary(summary) {
+  const body = clear($("#ind-table tbody"));
+  for (const r of summary.timeframes) {
+    body.append(el("tr", {},
+      el("td", { text: r.tf }),
+      el("td", { class: `verdict-${r.verdict.replace(" ", "-")}`, text: r.verdict }),
+      el("td", { class: "num", text: num(r.close) }),
+      el("td", { class: "num", text: num(r.ema20) }),
+      el("td", { class: "num", text: num(r.ema50) }),
+      el("td", { class: "num", text: num(r.ema200) }),
+      el("td", { class: "num", text: num(r.rsi14, 0) }),
+      el("td", { class: "num", text: num(r.atr14) }),
+      el("td", { class: "muted", text: r.reasons.join(", ") })));
+  }
+  if (!summary.timeframes.length) body.append(el("tr", {}, el("td", { colspan: 9, class: "muted", text: "data indikator belum tersedia" })));
+  const overall = $("#ind-overall");
+  overall.textContent = summary.overall ? `${summary.overall.verdict} (${summary.overall.buy} BUY · ${summary.overall.sell} SELL dari ${summary.overall.of})` : "";
+  overall.className = `badge ${summary.overall ? summary.overall.verdict : ""}`;
+  const extra = [];
+  if (summary.vwap !== null && summary.vwap !== undefined) extra.push(`${summary.vwap_is_twap ? "TWAP" : "VWAP"} ${num(summary.vwap)}`);
+  if (summary.nearest_above) extra.push(`resistance terdekat ${summary.nearest_above.name} ${num(summary.nearest_above.price)}`);
+  if (summary.nearest_below) extra.push(`support terdekat ${summary.nearest_below.name} ${num(summary.nearest_below.price)}`);
+  if (summary.atr_m15 !== null && summary.atr_m15 !== undefined) extra.push(`ATR M15 ${num(summary.atr_m15)}`);
+  if (summary.dxy_z_1h !== null && summary.dxy_z_1h !== undefined) extra.push(`DXY z-1j ${signed(summary.dxy_z_1h)}`);
+  $("#ind-extra").textContent = extra.join(" · ");
+}
+
+// ------------------------------------------------------------------ timing ("Kapan klik BUY / SELL")
+// The server sends absolute times; every countdown here is recomputed each second against the
+// browser clock, so "dalam 12:34" stays right between refreshes.
+function clockText(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
+}
+
+function liveCountdown(iso, before, during) {
+  return el("span", { class: "countdown-live", "data-target": String(Date.parse(iso)),
+    "data-before": before, "data-during": during, text: "…" });
+}
+
+function tickLiveCountdowns() {
+  const now = Date.now();
+  for (const node of document.querySelectorAll(".countdown-live")) {
+    const seconds = (Number(node.dataset.target) - now) / 1000;
+    node.textContent = seconds > 0 ? `${node.dataset.before} ${clockText(seconds)}` : node.dataset.during;
+  }
+}
+
+function renderTiming(t) {
+  const box = clear($("#timing"));
+  const n = t.now;
+  if (n.mode === "signal") {
+    box.append(el("p", { class: `timing-now ${n.action}` },
+      `${n.action} SEKARANG di zona ${num(n.entry_low)}–${num(n.entry_high)} · SL ${num(n.stop_loss)} · TP1 ${num(n.tp1)} · TP2 ${num(n.tp2)} · `,
+      liveCountdown(n.until_utc, "sisa waktu", "sinyal sudah kedaluwarsa"),
+      ` (s/d ${n.until_wib} WIB)`));
+  } else {
+    box.append(el("p", { class: "timing-now WAIT", text: "TUNGGU · jangan klik BUY/SELL dulu" }));
+    if (n.reasons.length) box.append(el("p", { class: "muted", text: `Karena: ${n.reasons.join("; ")}` }));
+  }
+  const list = el("ul", { class: "timing-list" });
+  if (t.blackout) {
+    const b = t.blackout;
+    list.append(el("li", { class: "block" },
+      el("b", { text: `⛔ Jangan klik ${b.from_wib}–${b.to_wib} WIB` }), ` · rilis ${b.title} pukul ${b.at_wib} WIB · `,
+      b.active ? liveCountdown(b.to_utc, "boleh lagi dalam", "sudah boleh") : liveCountdown(b.from_utc, "mulai dalam", "sedang berlangsung")));
+  }
+  for (const w of t.windows) {
+    list.append(el("li", { class: w.action },
+      el("b", { text: `${w.action} · ${w.label_wib} WIB` }), " · ",
+      liveCountdown(w.from_utc, "mulai dalam", "sedang berlangsung"),
+      ` · confidence ${w.confidence ?? "–"}${w.conditional ? " (bersyarat)" : ""}`,
+      el("div", { class: "meta", text: w.scenario })));
+  }
+  if (!t.windows.length) list.append(el("li", { class: "muted", text: "Belum ada jam yang condong BUY atau SELL di Outlook 24 jam ke depan." }));
+  box.append(el("h2", { text: "Jadwal peluang berikutnya" }), list);
+  if (t.triggers) {
+    const parts = [`Harga sekarang ${num(t.triggers.mid)}.`];
+    if (t.triggers.buy_above) parts.push(`Peluang BUY bila tembus ke atas ${num(t.triggers.buy_above.price)} (${t.triggers.buy_above.name}).`);
+    if (t.triggers.sell_below) parts.push(`Peluang SELL bila tembus ke bawah ${num(t.triggers.sell_below.price)} (${t.triggers.sell_below.name}).`);
+    box.append(el("p", {}, el("b", { text: "Konfirmasi harga: " }), parts.join(" ")));
+  }
+  box.append(el("p", { class: "muted", text: "Klik BUY/SELL di broker hanya saat kotak sinyal di bawah berubah menjadi BUY/SELL (juga dikirim ke Telegram) dengan angka entry, SL dan TP. Jadwal di atas adalah prediksi kapan peluang paling mungkin muncul, bukan perintah." }));
+  tickLiveCountdowns();
+}
+
+const headerClock = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+});
+function tickClock() {
+  const now = new Date();
+  const parts = Object.fromEntries(wibFormat.formatToParts(now).map((p) => [p.type, p.value]));
+  $("#clock").textContent = `${parts.weekday} ${parts.day} ${parts.month} · ${headerClock.format(now)} WIB`;
 }
 
 // ------------------------------------------------------------------ forecast (Proyeksi 24 jam)
@@ -434,6 +605,7 @@ function onTick(tick) {
     }
     state.last = bar;
     if (newBar) drawProjection(state);
+    if (newBar && state.ind && currentPage === "live") refreshLiveExtras();
   }
 }
 
@@ -618,6 +790,8 @@ const loaders = {
     const chart = makeChart("live", $("#chart"), false);
     await loadChart(chart);
     drawSignal(chart, state.active);
+    await loadIndicators(chart);
+    renderTiming(await api("/api/timing"));
   },
   outlook: async () => {
     const [outlook, state] = await Promise.all([api("/api/outlook"), api("/api/state")]);
@@ -699,6 +873,16 @@ async function show(page) {
   }
 }
 
+let extrasTimer = null;
+function refreshLiveExtras() { // new bar: indicators move and the timing windows roll forward
+  if (extrasTimer) return;
+  extrasTimer = setTimeout(async () => {
+    extrasTimer = null;
+    await loadIndicators(charts.live);
+    renderTiming(await api("/api/timing"));
+  }, 1500);
+}
+
 let refreshTimer = null;
 function refreshSoon() { // coalesce bursts of state/signal events into one fetch
   if (refreshTimer) return;
@@ -709,6 +893,7 @@ function refreshSoon() { // coalesce bursts of state/signal events into one fetc
       renderSignalCard(state);
       renderPrice(state.context);
       drawSignal(charts.live, state.active);
+      renderTiming(await api("/api/timing"));
     }
   }, 500);
 }
@@ -736,9 +921,11 @@ window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 window.addEventListener("DOMContentLoaded", () => {
   show(location.hash.slice(1) || "live");
   $("#tv-copy-script").addEventListener("click", copyIndicatorScript);
+  $("#ind-toggles").addEventListener("change", () => applyIndicatorToggles(charts.live));
+  tickClock();
   api("/api/state").then((state) => {
     $("nav a[data-page=tradingview]").hidden = !state.tradingview_symbol;
   }).catch(() => {});
   connect();
-  setInterval(tickCountdown, 1000);
+  setInterval(() => { tickCountdown(); tickClock(); tickLiveCountdowns(); }, 1000);
 });

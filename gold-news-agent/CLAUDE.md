@@ -148,5 +148,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   page also draws the indicator itself (Lightweight Charts: signal price lines, session bands,
   08:30 NY marks), a "Rencana trading" table, and a 24 h forecast ahead of the last candle
   (outlook bias × confidence × expected range; heads to TP1 while a signal is active).
+  Live page: WIB clock, "Kapan klik BUY/SELL" (`dashboard/timing.py`: now/blackout/next outlook
+  windows/level triggers, browser-side countdowns), overlays + per-TF read
+  (`dashboard/indicators_view.py`: EMA20/50/200, BB, RSI pane, VWAP, levels; the read never
+  makes a signal). APIs `/api/timing`, `/api/indicators`.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

@@ -158,6 +158,17 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
     ) -> list[dict[str, Any]]:
         return await data.candles(tf, limit)
 
+    @app.get("/api/indicators", dependencies=guard)
+    async def api_indicators(
+        tf: str = Query(default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1)$"),
+        limit: int = Query(default=settings.chart_bars, gt=0, le=5000),
+    ) -> dict[str, Any]:
+        return await data.indicators(tf, limit)
+
+    @app.get("/api/timing", dependencies=guard)
+    async def api_timing() -> dict[str, Any]:
+        return await data.timing()
+
     @app.get("/api/markers", dependencies=guard)
     async def api_markers(hours: float = Query(default=24, gt=0, le=24 * 14)) -> dict[str, Any]:
         return await data.markers(hours)

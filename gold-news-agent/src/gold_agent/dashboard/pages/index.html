@@ -13,6 +13,7 @@
   <header>
     <div class="brand">XAUUSD <span class="muted">Gold News Agent</span></div>
     <div id="price" class="price">–</div>
+    <div id="clock" class="clock" title="jam real-time WIB (Asia/Jakarta)">--:--:-- WIB</div>
     <div id="conn" class="conn off" title="koneksi live">● live</div>
     <form method="post" action="/logout"><button type="submit" class="link">Keluar</button></form>
   </header>
@@ -26,10 +27,37 @@
   </nav>
   <main>
     <section id="page-live" class="page">
+      <article class="card">
+        <h2>Kapan klik BUY / SELL <span class="muted">(prediksi alat berita, jam WIB)</span></h2>
+        <div id="timing"><p class="muted">Memuat…</p></div>
+      </article>
       <div class="grid">
         <article id="signal-card" class="card"><p class="muted">Memuat…</p></article>
-        <article class="card chart-card"><div id="chart"></div></article>
+        <article class="card chart-card chart-stack">
+          <div id="ind-toggles" class="toggles">
+            <label><input type="checkbox" data-ind="ema" checked> EMA 20/50/200</label>
+            <label><input type="checkbox" data-ind="bb" checked> Bollinger</label>
+            <label><input type="checkbox" data-ind="vwap" checked> VWAP</label>
+            <label><input type="checkbox" data-ind="levels" checked> Support/Resistance</label>
+            <label><input type="checkbox" data-ind="rsi" checked> RSI 14</label>
+          </div>
+          <div id="chart"></div>
+        </article>
       </div>
+      <article class="card">
+        <h2>Ringkasan indikator <span id="ind-overall" class="badge"></span></h2>
+        <div class="table-wrap">
+          <table id="ind-table" class="stack">
+            <thead><tr><th>Timeframe</th><th>Kesimpulan</th><th class="num">Harga</th>
+              <th class="num">EMA20</th><th class="num">EMA50</th><th class="num">EMA200</th>
+              <th class="num">RSI14</th><th class="num">ATR14</th><th>Alasan</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="ind-extra" class="muted"></p>
+        <p class="muted">Ringkasan indikator teknikal hanya membaca grafik. Angka BUY/SELL yang
+          dipakai tetap dari sinyal alat berita (berita + makro + teknikal + konfirmasi harga).</p>
+      </article>
       <article class="card">
         <h2>Berita terbaru</h2>
         <ul id="news" class="feed"></ul>

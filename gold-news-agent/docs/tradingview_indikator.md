@@ -4,6 +4,19 @@ Sinyal dari alat berita bisa digambar di grafik TradingView milikmu: kotak zona 
 TP1, TP2, TP3, sampai jam berlakunya habis, plus warna sesi London/New York, jeda harian
 17:00–18:00 New York, dan garis rilis data AS 08:30 New York (sama dengan aturan alat ini).
 
+## Menu Live: indikator lengkap dan "Kapan klik BUY / SELL"
+
+- **Jam WIB real-time** di kanan atas (detik berjalan).
+- **Kapan klik BUY / SELL**: saat ada sinyal tertulis *BUY/SELL SEKARANG* dengan zona, SL, TP
+  dan hitung mundur sisa waktunya. Saat menunggu: alasannya, **jam larangan** di sekitar rilis
+  data penting (15 menit sebelum sampai konfirmasi setelah rilis, sama dengan mesin sinyal),
+  **jadwal peluang berikutnya** dari Outlook (jam WIB, arah, confidence, hitung mundur), dan
+  **konfirmasi harga** (BUY bila tembus ke atas level X, SELL bila tembus ke bawah level Y).
+- **Grafik** dengan EMA 20/50/200, Bollinger (20, 2), VWAP, support/resistance, RSI 14 di
+  panel bawah, plus garis entry/SL/TP sinyal aktif; tiap indikator bisa dimatikan lewat centang.
+- **Ringkasan indikator** per timeframe (M5, M15, H1, H4): BUY/SELL/NETRAL dari tren, posisi
+  harga terhadap EMA, dan RSI. Ini hanya membaca grafik; angka yang dipakai tetap dari sinyal.
+
 ## Langsung di dashboard (tanpa salin-tempel)
 
 Menu **TradingView** di dashboard (`http://127.0.0.1:8787/#tradingview`) menampilkan:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,17 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         card = await page.text_content("#signal-card") or ""
         assert "2649.60–2650.40" in card and "2643.60" in card and "Batal jika" in card
         await _until(page, "charts.live && charts.live.lines.length === 6")  # entry x2, SL, TP1-3
+        clock = await page.text_content("#clock") or ""
+        assert re.search(r"\d{2}:\d{2}:\d{2} WIB$", clock), clock  # real-time WIB clock
+        await page.wait_for_selector("#timing .timing-now.BUY")
+        timing = await page.text_content("#timing") or ""
+        # The countdown runs on the browser clock; the seeded day is in the past, so it has expired.
+        assert "BUY SEKARANG di zona 2649.60–2650.40" in timing and "(s/d 21:35 WIB)" in timing
+        assert "Jadwal peluang berikutnya" in timing
+        await page.wait_for_selector("#ind-table tbody tr td.verdict-BUY, #ind-table tbody tr td")
+        assert await page.evaluate("charts.live.ind.groups.ema.ema200.options().visible")
+        await page.click("#ind-toggles input[data-ind=ema]")
+        assert not await page.evaluate("charts.live.ind.groups.ema.ema200.options().visible")
         code = await page.text_content("#signal-card .tv-code code") or ""
         assert code.startswith("GNA1|BUY|") and "|2643.60|" in code
         await page.wait_for_selector("#chart canvas")

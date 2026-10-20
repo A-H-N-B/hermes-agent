@@ -8,6 +8,8 @@ from typing import Any
 
 from gold_agent.analysis.llm_client import wib_day_start
 from gold_agent.core.app import AppContext
+from gold_agent.dashboard.indicators_view import WARMUP_BARS, indicator_series, indicator_summary
+from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
 from gold_agent.models import Analysis, CalendarEvent, MarketContext
 from gold_agent.ops.metrics import summarize as latency_summary
@@ -110,6 +112,29 @@ class DashboardData:
             }
             for bar in bars
         ]
+
+    async def indicators(self, tf: str, limit: int) -> JSON:
+        ctx = self._ctx
+        bars = await ctx.market.latest_candles(tf, limit + WARMUP_BARS, source=await self._source())
+        return {
+            "series": indicator_series(bars, limit),
+            "summary": indicator_summary(await ctx.market.latest_context()),
+        }
+
+    async def timing(self) -> JSON:
+        ctx = self._ctx
+        now = ctx.clock.now()
+        stored = await ctx.ops.kv_get(KV_ENGINE)
+        engine = EngineState.from_json(stored) if stored else EngineState()
+        return timing_view(
+            now=now,
+            settings=ctx.settings,
+            active=engine.active(now),
+            state=await ctx.signals.latest_state(),
+            outlook=await ctx.signals.latest_outlook(),
+            events=await ctx.calendar.between(now - timedelta(hours=1), now + timedelta(days=2)),
+            context=await ctx.market.latest_context(),
+        )
 
     async def markers(self, hours: float) -> JSON:
         ctx = self._ctx
