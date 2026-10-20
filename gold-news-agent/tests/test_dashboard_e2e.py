@@ -122,6 +122,9 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         assert "BUY SEKARANG di zona 2649.60–2650.40" in timing and "(s/d 21:35 WIB)" in timing
         assert "Jadwal peluang berikutnya" in timing
         await page.wait_for_selector("#ind-table tbody tr td.verdict-BUY, #ind-table tbody tr td")
+        height = await page.evaluate("document.documentElement.scrollHeight")
+        await page.wait_for_timeout(1500)
+        assert await page.evaluate("document.documentElement.scrollHeight") == height  # no growth
         assert await page.evaluate("charts.live.ind.groups.ema.ema200.options().visible")
         await page.click("#ind-toggles input[data-ind=ema]")
         assert not await page.evaluate("charts.live.ind.groups.ema.ema200.options().visible")
