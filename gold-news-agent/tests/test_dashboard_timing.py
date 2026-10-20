@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import numpy as np
+import pytest
+
 from gold_agent.config import Settings
 from gold_agent.dashboard.indicators_view import (
     WARMUP_BARS,
@@ -159,3 +162,34 @@ def test_overlays_have_ema200_from_the_first_shown_bar_given_the_warmup() -> Non
     assert all(r["ema200"] is not None and r["rsi14"] is not None for r in rows)
     assert rows[-1]["bb_lower"] < rows[-1]["bb_mid"] < rows[-1]["bb_upper"]
     assert indicator_series(bars[:10], 10)[0]["ema20"] is None  # not enough data -> no value
+
+
+def test_stochastic_5_3_3_is_bounded_and_tops_out_at_the_high_of_the_range() -> None:
+    from gold_agent.market.indicators import stochastic
+
+    highs = [float(x) for x in range(1, 21)]
+    lows = [h - 1 for h in highs]
+    closes = highs[:]  # every close at the period high
+    k, d = stochastic(highs, lows, closes, 5, 3, 3)
+    assert k[-1] == pytest.approx(100.0) and d[-1] == pytest.approx(100.0)
+    assert all(0 <= v <= 100 for v in k[~np.isnan(k)])
+    assert np.isnan(k[5]) and not np.isnan(k[6])  # 5-bar window + 3-bar smoothing
+
+
+def test_parabolic_sar_trails_an_uptrend_and_flips_on_the_reversal() -> None:
+    from gold_agent.market.indicators import parabolic_sar
+
+    highs = [10.0, 11, 12, 13, 14, 15, 14, 13, 12, 11, 10, 9]
+    lows = [h - 1 for h in highs]
+    sar, direction = parabolic_sar(highs, lows, 0.02, 0.2)
+    assert all(direction[1:8] == 1) and all(sar[i] < lows[i] for i in range(1, 8))
+    assert all(direction[8:] == -1) and sar[8] == 15.0  # flips to the prior extreme high
+    assert all(sar[i] > highs[i] for i in range(8, 12))
+
+
+def test_sar_and_stochastic_vote_in_the_timeframe_read() -> None:
+    state = TimeframeState(tf="M5", close=2650, ema20=2649, ema50=2651, trend="flat")
+    up = timeframe_read(state, {"sar_up": True, "stoch_k": 60.0, "stoch_d": 50.0})
+    down = timeframe_read(state, {"sar_up": False, "stoch_k": 15.0, "stoch_d": 25.0})
+    assert up["verdict"] == "BUY" and "SAR di bawah harga" in up["reasons"]
+    assert down["verdict"] == "SELL" and "Stoch turun (15), jenuh jual" in down["reasons"]

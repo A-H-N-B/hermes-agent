@@ -116,12 +116,15 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         await _until(page, "charts.live && charts.live.lines.length === 6")  # entry x2, SL, TP1-3
         clock = await page.text_content("#clock") or ""
         assert re.search(r"\d{2}:\d{2}:\d{2} WIB$", clock), clock  # real-time WIB clock
-        await page.wait_for_selector("#timing .timing-now.BUY")
+        await page.wait_for_selector("#timing .board-head.BUY")
         timing = await page.text_content("#timing") or ""
         # The countdown runs on the browser clock; the seeded day is in the past, so it has expired.
-        assert "BUY SEKARANG di zona 2649.60–2650.40" in timing and "(s/d 21:35 WIB)" in timing
-        assert "Jadwal peluang berikutnya" in timing
-        await page.wait_for_selector("#ind-table tbody tr td.verdict-BUY, #ind-table tbody tr td")
+        assert "BUY SEKARANG" in timing and "2649.60 – 2650.40" in timing and "2643.60" in timing
+        assert "sampai 21:35 WIB" in timing
+        assert "Semua jadwal peluang" in (await page.text_content("#timing-details") or "")
+        assert await page.evaluate("charts.live.ind.groups.sar.sar.data().length") > 0
+        assert await page.evaluate("charts.live.ind.groups.stoch.stoch_k.data().length") > 0
+        await page.wait_for_selector("#ind-chips .chip")
         height = await page.evaluate("document.documentElement.scrollHeight")
         await page.wait_for_timeout(1500)
         assert await page.evaluate("document.documentElement.scrollHeight") == height  # no growth
@@ -172,6 +175,10 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
 
         await page.click("nav a[data-page=kesehatan]")
         await page.wait_for_selector("#sources-table tbody tr")
+        await page.fill("#credit-input", "9.85")
+        await page.click("#credit-form button[type=submit]")
+        await page.wait_for_selector("#credit-status:has-text('Tersimpan')")
+        assert (await page.text_content("#credit") or "").startswith("Claude $9.85")
         sources = await page.text_content("#sources-table") or ""
         assert "bls_latest" in sources and "down" in sources and "HTTP 403" in sources
 

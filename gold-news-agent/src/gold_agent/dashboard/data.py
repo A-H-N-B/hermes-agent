@@ -8,7 +8,13 @@ from typing import Any
 
 from gold_agent.analysis.llm_client import wib_day_start
 from gold_agent.core.app import AppContext
-from gold_agent.dashboard.indicators_view import WARMUP_BARS, indicator_series, indicator_summary
+from gold_agent.dashboard.indicators_view import (
+    SUMMARY_TFS,
+    WARMUP_BARS,
+    indicator_series,
+    indicator_summary,
+    momentum,
+)
 from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
 from gold_agent.models import Analysis, CalendarEvent, MarketContext
@@ -115,10 +121,15 @@ class DashboardData:
 
     async def indicators(self, tf: str, limit: int) -> JSON:
         ctx = self._ctx
-        bars = await ctx.market.latest_candles(tf, limit + WARMUP_BARS, source=await self._source())
+        source = await self._source()
+        bars = await ctx.market.latest_candles(tf, limit + WARMUP_BARS, source=source)
+        extras = {
+            name: momentum(await ctx.market.latest_candles(name, 120, source=source))
+            for name in SUMMARY_TFS
+        }
         return {
             "series": indicator_series(bars, limit),
-            "summary": indicator_summary(await ctx.market.latest_context()),
+            "summary": indicator_summary(await ctx.market.latest_context(), extras),
         }
 
     async def timing(self) -> JSON:

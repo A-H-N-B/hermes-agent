@@ -93,6 +93,84 @@ def bollinger(
     return mid, mid + mult * std, mid - mult * std
 
 
+def stochastic(
+    high: Sequence[float],
+    low: Sequence[float],
+    close: Sequence[float],
+    k_period: int = 5,
+    k_smooth: int = 3,
+    d_period: int = 3,
+) -> tuple[Array, Array]:
+    """Slow stochastic (%K, %D) as charting platforms show Stoch(5, 3, 3): raw %K over k_period,
+    %K = SMA(k_smooth) of raw, %D = SMA(d_period) of %K. A flat window counts as 50."""
+    h, lo, c = _arr(high), _arr(low), _arr(close)
+    raw = np.full(c.shape, np.nan)
+    if len(c) >= k_period:
+        highest = np.lib.stride_tricks.sliding_window_view(h, k_period).max(axis=1)
+        lowest = np.lib.stride_tricks.sliding_window_view(lo, k_period).min(axis=1)
+        span = highest - lowest
+        with np.errstate(divide="ignore", invalid="ignore"):
+            value = np.where(span > 0, 100 * (c[k_period - 1 :] - lowest) / span, 50.0)
+        raw[k_period - 1 :] = value
+    k = _sma_nan(raw, k_smooth)
+    return k, _sma_nan(k, d_period)
+
+
+def _sma_nan(values: Array, period: int) -> Array:
+    """SMA that starts after the leading NaNs of `values` (for chained smoothing)."""
+    out = np.full(values.shape, np.nan)
+    valid = np.flatnonzero(~np.isnan(values))
+    if len(valid) == 0:
+        return out
+    first = int(valid[0])
+    out[first:] = sma(values[first:].tolist(), period)
+    return out
+
+
+def parabolic_sar(
+    high: Sequence[float],
+    low: Sequence[float],
+    start: float = 0.02,
+    maximum: float = 0.2,
+    increment: float | None = None,
+) -> tuple[Array, Array]:
+    """Wilder's Parabolic SAR (start, maximum; the step defaults to `start`, as platforms do).
+
+    Returns (sar, direction) with direction +1 while the SAR sits below price (uptrend) and -1
+    above it. The SAR never enters the previous two bars' range, and flips when price crosses it.
+    """
+    h, lo = _arr(high), _arr(low)
+    step = start if increment is None else increment
+    n = len(h)
+    sar = np.full(n, np.nan)
+    direction = np.zeros(n)
+    if n < 2:
+        return sar, direction
+    up = h[1] >= h[0]
+    af = start
+    extreme = h[0] if up else lo[0]
+    sar[1] = lo[0] if up else h[0]
+    direction[1] = 1 if up else -1
+    for i in range(2, n):
+        prev = sar[i - 1]
+        value = prev + af * (extreme - prev)
+        if up:
+            value = min(value, lo[i - 1], lo[i - 2])
+            if lo[i] < value:  # reversal to a downtrend
+                up, value, extreme, af = False, extreme, lo[i], start
+            elif h[i] > extreme:
+                extreme, af = h[i], min(af + step, maximum)
+        else:
+            value = max(value, h[i - 1], h[i - 2])
+            if h[i] > value:  # reversal to an uptrend
+                up, value, extreme, af = True, extreme, h[i], start
+            elif lo[i] < extreme:
+                extreme, af = lo[i], min(af + step, maximum)
+        sar[i] = value
+        direction[i] = 1 if up else -1
+    return sar, direction
+
+
 def vwap(
     high: Sequence[float], low: Sequence[float], close: Sequence[float], volume: Sequence[float]
 ) -> tuple[float | None, bool]:

@@ -7,13 +7,20 @@ TP1, TP2, TP3, sampai jam berlakunya habis, plus warna sesi London/New York, jed
 ## Menu Live: indikator lengkap dan "Kapan klik BUY / SELL"
 
 - **Jam WIB real-time** di kanan atas (detik berjalan).
-- **Kapan klik BUY / SELL**: saat ada sinyal tertulis *BUY/SELL SEKARANG* dengan zona, SL, TP
+- **Saldo API Claude** di kanan atas (contoh `Claude $9.85 · ±12 hari`): isi saldo dari
+  console.anthropic.com sekali di menu Kesehatan; sisanya dikurangi otomatis dari biaya setiap
+  panggilan Claude. Kuning = menipis (< 7 hari / < $2), merah = habis.
+- **Kapan klik BUY / SELL**: papan besar *🟢 BUY SEKARANG / 🔴 SELL SEKARANG / ⏳ TUNGGU*. Saat ada
+  sinyal: kotak Masuk di, Stop loss, Target, Sisa waktu. Saat menunggu: Prediksi berikutnya (arah +
+  jam WIB + hitung mundur), Jangan trading (jam rilis data), Pantau harga (BUY > X · SELL < Y),
+  dan satu baris apakah indikator searah. Detail ada di "Lihat detail".
+- Sebelumnya: saat ada sinyal tertulis *BUY/SELL SEKARANG* dengan zona, SL, TP
   dan hitung mundur sisa waktunya. Saat menunggu: alasannya, **jam larangan** di sekitar rilis
   data penting (15 menit sebelum sampai konfirmasi setelah rilis, sama dengan mesin sinyal),
   **jadwal peluang berikutnya** dari Outlook (jam WIB, arah, confidence, hitung mundur), dan
   **konfirmasi harga** (BUY bila tembus ke atas level X, SELL bila tembus ke bawah level Y).
-- **Grafik** dengan EMA 20/50/200, Bollinger (20, 2), VWAP, support/resistance, RSI 14 di
-  panel bawah, plus garis entry/SL/TP sinyal aktif; tiap indikator bisa dimatikan lewat centang.
+- **Grafik** dengan EMA 20/50/200, Bollinger (20, 2), VWAP, support/resistance, Parabolic SAR
+  (0.02, 0.20) sebagai titik hijau/merah, RSI 14 dan Stoch (5, 3, 3) di panel bawah, plus garis entry/SL/TP sinyal aktif; tiap indikator bisa dimatikan lewat centang.
 - **Ringkasan indikator** per timeframe (M5, M15, H1, H4): BUY/SELL/NETRAL dari tren, posisi
   harga terhadap EMA, dan RSI. Ini hanya membaca grafik; angka yang dipakai tetap dari sinyal.
 

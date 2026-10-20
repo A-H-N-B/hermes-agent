@@ -21,6 +21,9 @@ JSON = dict[str, Any]
 WARMUP_BARS = 200  # EMA200 needs this many bars before its first value
 SUMMARY_TFS = ("M5", "M15", "H1", "H4")
 RSI_BULL, RSI_BEAR = 55.0, 45.0
+STOCH = (5, 3, 3)  # Stoch(5, 3, 3)
+SAR = (0.02, 0.20)  # Parabolic SAR(start/step 0.02, maximum 0.20)
+STOCH_HIGH, STOCH_LOW = 80.0, 20.0
 
 
 def _num(value: float) -> float | None:
@@ -28,8 +31,12 @@ def _num(value: float) -> float | None:
 
 
 def indicator_series(bars: Sequence[Candle], keep: int) -> list[JSON]:
-    """EMA20/50/200, Bollinger(20, 2) and RSI14 per bar; only the last `keep` bars are returned."""
+    """EMA20/50/200, Bollinger(20, 2), RSI14, Stoch(5,3,3) and SAR(0.02, 0.2) per bar; only the
+    last `keep` bars are returned."""
     closes = [bar.close for bar in bars]
+    highs, lows = [bar.high for bar in bars], [bar.low for bar in bars]
+    stoch_k, stoch_d = ind.stochastic(highs, lows, closes, *STOCH)
+    sar, sar_dir = ind.parabolic_sar(highs, lows, *SAR)
     ema20, ema50, ema200 = ind.ema(closes, 20), ind.ema(closes, 50), ind.ema(closes, 200)
     bb_mid, bb_upper, bb_lower = ind.bollinger(closes, 20, 2.0)
     rsi14 = ind.rsi(closes, 14)
@@ -45,13 +52,48 @@ def indicator_series(bars: Sequence[Candle], keep: int) -> list[JSON]:
                 "bb_mid": _num(bb_mid[i]),
                 "bb_lower": _num(bb_lower[i]),
                 "rsi14": _num(rsi14[i]),
+                "stoch_k": _num(stoch_k[i]),
+                "stoch_d": _num(stoch_d[i]),
+                "sar": _num(sar[i]),
+                "sar_up": bool(sar_dir[i] > 0) if not math.isnan(sar[i]) else None,
             }
         )
     return rows
 
 
-def timeframe_read(state: TimeframeState) -> JSON:
-    """Vote of trend, price vs EMA20/EMA200, EMA20 vs EMA50 and RSI: +1 each for up, -1 for down."""
+def momentum(bars: Sequence[Candle]) -> JSON:
+    """Latest Stoch(5,3,3) and SAR(0.02, 0.2) of one timeframe's candles (None without data)."""
+    closes = [bar.close for bar in bars]
+    highs, lows = [bar.high for bar in bars], [bar.low for bar in bars]
+    stoch_k, stoch_d = ind.stochastic(highs, lows, closes, *STOCH)
+    sar, sar_dir = ind.parabolic_sar(highs, lows, *SAR)
+    ok = len(bars) > 0 and not math.isnan(sar[-1])
+    return {
+        "stoch_k": _num(stoch_k[-1]) if len(bars) else None,
+        "stoch_d": _num(stoch_d[-1]) if len(bars) else None,
+        "sar": _num(sar[-1]) if ok else None,
+        "sar_up": bool(sar_dir[-1] > 0) if ok else None,
+    }
+
+
+def _momentum_votes(extra: JSON) -> list[tuple[int, str]]:
+    votes: list[tuple[int, str]] = []
+    if extra.get("sar_up") is not None:
+        votes.append((1, "SAR di bawah harga") if extra["sar_up"] else (-1, "SAR di atas harga"))
+    k, d = extra.get("stoch_k"), extra.get("stoch_d")
+    if k is not None and d is not None:
+        if k > d:
+            votes.append((1, f"Stoch naik ({k:.0f})" + (", jenuh beli" if k >= STOCH_HIGH else "")))
+        elif k < d:
+            votes.append(
+                (-1, f"Stoch turun ({k:.0f})" + (", jenuh jual" if k <= STOCH_LOW else ""))
+            )
+    return votes
+
+
+def timeframe_read(state: TimeframeState, extra: JSON | None = None) -> JSON:
+    """Vote of trend, price vs EMA20/EMA200, EMA20 vs EMA50, RSI, and (when given) Parabolic SAR
+    and Stochastic: +1 each for up, -1 for down."""
     votes: list[tuple[int, str]] = []
     close = state.close
     if state.trend in ("up", "down"):
@@ -67,6 +109,7 @@ def timeframe_read(state: TimeframeState) -> JSON:
             votes.append((1, f"RSI {state.rsi14:.0f}"))
         elif state.rsi14 <= RSI_BEAR:
             votes.append((-1, f"RSI {state.rsi14:.0f}"))
+    votes += _momentum_votes(extra or {})
     score = sum(v for v, _ in votes)
     strong = len(votes) >= 4 and abs(score) == len(votes)
     if score >= 2:
@@ -87,14 +130,18 @@ def timeframe_read(state: TimeframeState) -> JSON:
         "ema200": state.ema200,
         "rsi14": state.rsi14,
         "atr14": state.atr14,
+        **{key: (extra or {}).get(key) for key in ("stoch_k", "stoch_d", "sar", "sar_up")},
     }
 
 
-def indicator_summary(context: MarketContext | None) -> JSON:
+def indicator_summary(context: MarketContext | None, extras: dict[str, JSON] | None = None) -> JSON:
     if context is None:
         return {"timeframes": [], "overall": None, "levels": [], "vwap": None}
+    extras = extras or {}
     reads = [
-        timeframe_read(context.timeframes[tf]) for tf in SUMMARY_TFS if tf in context.timeframes
+        timeframe_read(context.timeframes[tf], extras.get(tf))
+        for tf in SUMMARY_TFS
+        if tf in context.timeframes
     ]
     buys = sum(1 for r in reads if r["verdict"].startswith("BUY"))
     sells = sum(1 for r in reads if r["verdict"].startswith("SELL"))

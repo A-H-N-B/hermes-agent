@@ -294,13 +294,23 @@ function makeIndicatorSeries(lib, chart) {
   const rsi = line("#b39ddb", 1, 0, 1);
   rsi.createPriceLine({ price: 70, color: "#ef5350", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "70" });
   rsi.createPriceLine({ price: 30, color: "#26a69a", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "30" });
+  const stochK = line("#5dade2", 1, 0, 2);
+  const stochD = line("#f5b041", 1, 0, 2);
+  stochK.createPriceLine({ price: 80, color: "#ef5350", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "80" });
+  stochK.createPriceLine({ price: 20, color: "#26a69a", lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "20" });
+  const sar = chart.addSeries(lib.LineSeries, {
+    lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2, priceLineVisible: false,
+    lastValueVisible: false, crosshairMarkerVisible: false,
+  });
   const panes = chart.panes();
-  if (panes[1] && panes[1].setHeight) panes[1].setHeight(110);
+  for (const index of [1, 2]) if (panes[index] && panes[index].setHeight) panes[index].setHeight(100);
   return {
     groups: {
       ema: { ema20: line("#f5b041", 1), ema50: line("#5dade2", 1), ema200: line("#e74c3c", 2) },
       bb: { bb_upper: line("rgba(155, 89, 182, 0.8)", 1, 2), bb_mid: line("rgba(155, 89, 182, 0.5)", 1, 1), bb_lower: line("rgba(155, 89, 182, 0.8)", 1, 2) },
       rsi: { rsi14: rsi },
+      stoch: { stoch_k: stochK, stoch_d: stochD },
+      sar: { sar },
     },
     lines: { vwap: [], levels: [] },
     summary: null,
@@ -346,8 +356,13 @@ async function loadIndicators(state) {
   const payload = await api(`/api/indicators?tf=${CHART_TF}`);
   for (const group of Object.values(state.ind.groups)) {
     for (const [field, series] of Object.entries(group)) {
-      series.setData(payload.series.map((row) => (row[field] === null
-        ? { time: row.time + WIB_OFFSET } : { time: row.time + WIB_OFFSET, value: row[field] })));
+      series.setData(payload.series.map((row) => {
+        if (row[field] === null) return { time: row.time + WIB_OFFSET };
+        const point = { time: row.time + WIB_OFFSET, value: row[field] };
+        // SAR dots: green below price (uptrend), red above (downtrend).
+        if (field === "sar") point.color = row.sar_up ? "#26a69a" : "#ef5350";
+        return point;
+      }));
     }
   }
   state.ind.summary = payload.summary;
@@ -355,7 +370,16 @@ async function loadIndicators(state) {
   renderIndicatorSummary(payload.summary);
 }
 
+let lastSummary = null;
+let lastTiming = null;
+
 function renderIndicatorSummary(summary) {
+  lastSummary = summary;
+  const chips = clear($("#ind-chips"));
+  for (const r of summary.timeframes) {
+    chips.append(el("span", { class: `chip verdict-${r.verdict.replace(" ", "-")}`, text: `${r.tf} ${r.verdict}` }));
+  }
+  if (lastTiming) renderBoard();
   const body = clear($("#ind-table tbody"));
   for (const r of summary.timeframes) {
     body.append(el("tr", {},
@@ -367,9 +391,12 @@ function renderIndicatorSummary(summary) {
       el("td", { class: "num", text: num(r.ema200) }),
       el("td", { class: "num", text: num(r.rsi14, 0) }),
       el("td", { class: "num", text: num(r.atr14) }),
+      el("td", { class: "num", text: r.stoch_k === null || r.stoch_k === undefined ? "–" : `${num(r.stoch_k, 0)}/${num(r.stoch_d, 0)}` }),
+      el("td", { class: r.sar_up === null || r.sar_up === undefined ? "muted" : r.sar_up ? "verdict-BUY" : "verdict-SELL",
+        text: r.sar === null || r.sar === undefined ? "–" : `${num(r.sar)} ${r.sar_up ? "▲" : "▼"}` }),
       el("td", { class: "muted", text: r.reasons.join(", ") })));
   }
-  if (!summary.timeframes.length) body.append(el("tr", {}, el("td", { colspan: 9, class: "muted", text: "data indikator belum tersedia" })));
+  if (!summary.timeframes.length) body.append(el("tr", {}, el("td", { colspan: 11, class: "muted", text: "data indikator belum tersedia" })));
   const overall = $("#ind-overall");
   overall.textContent = summary.overall ? `${summary.overall.verdict} (${summary.overall.buy} BUY · ${summary.overall.sell} SELL dari ${summary.overall.of})` : "";
   overall.className = `badge ${summary.overall ? summary.overall.verdict : ""}`;
@@ -406,42 +433,140 @@ function tickLiveCountdowns() {
   }
 }
 
+function bigBox(label, value, note, cls = "") {
+  return el("div", { class: `big-box ${cls}` }, el("span", { text: label }), el("b", {}, value),
+    note ? (note instanceof Node ? note : el("small", { text: note })) : null);
+}
+
 function renderTiming(t) {
+  lastTiming = t;
+  renderBoard();
+  renderTimingDetails(t);
+}
+
+// The board answers three questions at a glance: what to do now, when the next chance is
+// (with a countdown against the WIB clock), and whether the chart's indicators agree.
+function renderBoard() {
+  const t = lastTiming;
   const box = clear($("#timing"));
   const n = t.now;
+  const boxes = el("div", { class: "big-boxes" });
+  let direction = null;
   if (n.mode === "signal") {
-    box.append(el("p", { class: `timing-now ${n.action}` },
-      `${n.action} SEKARANG di zona ${num(n.entry_low)}–${num(n.entry_high)} · SL ${num(n.stop_loss)} · TP1 ${num(n.tp1)} · TP2 ${num(n.tp2)} · `,
-      liveCountdown(n.until_utc, "sisa waktu", "sinyal sudah kedaluwarsa"),
-      ` (s/d ${n.until_wib} WIB)`));
+    direction = n.action;
+    box.append(el("p", { class: `board-head ${n.action}`, text: `${n.action === "BUY" ? "🟢" : "🔴"} ${n.action} SEKARANG` }));
+    boxes.append(
+      bigBox("Masuk di", `${num(n.entry_low)} – ${num(n.entry_high)}`, n.entry_type === "market" ? "harga pasar, selama di zona ini" : `pasang ${n.action} ${n.entry_type === "limit" ? "Limit" : "Stop"}`, n.action),
+      bigBox("Stop loss", num(n.stop_loss), "cut loss di sini", "SELL-soft"),
+      bigBox("Target", `${num(n.tp1)} → ${num(n.tp2)}`, "TP1 ambil 50%, sisanya TP2", "BUY-soft"),
+      bigBox("Sisa waktu", liveCountdown(n.until_utc, "", "kedaluwarsa"), `sampai ${n.until_wib} WIB`));
   } else {
-    box.append(el("p", { class: "timing-now WAIT", text: "TUNGGU · jangan klik BUY/SELL dulu" }));
-    if (n.reasons.length) box.append(el("p", { class: "muted", text: `Karena: ${n.reasons.join("; ")}` }));
+    const next = t.windows[0];
+    box.append(el("p", { class: "board-head WAIT", text: "⏳ TUNGGU · belum waktunya klik" }));
+    if (next) {
+      direction = next.action;
+      boxes.append(bigBox("Prediksi berikutnya", `${next.action} jam ${next.label_wib.split("–")[0]} WIB`,
+        el("small", {}, liveCountdown(next.from_utc, "dalam", "sedang berlangsung"), ` · confidence ${next.confidence ?? "–"}`), next.action));
+    } else {
+      boxes.append(bigBox("Prediksi berikutnya", "belum ada", "Outlook 24 jam belum condong BUY/SELL"));
+    }
+    if (t.blackout) {
+      const b = t.blackout;
+      boxes.append(bigBox("Jangan trading", `${b.from_wib} – ${b.to_wib} WIB`,
+        el("small", {}, `rilis ${b.title} · `, b.active ? liveCountdown(b.to_utc, "selesai dalam", "sudah boleh") : liveCountdown(b.from_utc, "dalam", "sedang berlangsung")), "WARN"));
+    }
+    if (t.triggers && (t.triggers.buy_above || t.triggers.sell_below)) {
+      const parts = [];
+      if (t.triggers.buy_above) parts.push(`BUY > ${num(t.triggers.buy_above.price)}`);
+      if (t.triggers.sell_below) parts.push(`SELL < ${num(t.triggers.sell_below.price)}`);
+      boxes.append(bigBox("Pantau harga", parts.join(" · "), `sekarang ${num(t.triggers.mid)}`));
+    }
   }
+  box.append(boxes);
+  if (lastSummary && lastSummary.overall && lastSummary.overall.of) {
+    const o = lastSummary.overall;
+    const agree = direction && o.verdict === direction;
+    const against = direction && o.verdict !== "NETRAL" && o.verdict !== direction;
+    box.append(el("p", { class: `agree ${agree ? "BUY" : against ? "WARN" : ""}`,
+      text: `Indikator: ${o.buy} dari ${o.of} timeframe BUY, ${o.sell} SELL${direction ? (agree ? ` · searah dengan ${direction} ✅` : against ? ` · berlawanan dengan ${direction} ⚠️ hati-hati` : " · netral") : ""}` }));
+  }
+  tickLiveCountdowns();
+}
+
+function renderTimingDetails(t) {
+  const box = clear($("#timing-details"));
+  const n = t.now;
+  if (n.mode === "wait" && n.reasons.length) box.append(el("p", { class: "muted", text: `Kenapa menunggu: ${n.reasons.join("; ")}` }));
   const list = el("ul", { class: "timing-list" });
-  if (t.blackout) {
-    const b = t.blackout;
-    list.append(el("li", { class: "block" },
-      el("b", { text: `⛔ Jangan klik ${b.from_wib}–${b.to_wib} WIB` }), ` · rilis ${b.title} pukul ${b.at_wib} WIB · `,
-      b.active ? liveCountdown(b.to_utc, "boleh lagi dalam", "sudah boleh") : liveCountdown(b.from_utc, "mulai dalam", "sedang berlangsung")));
-  }
   for (const w of t.windows) {
     list.append(el("li", { class: w.action },
       el("b", { text: `${w.action} · ${w.label_wib} WIB` }), " · ",
-      liveCountdown(w.from_utc, "mulai dalam", "sedang berlangsung"),
+      liveCountdown(w.from_utc, "dalam", "sedang berlangsung"),
       ` · confidence ${w.confidence ?? "–"}${w.conditional ? " (bersyarat)" : ""}`,
       el("div", { class: "meta", text: w.scenario })));
   }
   if (!t.windows.length) list.append(el("li", { class: "muted", text: "Belum ada jam yang condong BUY atau SELL di Outlook 24 jam ke depan." }));
-  box.append(el("h2", { text: "Jadwal peluang berikutnya" }), list);
+  box.append(el("h2", { text: "Semua jadwal peluang" }), list);
   if (t.triggers) {
-    const parts = [`Harga sekarang ${num(t.triggers.mid)}.`];
-    if (t.triggers.buy_above) parts.push(`Peluang BUY bila tembus ke atas ${num(t.triggers.buy_above.price)} (${t.triggers.buy_above.name}).`);
-    if (t.triggers.sell_below) parts.push(`Peluang SELL bila tembus ke bawah ${num(t.triggers.sell_below.price)} (${t.triggers.sell_below.name}).`);
-    box.append(el("p", {}, el("b", { text: "Konfirmasi harga: " }), parts.join(" ")));
+    const parts = [];
+    if (t.triggers.buy_above) parts.push(`BUY bila tembus ke atas ${num(t.triggers.buy_above.price)} (${t.triggers.buy_above.name})`);
+    if (t.triggers.sell_below) parts.push(`SELL bila tembus ke bawah ${num(t.triggers.sell_below.price)} (${t.triggers.sell_below.name})`);
+    if (parts.length) box.append(el("p", {}, el("b", { text: "Konfirmasi harga: " }), parts.join("; ")));
   }
-  box.append(el("p", { class: "muted", text: "Klik BUY/SELL di broker hanya saat kotak sinyal di bawah berubah menjadi BUY/SELL (juga dikirim ke Telegram) dengan angka entry, SL dan TP. Jadwal di atas adalah prediksi kapan peluang paling mungkin muncul, bukan perintah." }));
+  box.append(el("p", { class: "muted", text: "Klik BUY/SELL di broker hanya saat papan berubah menjadi BUY/SELL SEKARANG (juga dikirim ke Telegram). Jadwal adalah prediksi kapan peluang paling mungkin muncul, bukan perintah." }));
   tickLiveCountdowns();
+}
+
+// ------------------------------------------------------------------ Claude credit
+const CREDIT_STATUS = { aman: "", menipis: "warn", habis: "SELL" };
+
+function renderCredit(c) {
+  const badge = $("#credit");
+  const b = c.balance;
+  if (!b) {
+    badge.textContent = c.has_key ? "Claude: isi saldo" : "Claude: tanpa API key";
+    badge.className = "credit";
+  } else {
+    badge.textContent = `Claude $${num(b.remaining_usd)}${b.days_left !== null ? ` · ±${Math.floor(b.days_left)} hari` : ""}`;
+    badge.className = `credit ${CREDIT_STATUS[b.status]}`;
+  }
+  const info = $("#credit-info");
+  if (!info) return;
+  clear(info);
+  const rows = [
+    ["Sisa saldo (perkiraan)", b ? `$${num(b.remaining_usd)}` : "–", b ? `dari $${num(b.balance_usd)} yang diisi ${b.as_of_wib} WIB, terpakai $${num(b.spent_since_usd, 4)}` : "belum diisi"],
+    ["Pemakaian hari ini", `$${num(c.spent_today_usd, 4)}`, `batas harian di config $${num(c.daily_budget_usd)} (di atasnya hanya berita besar yang dianalisis Claude)`],
+    ["Rata-rata per hari", b && b.per_day_usd !== null ? `$${num(b.per_day_usd, 4)}` : "–", "dari pemakaian 7 hari terakhir"],
+    ["Perkiraan habis", b && b.empty_at_wib ? `${b.empty_at_wib} WIB` : "–", b && b.days_left !== null ? `±${num(b.days_left, 1)} hari lagi${b.status !== "aman" ? " · segera top-up" : ""}` : ""],
+  ];
+  const table = el("table", { class: "plan" });
+  for (const [label, value, note] of rows) table.append(planRow(label, value, note));
+  info.append(el("div", { class: "table-wrap" }, table));
+  if (b && b.status !== "aman") info.append(el("p", { class: "agree WARN", text: b.status === "habis" ? "Saldo habis: analisis memakai aturan saja sampai di-top-up." : "Saldo menipis: top-up di console.anthropic.com → Billing." }));
+}
+
+async function refreshCredit() {
+  try {
+    renderCredit(await api("/api/credit"));
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function saveCredit(event) {
+  event.preventDefault();
+  const status = $("#credit-status");
+  const value = Number($("#credit-input").value);
+  const response = await fetch("/api/credit", {
+    method: "POST", credentials: "same-origin",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ balance_usd: value }),
+  });
+  if (!response.ok) {
+    status.textContent = "Gagal menyimpan (isi angka saldo dalam USD).";
+    return;
+  }
+  renderCredit(await response.json());
+  status.textContent = "Tersimpan.";
 }
 
 const headerClock = new Intl.DateTimeFormat("en-GB", {
@@ -799,7 +924,10 @@ const loaders = {
   },
   kalender: async () => renderCalendar(await api("/api/calendar")),
   performa: async () => renderPerformance(await api("/api/performance")),
-  kesehatan: async () => renderHealth(await api("/api/health")),
+  kesehatan: async () => {
+    renderHealth(await api("/api/health"));
+    await refreshCredit();
+  },
   tradingview: async () => {
     const [state, outlook] = await Promise.all([api("/api/state"), api("/api/outlook")]);
     renderTradingView(state);
@@ -922,6 +1050,9 @@ window.addEventListener("DOMContentLoaded", () => {
   show(location.hash.slice(1) || "live");
   $("#tv-copy-script").addEventListener("click", copyIndicatorScript);
   $("#ind-toggles").addEventListener("change", () => applyIndicatorToggles(charts.live));
+  $("#credit-form").addEventListener("submit", saveCredit);
+  refreshCredit();
+  setInterval(refreshCredit, 60000);
   tickClock();
   api("/api/state").then((state) => {
     $("nav a[data-page=tradingview]").hidden = !state.tradingview_symbol;

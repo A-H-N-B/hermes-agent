@@ -151,6 +151,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   Live page: WIB clock, "Kapan klik BUY/SELL" (`dashboard/timing.py`: now/blackout/next outlook
   windows/level triggers, browser-side countdowns), overlays + per-TF read
   (`dashboard/indicators_view.py`: EMA20/50/200, BB, RSI pane, VWAP, levels; the read never
-  makes a signal). APIs `/api/timing`, `/api/indicators`.
+  makes a signal). APIs `/api/timing`, `/api/indicators`. Stoch(5,3,3) + Parabolic SAR(0.02,
+  0.2) in `market/indicators.py` (chart + per-TF votes). Claude credit (`dashboard/credit.py`,
+  `/api/credit`, kv `llm_credit`): no API returns a prepaid balance for a normal key, so the user
+  enters it once and `llm_usage` costs since then are subtracted; the POST is same-origin JSON only.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

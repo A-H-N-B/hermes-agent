@@ -22,12 +22,14 @@ from starlette.websockets import WebSocketDisconnect
 
 from gold_agent.core.app import AppContext
 from gold_agent.dashboard.auth import COOKIE, LoginLimiter, SessionSigner
+from gold_agent.dashboard.credit import credit_view, set_balance
 from gold_agent.dashboard.data import DashboardData
 from gold_agent.dashboard.live import LiveHub
 
 STATIC_DIR = Path(__file__).parent / "static"  # public assets (JS, CSS, vendored chart)
 PAGES_DIR = Path(__file__).parent / "pages"  # HTML shells, served by the routes below
 MAX_LOGIN_BODY = 4096
+MAX_CREDIT_USD = 100_000.0
 
 
 # The TradingView embed script, and the iframe it creates (both hosts it has used).
@@ -168,6 +170,28 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
     @app.get("/api/timing", dependencies=guard)
     async def api_timing() -> dict[str, Any]:
         return await data.timing()
+
+    @app.get("/api/credit", dependencies=guard)
+    async def api_credit() -> dict[str, Any]:
+        return await credit_view(ctx)
+
+    @app.post("/api/credit", dependencies=guard)
+    async def api_set_credit(request: Request) -> dict[str, Any]:
+        # The only write: same-origin JSON only, so another site cannot post it from a browser
+        # (a cross-site JSON POST needs a CORS preflight this app never grants).
+        origin = request.headers.get("origin")
+        if origin is not None and urlparse(origin).netloc != request.headers.get("host"):
+            raise HTTPException(status_code=403, detail="origin lain ditolak")
+        if request.headers.get("content-type", "").split(";")[0] != "application/json":
+            raise HTTPException(status_code=415, detail="kirim JSON")
+        body = await request.json()
+        balance = body.get("balance_usd") if isinstance(body, dict) else None
+        if isinstance(balance, bool) or not isinstance(balance, int | float):
+            raise HTTPException(status_code=422, detail="balance_usd harus angka")
+        if not 0 <= balance <= MAX_CREDIT_USD:
+            raise HTTPException(status_code=422, detail="saldo di luar batas wajar")
+        await set_balance(ctx, float(balance))
+        return await credit_view(ctx)
 
     @app.get("/api/markers", dependencies=guard)
     async def api_markers(hours: float = Query(default=24, gt=0, le=24 * 14)) -> dict[str, Any]:
