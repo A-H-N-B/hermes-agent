@@ -93,7 +93,10 @@ risk:
   volume_step: 0.01
 
 budget:
-  llm_daily_usd: 3.0 # Q4: above this, only impact >= deep_min_impact goes to the LLM
+  llm_daily_usd: 3.0 # Q4: above this, only high-impact news (release or impact >= 4) uses the LLM
+  # Share of that budget kept for your trading windows: outside them, routine news and the
+  # outlook narrative stop using Claude once the rest is spent (high-impact news never does).
+  window_reserve_pct: 50
   paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
 
 notifications:

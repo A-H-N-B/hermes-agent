@@ -190,6 +190,8 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   (`pick_gold_symbol`: Market Watch first, XAUUSD before GOLD, other quote currencies excluded).
   A feed switch (PAXG <-> MT5) resets the candle builder and reloads history from the feed now
   producing ticks (`FailoverAdapter.history` asks the active feed first), so two instruments'
-  bars are never mixed.
+  bars are never mixed. `budget.window_reserve_pct` (50): outside the trading windows, non
+  high-impact LLM calls stop once the unreserved part of the daily budget is spent (no budget
+  alert: only a spent-out day raises one).
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

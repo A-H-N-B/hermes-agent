@@ -130,7 +130,9 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    *spend limit* bulanan, mis. US$20. Selain itu program punya batasnya sendiri:
    `budget.llm_daily_usd` (bawaan **US$3/hari**; ubah dengan
    `uv run gold-agent config set budget.llm_daily_usd 20`). Bila batas harian tercapai, hanya
-   berita berdampak tinggi yang dikirim ke Claude sampai 00:00 WIB.
+   berita berdampak tinggi yang dikirim ke Claude sampai 00:00 WIB. Separuh budget itu disimpan
+   untuk jam trading (`budget.window_reserve_pct: 50`): di luar jam trading, berita biasa berhenti
+   memakai Claude begitu separuh pertama terpakai.
 4. **Buat key:** menu **API Keys** → **Create Key** → beri nama, mis. `gold-news-agent` →
    **Create**.
 5. Key langsung tampil, diawali `sk-ant-`. **Salin sekarang**: key hanya ditampilkan sekali.

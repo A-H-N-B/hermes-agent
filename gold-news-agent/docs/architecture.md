@@ -265,7 +265,10 @@ yang selalu aktif di Opus 5.5 dan makin panjang pada effort lebih tinggi:
 
 `budget.llm_daily_usd` (bawaan $3) adalah rem: setelah biaya hari itu (hari WIB) mencapai angka
 itu, hanya berita high-impact (rilis data, impact ≥ 4) yang masih dianalisis Opus; sisanya memakai
-aturan sampai pukul 00:00 WIB. Dengan rem $3 biaya harian ±$3–5 (berita high-impact tetap jalan).
+aturan sampai pukul 00:00 WIB. `budget.window_reserve_pct` (bawaan 50) menyimpan separuhnya untuk
+jam trading: di luar jendela, berita biasa dan narasi outlook berhenti memakai Opus begitu separuh
+pertama terpakai, jadi pagi yang ramai berita tidak menghabiskan jatah jam 14–17 dan 19–23 WIB.
+Dengan rem $3 biaya harian ±$3–5 (berita high-impact tetap jalan).
 Supaya **semua** berita dianalisis Opus sepanjang hari, naikkan ke ±$20–25. Biaya nyata per hari
 terlihat di header dashboard (saldo kredit), `/stats`, dan laporan harian.
 

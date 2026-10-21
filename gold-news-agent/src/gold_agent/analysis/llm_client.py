@@ -22,7 +22,8 @@ import structlog
 from gold_agent.config import LlmRoute, ModelPrice, Settings
 from gold_agent.core.clock import Clock
 from gold_agent.storage.ops_repo import OpsRepo
-from gold_agent.timeutils.sessions import WIB
+from gold_agent.timeutils.sessions import WIB, SessionClock
+from gold_agent.timeutils.windows import TradingHours
 
 log = structlog.get_logger(__name__)
 
@@ -137,6 +138,7 @@ class LlmClient:
         breaker = settings.llm.circuit_breaker
         self.breaker = CircuitBreaker(breaker.failures, breaker.cooldown_seconds, clock)
         self.budget_exceeded = False
+        self._hours = TradingHours(settings.trading.windows, SessionClock(settings.sessions))
 
     @property
     def available(self) -> bool:
@@ -149,13 +151,22 @@ class LlmClient:
         return await self._ops.llm_spend_since(wib_day_start(self._clock.now()))
 
     async def _check_budget(self, high_impact: bool) -> None:
+        """High-impact news always gets the LLM. Other calls stop when the WIB day's budget is
+        spent, and outside the trading windows already when only the reserve is left."""
         spent = await self.spent_today()
-        over = spent >= self._settings.budget.llm_daily_usd
+        budget = self._settings.budget
+        over = spent >= budget.llm_daily_usd
         if over and not self.budget_exceeded:
             log.warning("llm.budget_exceeded", spent=round(spent, 4))
         self.budget_exceeded = over
-        if over and not high_impact:
+        if high_impact:
+            return
+        if over:
             raise LlmUnavailable(f"budget LLM harian habis (${spent:.2f})")
+        reserve = budget.llm_daily_usd * budget.window_reserve_pct / 100
+        off_hours = self._hours.enabled and self._hours.current(self._clock.now()) is None
+        if off_hours and spent >= budget.llm_daily_usd - reserve:
+            raise LlmUnavailable(f"sisa budget LLM (${reserve:.2f}) disimpan untuk jam trading")
 
     async def _record(
         self,

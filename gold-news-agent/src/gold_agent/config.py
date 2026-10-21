@@ -243,6 +243,7 @@ class RiskSettings(StrictModel):
 
 class BudgetSettings(StrictModel):
     llm_daily_usd: float = Field(ge=0)
+    window_reserve_pct: float = Field(ge=0, le=100)  # kept for the trading windows
     paid_data_monthly_usd: float = Field(ge=0)
 
 
