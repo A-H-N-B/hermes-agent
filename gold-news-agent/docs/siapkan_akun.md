@@ -128,8 +128,9 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    kecil, mis. **US$5–10**, cukup untuk beberapa minggu pemakaian normal.
 3. **Pasang batas biaya** supaya tagihan tidak pernah kebablasan: **Settings → Limits** → atur
    *spend limit* bulanan, mis. US$20. Selain itu program punya batasnya sendiri:
-   `budget.llm_daily_usd` di `config/settings.yaml` (bawaan **US$3/hari**). Bila batas harian
-   tercapai, hanya berita berdampak tinggi yang dikirim ke Claude sampai 00:00 WIB.
+   `budget.llm_daily_usd` (bawaan **US$3/hari**; ubah dengan
+   `uv run gold-agent config set budget.llm_daily_usd 20`). Bila batas harian tercapai, hanya
+   berita berdampak tinggi yang dikirim ke Claude sampai 00:00 WIB.
 4. **Buat key:** menu **API Keys** → **Create Key** → beri nama, mis. `gold-news-agent` →
    **Create**.
 5. Key langsung tampil, diawali `sk-ant-`. **Salin sekarang**: key hanya ditampilkan sekali.
@@ -211,10 +212,12 @@ Data FRED harian (bukan real-time). Sistem memakainya untuk konteks yield 10 tah
    MT5_PASSWORD=passwordmu
    MT5_SERVER=NamaBroker-Demo
    ```
-3. Cari nama simbol emas di Market Watch (`XAUUSD`, `XAUUSDm`, `GOLD`, ...). Isi di
-   `config/settings.yaml`: `price_feed.primary: mt5` dan `price_feed.mt5_symbol: <nama itu>`.
-4. Pasang dependensinya: `uv sync --extra mt5`. Biarkan terminal MT5 tetap terbuka dan login
-   selama sistem jalan.
+3. Tidak perlu mengisi nama simbol: sumber harga bawaan `auto` memakai MT5 bila terminalnya
+   terbuka dan mencari sendiri simbol emas broker (`XAUUSD`, `XAUUSDm`, `GOLD`, ...; yang ada di
+   Market Watch didahulukan). Bila yang terpilih salah, tetapkan sendiri:
+   `uv run gold-agent config set price_feed.mt5_symbol XAUUSDm`.
+4. Dependensinya (`uv sync --extra mt5`) sudah dipasang installer Windows. Biarkan terminal MT5
+   tetap terbuka dan login selama sistem jalan; bila MT5 ditutup, harga sementara memakai PAXG.
 
 ---
 

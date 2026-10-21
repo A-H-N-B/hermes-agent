@@ -3,6 +3,7 @@
 #   scripts/backup.sh [backup_dir] [keep_days]     (defaults: backups/ and 14 days)
 # A custom-format dump of the whole database; prove it restores with scripts/restore_check.sh.
 set -euo pipefail
+umask 077 # the dumps hold the whole database: readable by this user only
 cd "$(dirname "$0")/.."
 dir="${1:-backups}"
 keep="${2:-14}"

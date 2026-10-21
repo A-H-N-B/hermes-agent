@@ -6,6 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 dir="${1:-backups}"
+if [ ! -d "$dir" ]; then
+  echo "backup directory not found: $dir (run scripts/backup.sh first, or pass the directory)" >&2
+  exit 1
+fi
 latest="$(find "$dir" -maxdepth 1 -name 'gold-*.dump' -printf '%T@ %p\n' 2>/dev/null |
   sort -n | tail -1 | cut -d' ' -f2-)"
 if [ -z "$latest" ]; then

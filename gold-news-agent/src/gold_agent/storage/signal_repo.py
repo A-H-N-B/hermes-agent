@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 
 from gold_agent.models import Outlook, Signal, SignalOutcome, SignalState
 from gold_agent.signals.profile import HourStats
@@ -98,6 +99,14 @@ class SignalRepo:
                 .order_by(SignalStateRow.ts)
             )
             return [SignalState.model_validate(r.payload) for r in rows]
+
+    async def prune_states(self, before: datetime) -> int:
+        """Delete engine states older than `before`; returns how many."""
+        async with self._db.session() as session:
+            result: Any = await session.execute(
+                delete(SignalStateRow).where(SignalStateRow.ts < before)
+            )
+            return int(result.rowcount or 0)
 
     async def scores_between(self, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
         """(time, composite score) of the stored engine states, oldest first (no payloads)."""

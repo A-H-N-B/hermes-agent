@@ -68,9 +68,11 @@ semua host sumber. Langkah ini wajib di VPS.
    `TELEGRAM_ADMIN_USER_IDS`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `DASHBOARD_PASSWORD`.
    Buat password acak, mis. `openssl rand -hex 24`. Opsional: `TELEGRAM_API_ID/HASH` (baca
    channel), `FRED_API_KEY`, `TWELVEDATA_API_KEY`. `.env` hanya untuk rahasia. Perilaku (bobot,
-   threshold, jam tenang) ada di `config/settings.yaml`.
+   threshold, jam tenang) ada di `config/settings.yaml`; nilai milik server ini ditulis di
+   `config/local.yaml` (tidak ikut git, hanya kunci yang diubah) supaya `git pull` tidak bentrok.
 4. Verifikasi sumber (langkah 2 di atas). Untuk sumber yang lolos **dan** ToS-nya sudah dibaca,
-   ubah `status: verified` dan `enabled: true` di `config/sources.yaml`. Collector hanya memakai
+   tandai di `config/sources.local.yaml` (`<id>: {status: verified, enabled: true}`, atau
+   `gold-agent config verified <id>` bila uv ada di host). Collector hanya memakai
    sumber yang verified.
 5. Login Telethon (bila memakai channel Telegram), sekali saja:
    `docker compose run --rm -it collector telegram-login`. File session tersimpan di volume
@@ -117,8 +119,8 @@ Untuk image produksi: pin `python:3.12-slim-bookworm` dan `ghcr.io/astral-sh/uv`
 | Backtest | `docker compose run --rm evaluator backtest --days 30 --folds 4` |
 | Usulan bobot | `docker compose run --rm evaluator calibrate` (butuh ≥ 100 sinyal tertutup) |
 
-- **Mengubah config:** edit `config/settings.yaml` atau `config/sources.yaml`, lalu
-  `docker compose restart <service>`. Folder config di-mount read-only, jadi tidak perlu build.
+- **Mengubah config:** tulis kuncinya di `config/local.yaml` / `config/sources.local.yaml`
+  (bukan di file yang ikut git), lalu `docker compose restart <service>`. Folder config di-mount read-only, jadi tidak perlu build.
   Config divalidasi saat start. Kalau salah ketik, service menolak jalan dan log menyebut
   field-nya.
 - **Update kode:** `git pull && docker compose build && docker compose up -d`. Migrasi jalan dulu
@@ -193,13 +195,17 @@ dalam satu jaringan Tailscale/WireGuard.
 
 1. VPS Linux: isi IP Tailscale di `docker-compose.mt5-bridge.yml`, lalu
    `docker compose -f docker-compose.yml -f docker-compose.mt5-bridge.yml up -d`. Redis hanya
-   terbuka di IP Tailscale dan tetap memakai password.
+   terbuka di IP Tailscale dan tetap memakai password. Supaya Redis tetap bisa dibuka saat boot
+   walau Tailscale belum siap, izinkan bind lebih awal: `net.ipv4.ip_nonlocal_bind = 1` di
+   `/etc/sysctl.d/99-gold-bind.conf`, lalu `sudo sysctl --system`.
 2. Windows: pasang Python 3.12 + uv, clone repo, `uv sync --extra mt5`. Isi `.env` dengan
    `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER`, dan
    `REDIS_URL=redis://:<REDIS_PASSWORD>@<IP Tailscale VPS>:6379/0`. Jalankan
    `uv run gold-agent mt5-bridge` sebagai service (NSSM atau Task Scheduler "At startup").
-3. Di `config/settings.yaml`: `price_feed.primary: mt5_bridge`. Bila DXY sintetis dari MT5 dipakai,
-   isi `market.usd_source: mt5_synthetic` dan simbol FX broker di `market.mt5_fx_symbols`.
+3. Di VPS Linux: `gold-agent config set price_feed.primary mt5_bridge` (tersimpan di
+   `config/local.yaml`). Bila DXY sintetis dari MT5 dipakai, set juga `market.usd_source
+   mt5_synthetic` dan simbol FX broker di `market.mt5_fx_symbols`. Bridge mengirim ulang riwayat
+   candle per timeframe tiap 10 menit, jadi core yang di-restart tetap memuat riwayat lengkap.
 4. Ukur hop jaringannya: bandingkan `received_at` tick dengan waktu server MT5 di dashboard.
 
 ## 9. Replay satu hari

@@ -11,15 +11,15 @@ from collections.abc import Mapping
 
 import structlog
 
-from gold_agent.core.bus import Bus
-from gold_agent.market.adapters.bridge import STREAM_BRIDGE_CANDLES, STREAM_TICKS_RAW
+from gold_agent.core.bus import STREAM_BRIDGE_HISTORY, Bus
+from gold_agent.market.adapters.bridge import STREAM_TICKS_RAW
 from gold_agent.market.adapters.mt5 import Mt5Adapter
 from gold_agent.models import Tick
 from gold_agent.models.common import Timeframe
 
 log = structlog.get_logger(__name__)
 
-INFO_EVERY_SECONDS = 600.0  # repeat symbol info so a restarted core learns it again
+INFO_EVERY_SECONDS = 600.0  # repeat symbol info + history so a restarted core learns them again
 FX_EVERY_SECONDS = 5.0
 
 
@@ -49,11 +49,13 @@ class BridgePublisher:
         )
 
     async def publish_history(self) -> int:
+        """One snapshot message per timeframe; returns the number of bars sent."""
         sent = 0
         for tf, count in self._history.items():
-            for candle in await self._adapter.history(tf, count):
-                await self._bus.publish(STREAM_BRIDGE_CANDLES, candle)
-                sent += 1
+            candles = await self._adapter.history(tf, count)
+            bars = [candle.model_dump(mode="json") for candle in candles]
+            await self._bus.publish(STREAM_BRIDGE_HISTORY, {"tf": tf, "candles": bars})
+            sent += len(bars)
         return sent
 
     async def publish_fx(self) -> None:
@@ -80,6 +82,7 @@ class BridgePublisher:
             if since_info >= INFO_EVERY_SECONDS:
                 since_info = 0.0
                 await self.publish_symbol_info()
+                await self.publish_history()
 
     async def run(self, stop: asyncio.Event) -> None:
         await self.publish_symbol_info()

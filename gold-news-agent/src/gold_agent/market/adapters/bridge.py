@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 
-from gold_agent.core.bus import Bus
+from gold_agent.core.bus import STREAM_BRIDGE_HISTORY, Bus
 from gold_agent.market.adapters.base import TickSink
 from gold_agent.models import Candle, Tick
 from gold_agent.models.common import Timeframe
 
 STREAM_TICKS_RAW = "market.ticks.raw"
-STREAM_BRIDGE_CANDLES = "market.bridge.candles"
+HISTORY_TAIL = 30  # snapshots looked at: every timeframe's newest is among them
 
 
 class BridgeTickAdapter:
@@ -42,12 +42,13 @@ class BridgeTickAdapter:
             await self._bus.ack(STREAM_TICKS_RAW, "market", [m.id for m in messages])
 
     async def history(self, tf: Timeframe, count: int) -> list[Candle]:
-        """The bridge publishes history on start-up; read whatever it left on the stream."""
-        messages = await self._bus.read(
-            STREAM_BRIDGE_CANDLES, f"market-history-{tf}", self._consumer, count=10_000, block_ms=0
-        )
-        candles = [Candle.model_validate(m.data) for m in messages if m.data.get("tf") == tf]
-        return candles[-count:]
+        """The newest snapshot the bridge left for this timeframe. It republishes them every
+        10 minutes, so a core that starts or restarts later still loads full history."""
+        for message in reversed(await self._bus.tail(STREAM_BRIDGE_HISTORY, HISTORY_TAIL)):
+            if message.data.get("tf") == tf:
+                bars = message.data.get("candles") or []
+                return [Candle.model_validate(bar) for bar in bars][-count:]
+        return []
 
     async def contract_size(self) -> float | None:
         return self._contract_size

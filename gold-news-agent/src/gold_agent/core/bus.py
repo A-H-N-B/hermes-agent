@@ -27,10 +27,12 @@ STREAM_ALERTS = "ops.alerts"  # Alert
 STREAM_NOTIFY = "notify.outbox"  # Notification
 STREAM_EVENTS = "app.events"  # small control events: {"type": "outlook.refresh", ...}
 STREAM_DEADLETTER = "deadletter"
+STREAM_BRIDGE_HISTORY = "market.bridge.history"  # {"tf", "candles"}: MT5 bridge snapshots
 
 DEFAULT_MAXLEN: dict[str, int] = {
     STREAM_TICKS: 200_000,
     STREAM_CONTEXT: 20_000,
+    STREAM_BRIDGE_HISTORY: 30,  # a few snapshots per timeframe; each is up to 1,500 bars
 }
 FALLBACK_MAXLEN = 50_000
 
@@ -66,6 +68,11 @@ class Bus(Protocol):
     ) -> list[Message]: ...
 
     async def ack(self, stream: str, group: str, ids: Sequence[str]) -> None: ...
+
+    async def tail(self, stream: str, count: int) -> list[Message]:
+        """The newest `count` messages, oldest first, outside any consumer group: a reader
+        that restarts sees them again."""
+        ...
 
     async def lag(self, stream: str, group: str) -> int | None: ...
 
@@ -136,6 +143,10 @@ class MemoryBus:
 
     async def ack(self, stream: str, group: str, ids: Sequence[str]) -> None:
         return None
+
+    async def tail(self, stream: str, count: int) -> list[Message]:
+        entries = self._stream(stream).entries[-count:] if count > 0 else []
+        return [Message(id=str(offset), stream=stream, data=data) for offset, data in entries]
 
     async def lag(self, stream: str, group: str) -> int | None:
         state = self._stream(stream)
@@ -221,6 +232,10 @@ class RedisBus:
     async def ack(self, stream: str, group: str, ids: Sequence[str]) -> None:
         if ids:
             await self._redis.xack(stream, group, *ids)
+
+    async def tail(self, stream: str, count: int) -> list[Message]:
+        entries = await self._redis.xrevrange(stream, count=count) if count > 0 else []
+        return self._decode(stream, list(reversed(entries)))
 
     async def lag(self, stream: str, group: str) -> int | None:
         try:

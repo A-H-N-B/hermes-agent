@@ -67,7 +67,8 @@ async def drain(context: AppContext, stream: str) -> list[Message]:
 async def test_relevant_story_is_triaged_published_and_timed(
     service_factory: Callable[..., Any],
 ) -> None:
-    service, context, fake = await service_factory(parsed(triage_value()))
+    # Impact 2: below deep_min_impact, so no background deep analysis races the assertions.
+    service, context, fake = await service_factory(parsed(triage_value(impact_score=2)))
     result = await service.handle_cluster(cluster("Fed's Logan signals fewer rate cuts ahead"))
     assert result is not None and result.origin == "llm"
     (message,) = await drain(context, STREAM_ANALYSES)

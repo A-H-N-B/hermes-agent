@@ -72,6 +72,7 @@ class Watchdog:
         self._disk_reader = disk_reader
         self._data_dir = data_dir
         self._failing: dict[str, Finding] = {}
+        self._undo: dict[str, tuple[str, Finding | None]] = {}  # alert id -> key, state before
         self.clock_offset_seconds: float | None = None
 
     # ------------------------------------------------------------------ checks
@@ -200,6 +201,7 @@ class Watchdog:
             was = self._failing.get(finding.key)
             if finding.problem and was is None:
                 self._failing[finding.key] = finding
+                self._undo[_alert_id(finding.key, now)] = (finding.key, None)
                 alerts.append(
                     Alert(
                         id=_alert_id(finding.key, now),
@@ -213,6 +215,7 @@ class Watchdog:
                 )
             elif not finding.problem and was is not None:
                 del self._failing[finding.key]
+                self._undo[_alert_id(finding.key, "ok", now)] = (finding.key, was)
                 if finding.title:
                     alerts.append(
                         Alert(
@@ -227,7 +230,17 @@ class Watchdog:
                     )
         return alerts
 
+    def undo(self, alert: Alert) -> None:
+        """Forget the state change behind an alert that could not be delivered, so the next
+        check raises it again instead of counting the problem as already reported."""
+        key, before = self._undo.pop(alert.id)
+        if before is None:
+            self._failing.pop(key, None)
+        else:
+            self._failing[key] = before
+
     async def check(self) -> list[Alert]:
+        self._undo = {}  # the previous check's alerts were delivered (or undone)
         now = self._ctx.clock.now()
         findings = [
             *await self._services(now),

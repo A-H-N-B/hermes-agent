@@ -41,7 +41,8 @@ tambahan hasil review Fase 0).
 - Outlook 24 jam dibuat tiap jam (dan saat berita penting); jam > 4 jam ke depan ditulis bersyarat.
   Minggu 16:00 WIB ada "outlook pembukaan Senin" dengan estimasi gap dari PAXG.
 
-Semua angka di atas ada di `config/settings.yaml` dan bisa diubah tanpa mengubah kode.
+Semua angka di atas ada di `config/settings.yaml` dan bisa diubah tanpa mengubah kode: tulis
+nilai sendiri di `config/local.yaml` (tidak ikut git) atau `uv run gold-agent config set KEY NILAI`.
 
 ## Prasyarat
 
@@ -60,8 +61,8 @@ cp .env.example .env        # isi key yang kamu punya; .env tidak pernah di-comm
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-Isi juga `http.contact_email` di `config/settings.yaml`. BLS menolak bot tanpa alamat kontak di
-User-Agent.
+Isi juga email kontak: `uv run gold-agent config set http.contact_email emailmu@contoh.com`. BLS
+menolak bot tanpa alamat kontak di User-Agent.
 
 ## Verifikasi sumber (Fase 0)
 
@@ -187,7 +188,8 @@ Test integrasi PostgreSQL/Redis ikut berjalan jika `GOLD_TEST_POSTGRES_URL` dan
 ## Struktur
 
 ```
-config/      settings.yaml (perilaku), sources.yaml (registry sumber), keywords.yaml,
+config/      settings.yaml (perilaku), sources.yaml (registry sumber), local.yaml +
+             sources.local.yaml (milik komputer ini, tidak ikut git), keywords.yaml,
              gold_drivers.yaml (knowledge base), events.yaml (rilis data AS), fed_officials.yaml
 prompts/     system prompt LLM (triage, deep, outlook, brief), berversi
 src/gold_agent/
@@ -221,7 +223,7 @@ Dockerfile, docker-compose.yml, docker-compose.mt5-bridge.yml
 | Gejala | Penyebab & solusi |
 |---|---|
 | Semua sumber `403 Forbidden` / "ditolak proxy" | Jaringan host memblokir domain tersebut (mis. container cloud dengan network policy). Jalankan di VPS/PC, atau izinkan domainnya. |
-| `bls_*` HTTP 403 | Isi `http.contact_email` di `settings.yaml`. |
+| `bls_*` HTTP 403 | Isi `http.contact_email` (`gold-agent config set http.contact_email ...`). |
 | Binance HTTP 451 | IP berada di AS. Pakai endpoint `*.binance.vision` (sudah default) atau VPS di luar AS. |
 | Error sertifikat SSL di balik proxy kantor | Set `SSL_CERT_FILE` ke bundle CA proxy tersebut. Jangan pernah mematikan verifikasi TLS. |
 | Sumber `skipped: butuh ... di .env` | Isi key terkait di `.env`. |

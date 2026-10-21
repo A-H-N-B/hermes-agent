@@ -1,5 +1,6 @@
 """Watchdog service: health checks every few seconds -> alerts (the notifier sends them), the clock
-offset for the dashboard, and the nightly retention clean-up of old ticks and snapshots."""
+offset for the dashboard, and the nightly retention clean-up of old ticks, market snapshots and
+engine states."""
 
 from __future__ import annotations
 
@@ -31,9 +32,14 @@ class WatchdogService:
     async def check(self) -> int:
         ctx = self._ctx
         alerts = await self.watchdog.check()
-        for alert in alerts:
-            await ctx.ops.save_alert(alert)
-            await ctx.bus.publish(STREAM_ALERTS, alert)
+        for index, alert in enumerate(alerts):
+            try:
+                await ctx.ops.save_alert(alert)
+                await ctx.bus.publish(STREAM_ALERTS, alert)
+            except Exception:
+                for unsent in alerts[index:]:
+                    self.watchdog.undo(unsent)  # raised again on the next check
+                raise
             log.warning("watchdog.alert", title=alert.title, severity=alert.severity)
         offset = self.watchdog.clock_offset_seconds
         await ctx.ops.kv_set(KV_CLOCK, {"offset_seconds": offset}, ctx.clock.now())
@@ -45,12 +51,14 @@ class WatchdogService:
         if not MAINTENANCE.due(now, await self.ledger.last_run(MAINTENANCE)):
             return False
         cfg = ctx.settings.watchdog
+        snapshots_before = now - timedelta(days=cfg.context_retention_days)
         ticks, contexts = await ctx.market.prune(
             ticks_before=now - timedelta(days=cfg.tick_retention_days),
-            contexts_before=now - timedelta(days=cfg.context_retention_days),
+            contexts_before=snapshots_before,
         )
+        states = await ctx.signals.prune_states(snapshots_before)  # one row a minute otherwise
         await self.ledger.mark(MAINTENANCE, now)
-        log.info("watchdog.pruned", ticks=ticks, contexts=contexts)
+        log.info("watchdog.pruned", ticks=ticks, contexts=contexts, states=states)
         return True
 
     async def run(self, stop: asyncio.Event) -> None:

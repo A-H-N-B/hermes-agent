@@ -18,7 +18,14 @@ import pytest
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_ALERTS, STREAM_NEWS_RAW
 from gold_agent.core.clock import ManualClock
-from gold_agent.models import Alert, MarketContext, SourceHealth, Tick
+from gold_agent.models import (
+    Alert,
+    MarketContext,
+    SignalComponents,
+    SignalState,
+    SourceHealth,
+    Tick,
+)
 from gold_agent.ops.clock import (
     ClockOffset,
     file_offset,
@@ -212,6 +219,16 @@ async def test_service_publishes_alerts_and_prunes_old_data_nightly(
     )
     await ctx.market.save_context(MarketContext(ts=NOW - timedelta(days=200)))
     await ctx.market.save_context(MarketContext(ts=NOW))
+    for ts in (NOW - timedelta(days=200), NOW):
+        await ctx.signals.save_state(
+            SignalState(
+                ts=ts,
+                action="WAIT",
+                composite_score=0.1,
+                confidence=0,
+                components=SignalComponents(N=0, M=0, T=0, P=0, session_factor=1),
+            )
+        )
     await ctx.ops.heartbeat("signal", NOW - timedelta(minutes=5))
     service = WatchdogService(ctx, watchdog(ctx, tmp_path))
     assert await service.check() == 1
@@ -225,3 +242,24 @@ async def test_service_publishes_alerts_and_prunes_old_data_nightly(
     assert [t.ts for t in ticks] == [NOW - timedelta(hours=1)]
     contexts = await ctx.market.contexts_between(NOW - timedelta(days=365), NOW + timedelta(1))
     assert [c.ts for c in contexts] == [NOW]
+    states = await ctx.signals.scores_between(NOW - timedelta(days=365), NOW + timedelta(1))
+    assert [ts for ts, _ in states] == [NOW]  # engine states follow the snapshot retention
+
+
+async def test_an_alert_that_could_not_be_delivered_is_raised_again(
+    ctx: AppContext, clock: ManualClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock.set(NOW)
+    await ctx.ops.heartbeat("signal", NOW - timedelta(minutes=5))
+    service = WatchdogService(ctx, watchdog(ctx, tmp_path))
+
+    async def locked(_alert: Alert) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(ctx.ops, "save_alert", locked)
+    with pytest.raises(OSError, match="locked"):
+        await service.check()
+    monkeypatch.undo()
+    assert await service.check() == 1  # not swallowed as "already reported"
+    published = await ctx.bus.read(STREAM_ALERTS, "t", "t", block_ms=0)
+    assert [m.data["title"] for m in published] == ["Service signal tidak merespons"]

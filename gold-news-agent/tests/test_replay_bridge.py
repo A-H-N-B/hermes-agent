@@ -170,3 +170,9 @@ async def test_bridge_round_trip(clock: ManualClock) -> None:
     assert receiver.quotes({"EURUSD": "EURUSD.m"}) == {"EURUSD": 2650.25}
     (candle,) = await receiver.history("M1", 10)
     assert candle.open_time == datetime(2026, 10, 13, 12, 28, tzinfo=UTC)
+    restarted = BridgeTickAdapter(bus, consumer="market-2")  # a core restart: history again
+    assert [c.open_time for c in await restarted.history("M1", 10)] == [candle.open_time]
+    clock.advance(600)
+    await publisher.publish_history()  # the bridge's 10-minute refresh: the newest one wins
+    (fresh,) = await restarted.history("M1", 10)
+    assert fresh.open_time == candle.open_time + timedelta(minutes=10)
