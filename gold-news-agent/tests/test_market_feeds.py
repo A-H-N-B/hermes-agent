@@ -15,8 +15,14 @@ from gold_agent.core.bus import STREAM_ALERTS, STREAM_CONTEXT
 from gold_agent.core.clock import ManualClock
 from gold_agent.market.adapters.base import TickSink
 from gold_agent.market.adapters.binance import BinanceStreamParser, parse_klines
+from gold_agent.market.adapters.factory import feed_order
 from gold_agent.market.adapters.failover import FailoverAdapter
-from gold_agent.market.adapters.mt5 import Mt5Adapter, detect_offset_hours, server_to_utc
+from gold_agent.market.adapters.mt5 import (
+    Mt5Adapter,
+    detect_offset_hours,
+    pick_gold_symbol,
+    server_to_utc,
+)
 from gold_agent.market.adapters.twelvedata import (
     TwelveDataError,
     check_response,
@@ -170,6 +176,46 @@ async def test_mt5_adapter_waits_for_a_fresh_tick_then_converts_server_time() ->
     assert await adapter.contract_size() == 100.0
     (candle,) = await adapter.history("M1", 1)
     assert candle.open_time == utc("2026-10-13T12:28")
+
+
+def symbol(name: str, *, visible: bool = False, trade_mode: int = 4, profit: str = "USD") -> Any:
+    return SimpleNamespace(
+        name=name, visible=visible, trade_mode=trade_mode, currency_profit=profit
+    )
+
+
+def test_the_brokers_gold_symbol_is_found_like_a_trader_would() -> None:
+    listed = [
+        symbol("XAGUSD", visible=True),  # silver
+        symbol("XAUEUR", visible=True),  # gold in euro
+        symbol("GOLDEUR", visible=True),
+        symbol("XAUUSD.r", visible=True, profit="EUR"),  # a USD name quoted in EUR
+        symbol("XAUUSD"),
+        symbol("XAUUSDm", visible=True),  # in Market Watch: the one the user trades
+        symbol("GOLD", visible=True),
+    ]
+    assert pick_gold_symbol(listed) == "XAUUSDm"
+    hidden = [symbol("GOLD.i"), symbol("XAUUSD+", trade_mode=0), symbol("XAUUSD.pro")]
+    assert pick_gold_symbol(hidden) == "XAUUSD.pro"  # XAUUSD before GOLD, tradable first
+    assert pick_gold_symbol([symbol("GOLD.i"), symbol("EURUSD")]) == "GOLD.i"
+    assert pick_gold_symbol([symbol("XAGUSD"), symbol("EURUSD")]) is None
+
+
+async def test_mt5_adapter_without_a_symbol_uses_the_detected_one() -> None:
+    clock = ManualClock(utc("2026-10-13T12:30"))
+    fake = FakeMt5(clock)
+    fake.symbols_get = lambda: [symbol("XAGUSD"), symbol("XAUUSDm", visible=True)]  # type: ignore[attr-defined]
+    selected: list[str] = []
+    fake.symbol_select = lambda name, _on: selected.append(name) or True  # type: ignore[method-assign]
+    adapter = Mt5Adapter(symbol=None, clock=clock, module=fake)
+    adapter.read_tick()
+    assert selected == ["XAUUSDm"]
+
+
+def test_auto_feed_prefers_the_brokers_mt5_price_when_mt5_is_installed() -> None:
+    assert feed_order("auto", ("twelvedata",), mt5=True) == ["mt5", "binance_paxg", "twelvedata"]
+    assert feed_order("auto", ("twelvedata",), mt5=False) == ["binance_paxg", "twelvedata"]
+    assert feed_order("mt5", ("binance_paxg", "mt5"), mt5=False) == ["mt5", "binance_paxg"]
 
 
 # --------------------------------------------------------------------------- failover
@@ -380,3 +426,41 @@ async def test_market_without_any_verified_feed_reports_missing_data(ctx: AppCon
     service = MarketService(ctx, transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     snapshot = service.context(ctx.clock.now())
     assert snapshot.stale and "data harga tidak tersedia" in snapshot.notes
+
+
+def m1_bars(end: datetime, count: int, source: str, price: float) -> list[Candle]:
+    return [
+        Candle(
+            source=source,
+            tf="M1",
+            open_time=end - timedelta(minutes=count - i),
+            close_time=end - timedelta(minutes=count - i - 1),
+            open=price,
+            high=price + 0.5,
+            low=price - 0.5,
+            close=price,
+            complete=True,
+        )
+        for i in range(count)
+    ]
+
+
+async def test_a_feed_switch_reloads_history_instead_of_mixing_two_instruments(
+    ctx_factory: Callable[..., AppContext], clock: ManualClock
+) -> None:
+    context = ctx_factory()
+    await context.db.create_all()
+    now = utc("2026-10-13T12:30")
+    clock.set(now)
+    broker = ScriptedAdapter([], {"M1": m1_bars(now, 30, "mt5", 2680.0)})
+    service = MarketService(context, adapter=broker)
+    try:
+        service.builder.seed("M1", m1_bars(now, 30, "binance_paxg", 2695.0))  # PAXG premium
+        service.builder.source = "binance_paxg"
+        tick = Tick(ts=now, bid=2680.0, ask=2680.3, source="mt5", received_at=now)
+        await service.on_tick(tick)
+        bars = service.builder.candles("M1")
+        assert {bar.source for bar in bars} == {"mt5"}
+        assert max(bar.high for bar in bars) < 2690  # no PAXG bar left to fake a jump
+    finally:
+        await context.close()

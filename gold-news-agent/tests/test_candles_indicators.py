@@ -15,7 +15,7 @@ from gold_agent.market.usd import UsdTracker, synthetic_dxy
 from gold_agent.models import Candle, Tick
 from gold_agent.timeutils.sessions import SessionClock
 
-SESSIONS = SessionClock(load_settings().sessions)
+SESSIONS = SessionClock(load_settings(local=False).sessions)
 
 
 def utc(text: str) -> datetime:

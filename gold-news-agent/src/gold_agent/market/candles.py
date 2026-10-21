@@ -90,6 +90,12 @@ class CandleBuilder:
         self._history: dict[str, deque[Candle]] = {tf: deque(maxlen=buffer) for tf in timeframes}
         self._current: dict[str, Candle | None] = dict.fromkeys(timeframes)
 
+    def reset(self) -> None:
+        """Forget every bar (the feed switched instrument; history is loaded again)."""
+        for tf in self.timeframes:
+            self._history[tf].clear()
+            self._current[tf] = None
+
     def seed(self, tf: Timeframe, candles: Iterable[Candle]) -> None:
         """Load history. A trailing incomplete candle becomes the live candle."""
         ordered = sorted(candles, key=lambda c: c.open_time)

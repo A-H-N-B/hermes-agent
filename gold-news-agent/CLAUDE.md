@@ -178,5 +178,18 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   chart-only on the same bars, NETRAL/TUNGGU DATA abstain, bars without an engine score
   skipped; served inside `/api/forecast` (cached 5 min). The forecast's chart state is the market
   service's own `timeframe_state` (one trend rule, `market/context.py:trend_of`).
+  This computer's settings live in git-ignored `config/local.yaml` (deep-merged over
+  settings.yaml) and `config/sources.local.yaml` (per-id fields); `gold_agent/local_config.py`
+  is stdlib+PyYAML only so the Windows updater (`scripts/windows/perbarui.ps1`, desktop shortcut
+  "Perbarui") can run the NEW revision's `migrate` before switching: edits to the tracked files
+  move to the local ones (full diff kept in data/backups), then `merge --ff-only`, `uv sync
+  --extra mt5`, config check, restart. `gold-agent config set|verified|migrate` (validated,
+  rolled back on a bad value); the installer writes through it; tests load with `local=False`.
+  `price_feed.primary: auto` (default) = MT5 when the MetaTrader5 package is installed (Windows)
+  then Binance PAXG; `mt5_symbol: null` detects the broker's spot-gold symbol
+  (`pick_gold_symbol`: Market Watch first, XAUUSD before GOLD, other quote currencies excluded).
+  A feed switch (PAXG <-> MT5) resets the candle builder and reloads history from the feed now
+  producing ticks (`FailoverAdapter.history` asks the active feed first), so two instruments'
+  bars are never mixed.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

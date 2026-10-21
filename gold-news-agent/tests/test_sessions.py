@@ -11,7 +11,7 @@ from gold_agent.models import CalendarEvent
 from gold_agent.timeutils.risky import risky_flags
 from gold_agent.timeutils.sessions import SessionClock, fmt_wib
 
-CLOCK = SessionClock(load_settings().sessions)
+CLOCK = SessionClock(load_settings(local=False).sessions)
 
 SUMMER = date(2026, 10, 13)  # US EDT + UK BST
 WINTER = date(2026, 12, 8)  # US EST + UK GMT

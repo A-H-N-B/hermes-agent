@@ -79,6 +79,8 @@ class MarketService:
         if tick.proxy:
             self.weekend.on_tick(tick.mid, status.open)
         if status.open:
+            if tick.source != self.builder.source and self.builder.candles("M1"):
+                await self._switch_source(tick.source)
             self.builder.source = tick.source
             completed = self.builder.update(tick)
             if completed:
@@ -99,6 +101,15 @@ class MarketService:
     async def flush_ticks(self) -> None:
         ticks, self._pending_ticks = self._pending_ticks, []
         await self._ctx.market.insert_ticks(ticks)
+
+    async def _switch_source(self, source: str) -> None:
+        """The feed changed instrument (MT5 back after PAXG, or the reverse). The two differ by
+        a premium, so mixing their bars would fake a jump in every indicator: start again from
+        the new feed's own history."""
+        log.warning("market.source_changed", old=self.builder.source, new=source)
+        self.builder.reset()
+        if self._feed is not None:
+            await self.load_history(self._feed)
 
     # ------------------------------------------------------------------ history
 

@@ -66,6 +66,9 @@ def _parser() -> argparse.ArgumentParser:
     add_parsers(sub)
     add_ops_parsers(sub)
     sub.add_parser("verify-sources", help="Phase 0 source verification", add_help=False)
+    sub.add_parser(
+        "config", help="this computer's own settings (config/local.yaml)", add_help=False
+    )
     return parser
 
 
@@ -226,6 +229,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from gold_agent.ops.verify_cli import main as verify_main
 
         return verify_main(argv[1:])
+    if argv and argv[0] == "config":
+        from gold_agent.config import load_settings, load_sources
+        from gold_agent.local_config import main as config_main
+
+        return config_main(argv[1:], validate=lambda: (load_settings(), load_sources()))
     args = _parser().parse_args(argv)
     match args.command:
         case "run":

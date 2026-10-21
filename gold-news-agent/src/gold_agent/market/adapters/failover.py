@@ -118,7 +118,10 @@ class FailoverAdapter:
                 return
 
     async def history(self, tf: Timeframe, count: int) -> list[Candle]:
-        for index, adapter in enumerate(self._adapters):
+        """From the feed that is producing ticks first, so bars and ticks are one instrument."""
+        order = [self.active, *(i for i in range(len(self._adapters)) if i != self.active)]
+        for index in order:
+            adapter = self._adapters[index]
             try:
                 candles = await adapter.history(tf, count)
             except Exception as exc:

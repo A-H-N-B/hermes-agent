@@ -56,9 +56,11 @@ trading:
     - { name: New York, zone: Asia/Jakarta, start: "19:00", end: "23:00", timeframe: M15 }
 
 price_feed:
-  primary: binance_paxg # Q2: mt5 | mt5_bridge | twelvedata | binance_paxg
+  # auto = your broker's own XAUUSD from MT5 when this computer runs MT5 (terminal open and
+  # logged in), otherwise Binance PAXG (a proxy that differs from spot by a premium).
+  primary: auto # Q2: auto | mt5 | mt5_bridge | twelvedata | binance_paxg
   fallbacks: [twelvedata]
-  mt5_symbol: null # Q2: e.g. XAUUSD, XAUUSDm, GOLD
+  mt5_symbol: null # null = found automatically (XAUUSD, XAUUSDm, XAUUSD.r, GOLD, ...)
   mt5_server_utc_offset: auto # MT5 bar times are broker-server time, not UTC (section C)
   stale_tick_seconds: 20 # no tick for this long while the market is open -> WAIT + alert
 

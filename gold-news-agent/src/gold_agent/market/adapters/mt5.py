@@ -9,8 +9,11 @@ US DST). The offset is detected from a fresh tick, or set in settings (mt5_serve
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import structlog
 
 from gold_agent.collectors.base import sleep_or_stop
 from gold_agent.core.clock import Clock
@@ -18,7 +21,32 @@ from gold_agent.market.adapters.base import TickSink
 from gold_agent.models import Candle, Tick
 from gold_agent.models.common import Timeframe
 
+log = structlog.get_logger(__name__)
+
 _TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
+# Gold priced in another currency: GOLDEUR, XAUUSD is never followed by these.
+_OTHER_CURRENCIES = ("EUR", "AUD", "GBP", "JPY", "CHF", "CAD", "CNH", "SGD", "TRY", "ZAR", "IDR")
+
+
+def _gold_rank(info: Any) -> tuple[int, int, int, int, str] | None:
+    """Sort key for a broker symbol that is spot gold in USD (XAUUSD, XAUUSDm, XAUUSD.r, GOLD,
+    GOLD.i, ...), None for anything else. Market Watch symbols and tradable ones come first."""
+    name = str(getattr(info, "name", ""))
+    upper = name.upper()
+    prefix = next((p for p in ("XAUUSD", "GOLD") if upper.startswith(p)), None)
+    if prefix is None or upper[len(prefix) :].startswith(_OTHER_CURRENCIES):
+        return None
+    if getattr(info, "currency_profit", "USD") not in ("USD", ""):
+        return None
+    hidden = 0 if getattr(info, "visible", False) else 1
+    disabled = 1 if getattr(info, "trade_mode", 4) == 0 else 0  # SYMBOL_TRADE_MODE_DISABLED
+    return hidden, disabled, 0 if prefix == "XAUUSD" else 1, len(name), name
+
+
+def pick_gold_symbol(symbols: Iterable[Any]) -> str | None:
+    """The broker's spot gold symbol, found the way a trader would look for it."""
+    ranked = sorted(rank for rank in map(_gold_rank, symbols) if rank is not None)
+    return ranked[0][-1] if ranked else None
 
 
 def detect_offset_hours(server_epoch: float, utc_now: datetime) -> int | None:
@@ -38,7 +66,7 @@ class Mt5Adapter:
     def __init__(
         self,
         *,
-        symbol: str,
+        symbol: str | None,
         clock: Clock,
         poll_ms: int = 100,
         offset_hours: int | None = None,
@@ -50,7 +78,7 @@ class Mt5Adapter:
         if module is None:
             import MetaTrader5 as module  # type: ignore[import-not-found,no-redef]
         self._mt5 = module
-        self._symbol = symbol
+        self._symbol = symbol or ""  # empty: detected from the broker's list on first connect
         self._clock = clock
         self._poll = poll_ms / 1000
         self._offset = offset_hours
@@ -68,6 +96,12 @@ class Mt5Adapter:
             kwargs = {"login": int(login), "password": password, "server": server}
         if not self._mt5.initialize(**kwargs):
             raise ConnectionError(f"MT5 initialize failed: {self._mt5.last_error()}")
+        if not self._symbol:
+            found = pick_gold_symbol(self._mt5.symbols_get() or ())
+            if found is None:
+                raise ValueError("MT5: no gold symbol found; set price_feed.mt5_symbol")
+            log.info("mt5.symbol_detected", symbol=found)
+            self._symbol = found
         if not self._mt5.symbol_select(self._symbol, True):
             raise ValueError(f"MT5 symbol not available: {self._symbol}")
         self._initialised = True

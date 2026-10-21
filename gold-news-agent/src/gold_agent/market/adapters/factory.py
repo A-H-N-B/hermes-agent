@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from typing import TYPE_CHECKING
 
@@ -84,11 +85,28 @@ def _make(ctx: AppContext, client: httpx.AsyncClient, feed: str) -> PriceAdapter
     if feed == "mt5_bridge":
         return BridgeTickAdapter(ctx.bus)
     if feed == "mt5":
-        if sys.platform != "win32":
-            log.warning("feed.mt5_unavailable", hint="MetaTrader5 runs on Windows; use mt5_bridge")
+        if not mt5_installed():
+            log.warning(
+                "feed.mt5_unavailable", hint="Windows + `uv sync --extra mt5`, or mt5_bridge"
+            )
             return None
         return mt5_adapter(ctx)
     return None
+
+
+def mt5_installed() -> bool:
+    return sys.platform == "win32" and importlib.util.find_spec("MetaTrader5") is not None
+
+
+def feed_order(primary: str, fallbacks: tuple[str, ...], *, mt5: bool) -> list[str]:
+    """`auto`: the broker's own MT5 price when this computer runs MT5, else Binance PAXG (the
+    failover returns to MT5 once its terminal is up). Duplicates are dropped."""
+    expanded: list[str] = []
+    for feed in (primary, *fallbacks):
+        expanded += (
+            (["mt5", "binance_paxg"] if mt5 else ["binance_paxg"]) if feed == "auto" else [feed]
+        )
+    return list(dict.fromkeys(expanded))
 
 
 def mt5_adapter(ctx: AppContext) -> Mt5Adapter:
@@ -99,7 +117,7 @@ def mt5_adapter(ctx: AppContext) -> Mt5Adapter:
     offset = settings.price_feed.mt5_server_utc_offset
     login = ctx.env.get("MT5_LOGIN")
     return Mt5Adapter(
-        symbol=settings.price_feed.mt5_symbol or "XAUUSD",
+        symbol=settings.price_feed.mt5_symbol,
         clock=ctx.clock,
         poll_ms=settings.market.mt5_poll_ms,
         offset_hours=None if offset == "auto" else int(offset),
@@ -110,8 +128,9 @@ def mt5_adapter(ctx: AppContext) -> Mt5Adapter:
 
 
 def build_price_adapter(ctx: AppContext, client: httpx.AsyncClient) -> FailoverAdapter | None:
-    feeds = [ctx.settings.price_feed.primary, *ctx.settings.price_feed.fallbacks]
-    adapters = [a for a in (_make(ctx, client, feed) for feed in dict.fromkeys(feeds)) if a]
+    feed = ctx.settings.price_feed
+    feeds = feed_order(feed.primary, feed.fallbacks, mt5=mt5_installed())
+    adapters = [a for a in (_make(ctx, client, name) for name in feeds) if a]
     if not adapters:
         log.error("feed.none_available", feeds=feeds)
         return None

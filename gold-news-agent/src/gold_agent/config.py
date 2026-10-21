@@ -21,6 +21,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from gold_agent.local_config import load_merged_settings, load_merged_sources
 from gold_agent.models.common import Timeframe
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -217,7 +218,7 @@ class TradingSettings(StrictModel):
     windows: tuple[TradingWindow, ...] = ()
 
 
-PriceFeedName = Literal["mt5", "mt5_bridge", "twelvedata", "binance_paxg"]
+PriceFeedName = Literal["auto", "mt5", "mt5_bridge", "twelvedata", "binance_paxg"]
 
 
 class PriceFeedSettings(StrictModel):
@@ -618,9 +619,13 @@ def _read_yaml(path: Path) -> Any:
         return yaml.safe_load(handle)
 
 
-def load_sources(path: Path = CONFIG_DIR / "sources.yaml") -> SourceRegistry:
-    return SourceRegistry.model_validate(_read_yaml(path))
+def load_sources(path: Path = CONFIG_DIR / "sources.yaml", *, local: bool = True) -> SourceRegistry:
+    """The registry, with this computer's `sources.local.yaml` on top unless `local` is False."""
+    data = load_merged_sources(path) if local else _read_yaml(path)
+    return SourceRegistry.model_validate(data)
 
 
-def load_settings(path: Path = CONFIG_DIR / "settings.yaml") -> Settings:
-    return Settings.model_validate(_read_yaml(path))
+def load_settings(path: Path = CONFIG_DIR / "settings.yaml", *, local: bool = True) -> Settings:
+    """Settings, with this computer's `local.yaml` on top unless `local` is False."""
+    data = load_merged_settings(path) if local else _read_yaml(path)
+    return Settings.model_validate(data)

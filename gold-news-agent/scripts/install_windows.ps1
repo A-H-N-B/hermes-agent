@@ -8,6 +8,8 @@
 # Telegram bot token and Claude API key (hidden input, checked against both services before
 # saving), finds the Telegram chat ID itself, activates the public sources that pass
 # verify-sources from this machine, then starts the program on every Windows login.
+# This computer's settings go to config\local.yaml / config\sources.local.yaml (git-ignored),
+# so "Perbarui Gold News Agent" (scripts\windows\perbarui.ps1) can update without conflicts.
 # Kept ASCII-only: Windows PowerShell 5.1 reads `irm | iex` text without an encoding hint.
 
 function Install-GoldNewsAgent {
@@ -77,7 +79,11 @@ function Install-GoldNewsAgent {
     Set-Location $Root
 
     Step 4 'Pasang dependensi (2-5 menit)'
-    uv sync
+    uv sync --extra mt5  # MetaTrader5: the broker's own price when MT5 runs on this laptop
+    if ($LASTEXITCODE -ne 0) {
+        Warn 'Paket MetaTrader 5 tidak tersedia di laptop ini (mis. Windows ARM): harga memakai PAXG.'
+        uv sync
+    }
     if ($LASTEXITCODE -ne 0) { Fail 'uv sync gagal. Kirim tulisan merah di atas ke yang membantu Anda.'; return }
     $Exe = Join-Path $Root '.venv\Scripts\gold-agent.exe'
     Ok 'Dependensi terpasang'
@@ -148,28 +154,24 @@ function Install-GoldNewsAgent {
     }
 
     Step 6 'Email kontak dan file log'
-    $SettingsPath = Join-Path $Root 'config\settings.yaml'
-    $settings = [IO.File]::ReadAllText($SettingsPath)
-    if ($settings -match '(?m)^[ \t]*contact_email:[ \t]*null') {
+    $email = & (Join-Path $Root '.venv\Scripts\python.exe') -c 'from gold_agent.config import load_settings; print(load_settings().http.contact_email or "")'
+    if (-not $email) {
         do { $email = (Read-Host '  Ketik email kontak (untuk situs data resmi AS)').Trim() } while ($email -notmatch '^[^@\s"]+@[^@\s"]+\.[^@\s"]+$')
-        $settings = [regex]::Replace($settings, '(?m)^[ \t]*contact_email:[^\r\n]*', { param($m) "  contact_email: `"$email`"" })
+        & $Exe config set http.contact_email $email
+        if ($LASTEXITCODE -ne 0) { Fail 'Email tidak tersimpan (lihat tulisan merah di atas).'; return }
     }
-    $settings = [regex]::Replace($settings, '(?m)^[ \t]*file: null[^\r\n]*', '  file: data/logs/gold-agent.log')
-    [IO.File]::WriteAllText($SettingsPath, $settings)
-    & (Join-Path $Root '.venv\Scripts\python.exe') -c 'from gold_agent.config import load_settings; load_settings()'
-    if ($LASTEXITCODE -ne 0) { Fail 'config\settings.yaml tidak valid (lihat tulisan merah di atas).'; return }
-    Ok 'Config tersimpan'
+    & $Exe config set logging.file data/logs/gold-agent.log
+    if ($LASTEXITCODE -ne 0) { Fail 'Config tidak valid (lihat tulisan merah di atas).'; return }
+    Ok 'Config tersimpan di config\local.yaml'
 
     Step 7 'Tes dan aktifkan sumber data (1-3 menit, layar diam itu normal)'
     & $Exe verify-sources --only ($Sources -join ',') --note 'install'
     $report = Get-Content (Join-Path $Root 'docs\source_report.json') -Raw | ConvertFrom-Json
     $passed = @($report.results | Where-Object { $_.status -in 'ok', 'warn' } | ForEach-Object { $_.source_id })
-    $SourcesPath = Join-Path $Root 'config\sources.yaml'
-    $yaml = [IO.File]::ReadAllText($SourcesPath)
-    foreach ($id in $passed) {
-        $yaml = [regex]::Replace($yaml, "(?s)(- id: $id\r?\n(?:(?!- id:).)*?status: )candidate", '${1}verified', 1)
+    if ($passed.Count) {
+        & $Exe config verified @passed
+        if ($LASTEXITCODE -ne 0) { Fail 'Sumber tidak bisa diaktifkan (lihat tulisan merah di atas).'; return }
     }
-    [IO.File]::WriteAllText($SourcesPath, $yaml)
     Ok "Diaktifkan $($passed.Count) sumber: $($passed -join ', ')"
     if ($passed -notcontains 'binance_paxg_ws' -and $passed -notcontains 'binance_paxg_rest') {
         Warn 'Sumber harga Binance gagal dari jaringan ini: harga akan "tidak tersedia".'
@@ -188,14 +190,14 @@ function Install-GoldNewsAgent {
     Ok "Nyala otomatis saat login: $Startup"
     $shell = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
-    foreach ($pair in @(@('Jalankan Gold News Agent', 'jalankan.cmd'), @('Matikan Gold News Agent', 'matikan.cmd'))) {
+    foreach ($pair in @(@('Jalankan Gold News Agent', 'jalankan.cmd'), @('Matikan Gold News Agent', 'matikan.cmd'), @('Perbarui Gold News Agent', 'perbarui.cmd'))) {
         $link = $shell.CreateShortcut((Join-Path $desktop "$($pair[0]).lnk"))
         $link.TargetPath = Join-Path $Win $pair[1]
         $link.WorkingDirectory = $Root
         $link.Save()
     }
     [IO.File]::WriteAllText((Join-Path $desktop 'Dashboard XAUUSD.url'), "[InternetShortcut]`r`nURL=http://127.0.0.1:8787/`r`n", [Text.Encoding]::ASCII)
-    Ok 'Shortcut di Desktop: "Jalankan Gold News Agent", "Matikan Gold News Agent", "Dashboard XAUUSD"'
+    Ok 'Shortcut di Desktop: "Jalankan", "Matikan", "Perbarui Gold News Agent" dan "Dashboard XAUUSD"'
 
     Step 9 'Menyalakan program dan membuka dashboard'
     # The call operator, not Start-Process -Wait: that would also wait for the agent it starts.

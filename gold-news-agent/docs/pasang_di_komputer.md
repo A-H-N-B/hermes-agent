@@ -32,9 +32,14 @@ ditolak robots.txt tidak pernah diaktifkan), memasang nyala otomatis lewat folde
 membuka dashboard. Aman dijalankan ulang. Sumber lain (FinancialJuice, FXStreet, Kitco, ...)
 tetap `candidate` sampai syarat penggunaannya kamu baca sendiri (langkah 7).
 
-Installer juga membuat dua shortcut di Desktop: **Jalankan Gold News Agent** (menyalakan program
-bila belum jalan, lalu membuka dashboard; tidak pernah menyalakan dua salinan) dan **Matikan Gold
-News Agent**, plus **Dashboard XAUUSD** (langsung membuka `http://127.0.0.1:8787/`). Dua yang pertama memanggil `scripts\windows\jalankan.cmd` / `matikan.cmd`.
+Installer juga membuat shortcut di Desktop: **Jalankan Gold News Agent** (menyalakan program
+bila belum jalan, lalu membuka dashboard; tidak pernah menyalakan dua salinan), **Matikan Gold
+News Agent**, **Perbarui Gold News Agent** (update aman, lihat "Update ke versi baru"), plus
+**Dashboard XAUUSD** (langsung membuka `http://127.0.0.1:8787/`). Tiga yang pertama memanggil
+`scripts\windows\jalankan.cmd` / `matikan.cmd` / `perbarui.cmd`. Pengaturan yang diisi installer
+(email kontak, file log, sumber yang lolos uji) disimpan di `config\local.yaml` dan
+`config\sources.local.yaml`: file milik komputer itu sendiri yang tidak ikut git, jadi tidak
+pernah bentrok saat update.
 
 ---
 
@@ -108,7 +113,7 @@ Semua perintah berikutnya dijalankan **di folder project** ini.
 ## Langkah 3 — Pasang dependensi
 
 ```powershell
-uv sync                    # Windows + MetaTrader 5: uv sync --extra mt5
+uv sync                    # Windows: uv sync --extra mt5 (harga broker dari MetaTrader 5)
 uv run gold-agent --help   # harus muncul daftar perintah
 ```
 
@@ -130,23 +135,41 @@ Untuk MT5: isi `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER` (persis seperti di jend
 
 ## Langkah 5 — Sesuaikan config
 
-Buka `config\settings.yaml` (mis. `notepad config\settings.yaml`):
+`config\settings.yaml` berisi nilai bawaan dan ikut diperbarui. **Jangan ubah file itu**:
+pengaturan milikmu masuk ke `config\local.yaml` (tidak ikut git, aman saat update) lewat:
+
+```powershell
+uv run gold-agent config set http.contact_email "emailmu@contoh.com"
+uv run gold-agent config set risk.account_equity 1000
+```
+
+Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut field-nya.
+`config\local.yaml` juga boleh dibuka dengan Notepad: isinya hanya kunci yang kamu ubah.
 
 1. `http.contact_email`: email kontakmu (boleh alamat khusus). Sebagian situs data AS (BLS)
    menolak bot tanpa alamat kontak.
 2. `risk.account_equity`: modal akun (angka). Opsional, tapi tanpa ini ukuran lot tidak
    ditampilkan. Sistem tidak pernah menebak.
-3. Sumber harga di `price_feed`:
-   - **Windows + MT5** (paling akurat, harga broker-mu sendiri): `primary: mt5` dan
-     `mt5_symbol:` sesuai nama simbol emas di broker (`XAUUSD`, `XAUUSDm`, `GOLD`, ...).
-     Terminal MT5 harus **terbuka dan login** selama sistem jalan.
-   - **Tanpa MT5:** biarkan `primary: binance_paxg`. PAXG adalah token emas yang
-     diperdagangkan 24/7 dan diberi label *proxy* di setiap sinyal.
-4. **[Windows]** Agar log tersimpan saat berjalan otomatis (langkah 10), isi `logging.file:
-   data/logs/gold-agent.log` (dirotasi otomatis 10 MB × 5).
+3. Sumber harga (`price_feed.primary`, bawaan `auto`):
+   - **Windows + MT5** (paling akurat, harga broker-mu sendiri): cukup buka terminal MT5 dan
+     login. `auto` memakai MT5 bila terminalnya jalan dan mencari sendiri simbol emas broker
+     (`XAUUSD`, `XAUUSDm`, `XAUUSD.r`, `GOLD`, ...; yang ada di Market Watch didahulukan).
+     Bila MT5 ditutup, program pindah ke PAXG dan kembali ke MT5 paling lambat 15 menit setelah
+     MT5 dibuka lagi; riwayat candle dimuat ulang dari feed baru supaya dua harga tidak tercampur.
+   - **Tanpa MT5:** `auto` memakai Binance PAXG, token emas 24/7 yang harganya berselisih
+     beberapa dolar dari XAUUSD spot dan diberi label *proxy* di setiap sinyal.
+4. **[Windows]** Agar log tersimpan saat berjalan otomatis (langkah 10), isi `logging.file`
+   dengan `data/logs/gold-agent.log` (dirotasi otomatis 10 MB × 5).
+5. Jam trading (`trading.windows`, bawaan London M5 14:00–17:00 dan New York M15 19:00–23:00
+   WIB). Di luar jam itu tidak ada sinyal BUY/SELL (berita tetap dikirim). Di dalamnya entry,
+   SL/TP, dan masa berlaku memakai chart jendela itu. Contoh mengganti jam (satu baris):
+   `uv run gold-agent config set trading.windows "[{name: London, start: '15:00', end: '18:00', timeframe: M5}]"`.
+   `[]` berarti sinyal sepanjang hari. Catatan: London mundur sejam setelah 25 Okt (buka 15:00
+   WIB) dan New York setelah 1 Nov (data AS 20:30 WIB). Jendela bisa mengikuti jam London
+   otomatis dengan `zone: Europe/London, start: '08:00', end: '11:00'`.
 
-Jam tenang (00:00–05:00 WIB), ambang sinyal, dan batas rugi harian juga ada di file ini.
-Config yang salah ketik membuat program menolak jalan dan menyebut field-nya.
+Jam tenang (00:00–05:00 WIB), ambang sinyal, dan batas rugi harian juga ada di
+`config\settings.yaml` dan bisa ditimpa dengan cara yang sama.
 
 ## Langkah 6 — Jam komputer harus tepat
 
@@ -296,11 +319,26 @@ Telethon bisa dibuat ulang dengan `telegram-login`.
 
 ## Update ke versi baru
 
+**Windows:** klik shortcut **Perbarui Gold News Agent** di Desktop. Bila shortcut itu belum ada
+(instalasi sebelum 21 Okt 2026), tempel sekali di Windows PowerShell biasa:
+
 ```powershell
-Stop-ScheduledTask -TaskName "GoldNewsAgent"      # atau Ctrl+C
-git pull
-uv sync                                           # + --extra mt5 bila dipakai
-Start-ScheduledTask -TaskName "GoldNewsAgent"
+powershell -NoExit -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/windows/perbarui.ps1 | iex"
+```
+
+Updater mematikan program, memindahkan setiap ubahan di `config\settings.yaml` /
+`config\sources.yaml` ke `config\local.yaml` / `config\sources.local.yaml` (salinan lengkapnya
+disimpan di `data\backups\config-sebelum-update-*.patch`), mengambil versi baru, memasang
+dependensinya, memeriksa config masih valid, lalu menyalakan program lagi dan membuat shortcut
+Perbarui. `.env` dan `data\` tidak disentuh. Bila gagal sebelum versi baru terpasang, versi lama
+dinyalakan lagi.
+
+**macOS/Linux** (tanpa updater):
+
+```bash
+uv run gold-agent config migrate   # ubahan config pindah ke config/local.yaml
+git pull --ff-only
+uv sync
 ```
 
 ## Bila ada masalah

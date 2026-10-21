@@ -6,6 +6,10 @@
 *.session-journal
 secrets/
 
+# This computer's own settings (gold-agent config ...): never committed, survive updates
+config/local.yaml
+config/sources.local.yaml
+
 # Runtime data
 data/
 logs/

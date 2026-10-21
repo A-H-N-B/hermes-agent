@@ -35,8 +35,8 @@ def _source(**overrides: Any) -> dict[str, Any]:
 
 
 def test_shipped_config_files_validate() -> None:
-    settings = load_settings()
-    registry = load_sources()
+    settings = load_settings(local=False)
+    registry = load_sources(local=False)
     assert settings.execution_enabled is False
     assert settings.mode == "SIGNAL_ONLY"
     assert registry.sources

@@ -33,7 +33,7 @@ async def dashboard(
     clock.set(NOW)
     await seed_dashboard(ctx, settings)
     ctx.env["DASHBOARD_PASSWORD"] = PASSWORD
-    shipped = load_settings().trading.windows  # London M5 14-17, New York M15 19-23 WIB
+    shipped = load_settings(local=False).trading.windows  # London M5 14-17, New York M15 19-23 WIB
     ctx.settings = settings.model_copy(
         update={
             "dashboard": settings.dashboard.model_copy(update={"port": 0}),
