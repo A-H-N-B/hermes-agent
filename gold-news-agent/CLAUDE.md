@@ -74,10 +74,12 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 - **Phase 3 (done, pending real data).** Prefilter (`keywords.yaml`), fast-path release parser
   (18 US events, country guard, calendar forecast fallback, prior vs calibrated surprise s.d.),
   playbooks (11.4 buckets → actual thresholds), Claude client (`analysis/llm_client.py`:
-  `messages.parse` structured output, cached system prompt + KB, Haiku with thinking off,
-  timeouts, circuit breaker, WIB-day budget, `llm_usage` cost log, refusal handling), rules
-  fallback, anti-hallucination checks (ids, quotes, numbers), cross-verification weights, deep
-  analysis (Sonnet), price-led spikes → alert + targeted `collector.poll_now`, analyzer service.
+  `beta.messages.parse` structured output, cached system prompt + KB, every route on Opus 5.5
+  (thinking always on, `effort` per route, server-side refusal `fallbacks: default` priced per
+  `usage.iterations`), timeouts, circuit breaker, WIB-day budget, `llm_usage` cost log, refusal
+  handling), rules fallback, anti-hallucination checks (ids, quotes, numbers), cross-verification
+  weights, deep analysis (Opus 5.5, effort high), price-led spikes → alert + targeted
+  `collector.poll_now`, analyzer service.
   `gold-agent labels export/import` + `gold-agent eval-triage [--llm]` measure the Phase 3 bar
   (precision ≥ 0.9 on ≥ 100 labelled headlines, p95 < 5 s) — needs the real archive to run.
 - **Phase 4 (done).** `signals/scoring.py` (N/M/T/P, decay, priced-in, novelty, confirmed-only

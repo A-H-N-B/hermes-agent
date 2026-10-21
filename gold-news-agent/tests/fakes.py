@@ -22,9 +22,19 @@ def usage(
 
 
 def parsed(
-    value: Any, *, stop_reason: str = "end_turn", tokens: SimpleNamespace | None = None
+    value: Any,
+    *,
+    stop_reason: str = "end_turn",
+    tokens: SimpleNamespace | None = None,
+    model: str | None = None,
 ) -> Any:
-    return SimpleNamespace(parsed_output=value, usage=tokens or usage(), stop_reason=stop_reason)
+    """A parse() response; `model` is the model that served it (absent = the requested one)."""
+    response = SimpleNamespace(
+        parsed_output=value, usage=tokens or usage(), stop_reason=stop_reason
+    )
+    if model is not None:
+        response.model = model
+    return response
 
 
 def timeout_error() -> anthropic.APITimeoutError:
@@ -60,6 +70,7 @@ class FakeAnthropic:
         self.requests: list[dict[str, Any]] = []
         self.options: list[dict[str, Any]] = []
         self.messages = FakeMessages(self)
+        self.beta = SimpleNamespace(messages=self.messages)  # the client calls beta.messages.parse
 
     def with_options(self, **options: Any) -> FakeAnthropic:
         self.options.append(options)

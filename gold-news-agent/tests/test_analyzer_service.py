@@ -74,7 +74,7 @@ async def test_relevant_story_is_triaged_published_and_timed(
     published = Analysis.model_validate(message.data)
     assert published.cluster_id == "c1" and published.triage.direction_gold == "bearish"
     stored = await context.news.get_analysis("c1")
-    assert stored is not None and stored.model == "claude-haiku-5-5"
+    assert stored is not None and stored.model == "claude-opus-5-5"
     stages = {s.stage: s for s in await context.ops.latency_samples(T0 - timedelta(minutes=1))}
     assert stages["triaged"].seconds_from_first_seen == pytest.approx(2.0)
     assert len(fake.requests) == 1

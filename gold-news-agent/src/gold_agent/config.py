@@ -328,6 +328,13 @@ class ModelPrice(StrictModel):
     cache_read: float = Field(ge=0)
 
 
+# Models on which `thinking: {type: "disabled"}` is a 400 at every effort level: thinking is
+# always on and `effort` is the only control.
+ALWAYS_THINKING_MODELS = frozenset(
+    {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5", "claude-fable-5-1"}
+)
+
+
 class LlmSettings(StrictModel):
     provider: Literal["anthropic"]
     enabled: bool
@@ -336,8 +343,25 @@ class LlmSettings(StrictModel):
     deep: LlmRoute
     outlook: LlmRoute
     brief: LlmRoute
+    # Server-side refusal fallback: if a safety classifier declines a request (false positives
+    # happen on benign news), the API re-runs it on the model Anthropic recommends for that
+    # category instead of failing. "off" sends requests without it.
+    fallbacks: Literal["default", "off"] = "default"
     circuit_breaker: CircuitBreaker
     pricing_per_mtok: dict[str, ModelPrice]
+
+    @model_validator(mode="after")
+    def _routes_are_callable_and_priced(self) -> LlmSettings:
+        for name in ("triage", "deep", "outlook", "brief"):
+            route: LlmRoute = getattr(self, name)
+            if route.thinking == "disabled" and route.model in ALWAYS_THINKING_MODELS:
+                raise ValueError(
+                    f"llm.{name}: {route.model} cannot run with thinking disabled; "
+                    "lower `effort` instead"
+                )
+            if route.model not in self.pricing_per_mtok:
+                raise ValueError(f"llm.{name}: no pricing_per_mtok entry for {route.model}")
+        return self
 
 
 class AnalysisSettings(StrictModel):

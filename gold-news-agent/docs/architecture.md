@@ -8,7 +8,7 @@ persetujuan di akhir Fase 0. Diagram alur utama ada di `PROMPT_XAUUSD_NEWS_AGENT
 ```
 collectors (async, 1 per sumber) ─► normalizer ─► dedup/cluster ─► Redis Stream news.raw
       ─► prefilter (regex, <10 ms) ─┬─► fast path: parser angka rilis + playbook ─► FLASH
-                                    └─► LLM triage (Haiku) ─► deep analysis (Sonnet, impact ≥ 3)
+                                    └─► LLM triage (Opus 5.5, effort low) ─► deep analysis (Opus 5.5, effort high, impact ≥ 3)
 market context (tick, candle, DXY, yield, teknikal, kalender) ─► signal engine ─► Telegram / dashboard / paper tracker
 scheduler: kalender, playbook T-60, outlook per jam, brief sesi, laporan
 ```
@@ -56,14 +56,20 @@ Timescale, jadi beralih nanti tetap mudah.
 
 ### ADR-005 Output terstruktur LLM — Diterapkan di config, implementasi Fase 3
 
-- Model: `claude-haiku-5-5` (triage), `claude-sonnet-5-5` (deep/outlook/playbook),
-  `claude-opus-5-5` (brief harian, opsional).
-- Pakai structured outputs (`output_config.format` / `client.messages.parse()` + pydantic). Jangan
-  memaksa tool lewat `tool_choice` `any`/`tool`, karena Sonnet 5.5 dan Opus 5.5 menolaknya (HTTP
-  400). Jika memakai tool `record_gold_analysis`, gunakan `tool_choice: auto` + `strict: true`.
-- Triage: Haiku 5.5 dengan `effort: low` dan thinking dimatikan (diizinkan pada effort ≤ high)
-  supaya latensi rendah. Sonnet 5.5 tidak menerima `thinking: disabled`; pakai effort rendah atau
-  `between_tools`.
+- Model: semua rute memakai `claude-opus-5-5` (triage, deep, outlook, brief harian/mingguan).
+  Kedalaman diatur per rute lewat `effort`: triage `low` (tiap berita, harus cepat), outlook
+  `medium`, deep dan brief `high`.
+- Pakai structured outputs (`output_config.format` / `client.beta.messages.parse()` + pydantic).
+  Jangan memaksa tool lewat `tool_choice` `any`/`tool`, karena Opus 5.5 menolaknya (HTTP 400). Jika
+  memakai tool `record_gold_analysis`, gunakan `tool_choice: auto` + `strict: true`.
+- Thinking Opus 5.5 selalu aktif: `thinking: disabled` dan `budget_tokens` ditolak (HTTP 400), dan
+  config sudah menolak kombinasi itu saat program start. Thinking ikut dihitung dalam `max_tokens`,
+  jadi `max_tokens` diberi ruang (triage 4096, rute lain 16000).
+- Refusal: `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) membuat permintaan yang
+  ditolak classifier dijalankan ulang di server Anthropic pada model rekomendasinya (Opus 5 / Opus
+  4.8). Biaya tiap hop dihitung dari `usage.iterations` dengan harga model hop itu, dan hasilnya
+  dicatat di bawah model yang benar-benar menjawab. `stop_reason == "refusal"` di akhir rantai tetap
+  dianggap kegagalan LLM, jadi fallback ke aturan.
 - Prompt caching: system prompt + `gold_drivers.yaml` di depan, data berubah-ubah di belakang.
   Minimum prefix yang bisa di-cache 512 token. Pantau `usage.cache_read_input_tokens`.
 - Tangani `stop_reason == "refusal"` sebagai kegagalan LLM, yaitu fallback ke aturan.
@@ -240,26 +246,28 @@ pertama bergeser 5–30 detik, tanpa efek lain.
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):
 
-| Model | Input | Output | Baca cache |
+| Model | Input | Output | Tulis cache (5 mnt) | Baca cache |
+|---|---|---|---|---|
+| Opus 5.5 (semua rute) | $4 | $20 | $5 | $0,20 |
+| Opus 5 / Opus 4.8 (hanya saat fallback refusal) | $5 | $25 | $6,25 | $0,50 |
+
+Asumsi berikut harus **diganti dengan data `llm_usage` nyata**. Output sudah termasuk thinking,
+yang selalu aktif di Opus 5.5 dan makin panjang pada effort lebih tinggi:
+
+| Tugas | Volume/hari | Token per panggilan (cache / baru / output+thinking) | Biaya/hari |
 |---|---|---|---|
-| Haiku 5.5 | $0,10 | $0,50 | ±$0,01 |
-| Sonnet 5.5 | $2 | $10 | $0,20 |
-| Opus 5.5 | $4 | $20 | $0,20 |
+| Triage (effort low) | 600 cluster | 4k / 0,7k / 0,65k | ±$10 |
+| Deep (effort high) | 40 | 6k / 3k / 6k | ±$5,30 |
+| Outlook per jam (effort medium) | 24 | 6k / 5k / 5k | ±$2,90 |
+| Brief harian (effort high) | 1 | – / 30k / 8k | ±$0,30 |
+| Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 4–6k | ±$2,50 |
+| **Total tanpa rem** | | | **±$21/hari** |
 
-Asumsi berikut harus **diganti dengan data `llm_usage` nyata di Fase 3**:
-
-| Tugas | Volume/hari | Token per panggilan (cache / baru / output) | Biaya/hari |
-|---|---|---|---|
-| Triage Haiku | 600 cluster | 4k / 0,7k / 0,35k | ±$0,17 |
-| Deep Sonnet | 40 | 6k / 3k / 3k (termasuk thinking) | ±$1,50 |
-| Outlook per jam Sonnet | 24 | 6k / 5k / 2,5k | ±$0,85 |
-| Playbook Sonnet | 3 | 6k / 3k / 3k | ±$0,12 |
-| Brief harian Opus | 1 | – / 30k / 5k | ±$0,22 |
-| **Total** | | | **±$2,9/hari ≈ $85–90/bulan** |
-
-Varian hemat (±$1/hari ≈ $30/bulan): outlook per jam memakai Haiku kecuali saat pembukaan sesi,
-deep analysis hanya untuk impact ≥ 4, tanpa brief Opus. `budget.llm_daily_usd` menjadi rem darurat:
-jika terlampaui, hanya berita high-impact yang dianalisis LLM.
+`budget.llm_daily_usd` (bawaan $3) adalah rem: setelah biaya hari itu (hari WIB) mencapai angka
+itu, hanya berita high-impact (rilis data, impact ≥ 4) yang masih dianalisis Opus; sisanya memakai
+aturan sampai pukul 00:00 WIB. Dengan rem $3 biaya harian ±$3–5 (berita high-impact tetap jalan).
+Supaya **semua** berita dianalisis Opus sepanjang hari, naikkan ke ±$20–25. Biaya nyata per hari
+terlihat di header dashboard (saldo kredit), `/stats`, dan laporan harian.
 
 Biaya lain: VPS Linux 2–4 GB sekitar $6–24/bulan. VPS Windows untuk MT5 lebih mahal. Harga Twelve
 Data berbayar dan X API harus dicek di situs masing-masing karena tidak diasumsikan di sini.

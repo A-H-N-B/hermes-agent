@@ -147,9 +147,13 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    Bila muncul daftar nama model, key berfungsi. `401` artinya key salah. `400` dengan pesan
    soal billing/credit artinya saldo belum diisi.
 
-Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): Haiku untuk triage
-cepat dan murah, Sonnet untuk analisis mendalam dan outlook, Opus hanya untuk ringkasan harian
-(opsional). Biaya nyata tercatat di tabel `llm_usage` dan terlihat di laporan harian dan
+Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): semua tugas AI
+(triage tiap berita, analisis mendalam, outlook per jam, ringkasan harian/mingguan) memakai
+**Claude Opus 5.5**, dengan tingkat `effort` berbeda per tugas. Opus lebih mahal daripada model
+kecil (±$0,02 per berita yang di-triage), jadi `budget.llm_daily_usd` (bawaan $3/hari) menjadi
+rem: setelah batas itu tercapai, hanya berita high-impact yang tetap dianalisis Opus sampai pukul
+00:00 WIB. Naikkan angkanya bila ingin semua berita dianalisis Opus sepanjang hari (±$20/hari).
+Biaya nyata tercatat di tabel `llm_usage` dan terlihat di header dashboard, laporan harian, dan
 `/stats`.
 
 **Memantau pemakaian:** Console → **Usage** menampilkan biaya per hari.

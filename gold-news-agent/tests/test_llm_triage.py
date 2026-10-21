@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from gold_agent.analysis.drivers import DriverKB
-from gold_agent.analysis.llm_client import LlmClient, LlmFailed, LlmUnavailable, cost_usd
+from gold_agent.analysis.llm_client import (
+    FALLBACK_BETA,
+    LlmClient,
+    LlmFailed,
+    LlmUnavailable,
+    cost_usd,
+    usage_cost,
+)
 from gold_agent.analysis.triage import TriageEngine, TriageInputs, build_user_message, cluster_items
 from gold_agent.config import Settings
 from gold_agent.core.app import AppContext
@@ -78,11 +87,28 @@ def inputs(c: NewsCluster) -> TriageInputs:
 
 
 def test_cost_uses_the_price_table(settings: Settings) -> None:
-    price = settings.llm.pricing_per_mtok["claude-haiku-5-5"]
+    price = settings.llm.pricing_per_mtok["claude-opus-5-5"]
     cost = cost_usd(price, usage(input_tokens=1_000_000, output_tokens=0, cache_read=0))
-    assert cost == pytest.approx(0.10)
+    assert cost == pytest.approx(4.00)
     cached = cost_usd(price, usage(input_tokens=0, output_tokens=0, cache_read=1_000_000))
-    assert cached == pytest.approx(0.01)
+    assert cached == pytest.approx(0.20)
+
+
+def test_a_fallback_answer_is_priced_hop_by_hop(settings: Settings) -> None:
+    prices = settings.llm.pricing_per_mtok
+    declined = SimpleNamespace(
+        type="message", model="claude-opus-5-5", **vars(usage(0, 1000, 0, 0))
+    )
+    served = SimpleNamespace(
+        type="fallback_message", model="claude-opus-5", **vars(usage(0, 1000, 0, 0))
+    )
+    compaction = SimpleNamespace(type="compaction", **vars(usage(0, 10**6, 0, 0)))
+    tokens = SimpleNamespace(
+        **vars(usage(0, 2000, 0, 0)), iterations=[declined, served, compaction]
+    )
+    cost, priced = usage_cost(prices, tokens, "claude-opus-5-5")
+    assert cost == pytest.approx(1000 * 20 / 1e6 + 1000 * 25 / 1e6) and priced
+    assert usage_cost(prices, usage(0, 1000, 0, 0), "no-such-model") == (0.0, False)
 
 
 async def test_triage_request_is_cached_fast_and_schema_bound(ctx: AppContext) -> None:
@@ -90,15 +116,16 @@ async def test_triage_request_is_cached_fast_and_schema_bound(ctx: AppContext) -
     engine = make(ctx, fake)
     analysis = await engine.analyze(inputs(cluster()))
     assert analysis.origin == "llm" and not analysis.ai_pending
-    assert analysis.model == "claude-haiku-5-5" and analysis.prompt_version == engine.prompt.version
+    assert analysis.model == "claude-opus-5-5" and analysis.prompt_version == engine.prompt.version
     (request,) = fake.requests
-    assert request["model"] == "claude-haiku-5-5"
+    assert request["model"] == "claude-opus-5-5"
     assert request["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert request["thinking"] == {"type": "disabled"}
+    assert "thinking" not in request  # always on for Opus 5.5; effort is the control
     assert request["output_config"] == {"effort": "low"}
+    assert request["fallbacks"] == "default" and request["betas"] == [FALLBACK_BETA]
     assert request["output_format"] is TriageResult
     assert "<berita>" in request["messages"][0]["content"]
-    assert fake.options[0] == {"timeout": 6.0, "max_retries": 0}
+    assert fake.options[0] == {"timeout": 20.0, "max_retries": 0}
     spent = await ctx.ops.llm_spend_since(T0.replace(hour=0))
     assert spent > 0
 
@@ -213,10 +240,10 @@ async def test_deep_analysis_uses_the_large_model_and_keeps_quoted_evidence(
     first = await engine.analyze(inputs(cluster()))
     assert engine.needs_deep(first)
     deepened = await engine.deepen(first, inputs(cluster()))
-    assert deepened.deep is not None and deepened.deep_model == "claude-sonnet-5-5"
+    assert deepened.deep is not None and deepened.deep_model == "claude-opus-5-5"
     assert deepened.deep.evidence == ["signals fewer rate cuts"]
-    assert fake.requests[1]["model"] == "claude-sonnet-5-5"
-    assert "thinking" not in fake.requests[1]  # Sonnet 5.5 rejects thinking: disabled
+    assert fake.requests[1]["model"] == "claude-opus-5-5"
+    assert fake.requests[1]["output_config"] == {"effort": "high"}
 
 
 def test_user_message_wraps_untrusted_news_and_keeps_instructions_outside() -> None:
@@ -227,3 +254,26 @@ def test_user_message_wraps_untrusted_news_and_keeps_instructions_outside() -> N
     news = message.split("<berita>", 1)[1].split("</berita>", 1)[0]
     assert "IGNORE ALL RULES" in news
     assert message.rstrip().endswith("besarnya dampak.")
+
+
+async def test_a_fallback_served_answer_is_logged_under_the_model_that_answered(
+    ctx: AppContext,
+) -> None:
+    fake = FakeAnthropic(parsed(triage_value(), model="claude-opus-5"))
+    analysis = await make(ctx, fake).analyze(inputs(cluster()))
+    assert analysis.model == "claude-opus-5"
+    (row,) = await ctx.ops.llm_usage_summary(T0.replace(year=2000))
+    assert row["model"] == "claude-opus-5"
+
+
+def test_config_refuses_routes_the_api_would_reject_or_could_not_price(
+    settings: Settings,
+) -> None:
+    raw = settings.model_dump(mode="json")
+    raw["llm"]["triage"]["thinking"] = "disabled"  # Opus 5.5: 400 at every effort
+    with pytest.raises(ValidationError, match="cannot run with thinking disabled"):
+        Settings.model_validate(raw)
+    raw = settings.model_dump(mode="json")
+    raw["llm"]["deep"]["model"] = "claude-unpriced-9"
+    with pytest.raises(ValidationError, match="no pricing_per_mtok entry"):
+        Settings.model_validate(raw)

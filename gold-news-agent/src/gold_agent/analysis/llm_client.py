@@ -1,9 +1,15 @@
 """Claude API access for analysis: structured outputs, prompt caching, timeouts, circuit breaker,
-daily budget and per-call usage/cost logging (section 13.1)."""
+daily budget and per-call usage/cost logging (section 13.1).
+
+Requests go through the beta Messages endpoint so a safety-classifier refusal (a false positive on
+benign news) can be retried server-side on the recommended fallback model (`fallbacks="default"`).
+The served model and every sampling iteration are priced at their own rates, so the cost log and
+the dashboard's credit estimate stay right when a fallback model answers."""
 
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from datetime import time as dtime
@@ -22,6 +28,8 @@ log = structlog.get_logger(__name__)
 
 Route = Literal["triage", "deep", "outlook", "brief"]
 T = TypeVar("T", bound=pydantic.BaseModel)
+FALLBACK_BETA = "server-side-fallback-2026-07-01"  # pairs with fallbacks="default"
+PRICED_ITERATIONS = ("message", "fallback_message")  # compaction etc. are not model turns
 
 
 class LlmUnavailable(Exception):
@@ -43,6 +51,25 @@ class LlmResult[T2]:
     latency_ms: float
     cost_usd: float
     cache_read_tokens: int
+
+
+def usage_cost(prices: Mapping[str, ModelPrice], usage: Any, model: str) -> tuple[float, bool]:
+    """Cost of one response: each sampling iteration at its own model's price when the response
+    lists them (a refused hop plus the fallback that served), else the totals at `model`'s price.
+    The flag is False when a model had no price (its tokens were counted as free)."""
+    iterations = [
+        step
+        for step in getattr(usage, "iterations", None) or []
+        if getattr(step, "type", None) in PRICED_ITERATIONS
+    ]
+    if not iterations:
+        return cost_usd(prices.get(model), usage), model in prices
+    total, priced = 0.0, True
+    for step in iterations:
+        name = getattr(step, "model", None) or model
+        priced = priced and name in prices
+        total += cost_usd(prices.get(name), step)
+    return total, priced
 
 
 def cost_usd(price: ModelPrice | None, usage: Any) -> float:
@@ -141,8 +168,9 @@ class LlmClient:
         error: str | None,
         ref_id: str | None,
     ) -> float:
-        price = self._settings.llm.pricing_per_mtok.get(model)
-        cost = cost_usd(price, usage)
+        cost, priced = usage_cost(self._settings.llm.pricing_per_mtok, usage, model)
+        if usage is not None and not priced:
+            log.warning("llm.unpriced_model", model=model, route=route)
         await self._ops.add_llm_usage(
             ts=self._clock.now(),
             route=route,
@@ -188,14 +216,18 @@ class LlmClient:
         }
         if config.thinking == "disabled":
             request["thinking"] = {"type": "disabled"}
+        if self._settings.llm.fallbacks == "default":
+            request["betas"] = [FALLBACK_BETA]
+            request["fallbacks"] = "default"
 
         started = time.perf_counter()
         usage: Any = None
         try:
             client = self._client.with_options(timeout=config.timeout_seconds, max_retries=0)
-            response = await client.messages.parse(**request)
+            response = await client.beta.messages.parse(**request)
             usage = getattr(response, "usage", None)
-            if getattr(response, "stop_reason", None) == "refusal":
+            served = getattr(response, "model", None) or config.model
+            if getattr(response, "stop_reason", None) == "refusal":  # the whole chain declined
                 raise LlmFailed("model menolak (refusal)")
             parsed = getattr(response, "parsed_output", None)
             if parsed is None:
@@ -242,12 +274,14 @@ class LlmClient:
             raise LlmFailed(f"{type(exc).__name__}") from exc
         latency = (time.perf_counter() - started) * 1000
         cost = await self._record(
-            route, config.model, usage=usage, latency_ms=latency, ok=True, error=None, ref_id=ref_id
+            route, served, usage=usage, latency_ms=latency, ok=True, error=None, ref_id=ref_id
         )
+        if served != config.model:
+            log.info("llm.fallback_served", route=route, requested=config.model, served=served)
         self.breaker.success()
         return LlmResult(
             value=parsed,
-            model=config.model,
+            model=served,
             latency_ms=round(latency, 1),
             cost_usd=cost,
             cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
