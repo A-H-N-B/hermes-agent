@@ -65,10 +65,16 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
     lines = [
         f"{icon} <b>{signal.action} XAUUSD</b> | Confidence {signal.confidence}/100",
         f"🕐 {wib_clock(signal.created_at_utc)} WIB · Sesi {esc(signal.session)}",
+    ]
+    if signal.trading_window:
+        lines.append(
+            f"📊 Chart {esc(signal.timeframe or '-')} · jam trading {esc(signal.trading_window)}"
+        )
+    lines += [
         f"💵 Harga {price(signal.bid)}/{price(signal.ask)} · Spread {signal.spread:.2f}",
         f"🎯 Entry {price(signal.entry_low)}–{price(signal.entry_high)} ({signal.entry_type})",
         f"🛑 SL {price(signal.stop_loss)} ({signal.sl_distance:.2f}$ · "
-        f"{signal.sl_atr_multiple:.2f}×ATR)",
+        f"{signal.sl_atr_multiple:.2f}×ATR {esc(signal.timeframe or 'M15')})",
         f"✅ TP1 {price(signal.tp1)} (1R) · TP2 {price(signal.tp2)} (2R) · {tp3}",
         f"⏳ Berlaku s/d {esc(signal.valid_until_wib)}",
     ]

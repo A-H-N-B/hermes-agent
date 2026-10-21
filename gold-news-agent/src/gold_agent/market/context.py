@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
 from gold_agent.config import Settings
 from gold_agent.market import indicators as ind
@@ -52,23 +53,44 @@ class WeekendTracker:
         return self.latest - self.reference
 
 
-def timeframe_state(tf: Timeframe, candles: Sequence[Candle]) -> TimeframeState:
+SWING_BARS = 120  # recent complete bars searched for the nearest swing high/low
+Trend = Literal["up", "down", "flat"]
+
+
+def trend_of(close: float, ema20: float | None, ema50: float | None) -> Trend | None:
+    """EMA20 above EMA50 with the close above EMA50 is up (mirror for down), else flat."""
+    if ema20 is None or ema50 is None:
+        return None
+    if ema20 > ema50 and close > ema50:
+        return "up"
+    if ema20 < ema50 and close < ema50:
+        return "down"
+    return "flat"
+
+
+def nearest_swings(
+    candles: Sequence[Candle], price: float, half_width: int
+) -> tuple[float | None, float | None]:
+    """Nearest fractal swing high above `price` and swing low below it, from complete bars."""
+    recent = [c for c in candles if c.complete][-SWING_BARS:]
+    highs, lows = ind.swing_points([c.high for c in recent], [c.low for c in recent], half_width)
+    above = [p for _, p in highs if p > price]
+    below = [p for _, p in lows if p < price]
+    return (min(above) if above else None), (max(below) if below else None)
+
+
+def timeframe_state(
+    tf: Timeframe, candles: Sequence[Candle], swing_half_width: int = 3
+) -> TimeframeState:
     if not candles:
         return TimeframeState(tf=tf)
     closes = [c.close for c in candles]
     highs = [c.high for c in candles]
     lows = [c.low for c in candles]
+    swing_high, swing_low = nearest_swings(candles, closes[-1], swing_half_width)
     ema20 = ind.last(ind.ema(closes, 20))
     ema50 = ind.last(ind.ema(closes, 50))
     mid, upper, lower = ind.bollinger(closes)
-    trend = None
-    if ema20 is not None and ema50 is not None:
-        if ema20 > ema50 and closes[-1] > ema50:
-            trend = "up"
-        elif ema20 < ema50 and closes[-1] < ema50:
-            trend = "down"
-        else:
-            trend = "flat"
     return TimeframeState(
         tf=tf,
         close=closes[-1],
@@ -80,7 +102,9 @@ def timeframe_state(tf: Timeframe, candles: Sequence[Candle]) -> TimeframeState:
         bb_upper=ind.last(upper),
         bb_mid=ind.last(mid),
         bb_lower=ind.last(lower),
-        trend=trend,
+        trend=trend_of(closes[-1], ema20, ema50),
+        swing_high=swing_high,
+        swing_low=swing_low,
         bars=len(candles),
     )
 
@@ -124,8 +148,10 @@ def build_market_context(
         notes.append(f"harga dari {tick.source} (proxy, bukan XAUUSD spot)")
     if tick.spread <= 0:
         notes.append("spread tidak tersedia dari feed ini")
+    width = settings.market.swing_half_width
     states = {
-        tf: timeframe_state(tf, builder.candles(tf)) for tf in ("M5", "M15", "H1", "H4", "D1")
+        tf: timeframe_state(tf, builder.candles(tf), width)
+        for tf in ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
     }
     m1 = builder.candles("M1")
     atr_m1 = ind.last(ind.atr([c.high for c in m1], [c.low for c in m1], [c.close for c in m1], 14))

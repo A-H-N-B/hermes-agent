@@ -486,6 +486,7 @@ function bigBox(label, value, note, cls = "") {
 
 function renderTiming(t) {
   lastTiming = t;
+  followTradingWindow(t.trading);
   renderBoard();
   renderTimingDetails(t);
 }
@@ -513,10 +514,25 @@ function scoreGauge(t) {
   return wrap;
 }
 
+// Trading hours (config trading.windows): the window open now and its chart, or the next one.
+function tradingLine(trading) {
+  if (!trading) return null;
+  const a = trading.active;
+  if (a) {
+    return el("p", { class: "trading-line on" }, `🕑 Jam trading ${a.name} · chart ${a.timeframe} · sampai ${a.end_wib} WIB · `,
+      liveCountdown(a.end_utc, "sisa", "sudah selesai"));
+  }
+  const next = trading.next;
+  return el("p", { class: "trading-line" }, `💤 Di luar jam trading Anda (${trading.summary})`,
+    next ? el("span", {}, ` · berikutnya ${next.label} · `, liveCountdown(next.start_utc, "mulai dalam", "mulai sekarang")) : null);
+}
+
 function renderBoard() {
   const t = lastTiming;
   const box = clear($("#timing"));
   const n = t.now;
+  const line = tradingLine(t.trading);
+  if (line) box.append(line);
   const boxes = el("div", { class: "big-boxes" });
   let direction = null;
   if (n.mode === "signal") {
@@ -533,9 +549,11 @@ function renderBoard() {
     if (next) {
       direction = next.action;
       boxes.append(bigBox("Prediksi berikutnya", `${next.action} jam ${next.label_wib.split("–")[0]} WIB`,
-        el("small", {}, liveCountdown(next.from_utc, "dalam", "sedang berlangsung"), ` · confidence ${next.confidence ?? "–"}`), next.action));
+        el("small", {}, liveCountdown(next.from_utc, "dalam", "sedang berlangsung"),
+          `${next.timeframe ? ` · chart ${next.timeframe}` : ""} · confidence ${next.confidence ?? "–"}`), next.action));
     } else {
-      boxes.append(bigBox("Prediksi berikutnya", "belum ada", "Outlook 24 jam belum condong BUY/SELL"));
+      boxes.append(bigBox("Prediksi berikutnya", "belum ada",
+        t.trading ? "belum ada jam trading Anda yang condong BUY/SELL" : "Outlook 24 jam belum condong BUY/SELL"));
     }
     if (t.blackout) {
       const b = t.blackout;
@@ -568,12 +586,12 @@ function renderTimingDetails(t) {
   const list = el("ul", { class: "timing-list" });
   for (const w of t.windows) {
     list.append(el("li", { class: w.action },
-      el("b", { text: `${w.action} · ${w.label_wib} WIB` }), " · ",
+      el("b", { text: `${w.action} · ${w.label_wib} WIB${w.timeframe ? ` · chart ${w.timeframe}` : ""}` }), " · ",
       liveCountdown(w.from_utc, "dalam", "sedang berlangsung"),
       ` · confidence ${w.confidence ?? "–"}${w.conditional ? " (bersyarat)" : ""}`,
       el("div", { class: "meta", text: w.scenario })));
   }
-  if (!t.windows.length) list.append(el("li", { class: "muted", text: "Belum ada jam yang condong BUY atau SELL di Outlook 24 jam ke depan." }));
+  if (!t.windows.length) list.append(el("li", { class: "muted", text: t.trading ? "Belum ada jam trading Anda yang condong BUY atau SELL di Outlook 24 jam ke depan." : "Belum ada jam yang condong BUY atau SELL di Outlook 24 jam ke depan." }));
   box.append(el("h2", { text: "Semua jadwal peluang" }), list);
   if (t.triggers) {
     const parts = [];
@@ -675,12 +693,44 @@ function buildRing() {
   $("#tf-close").addEventListener("click", () => { ring.hidden = true; });
 }
 
+// Inside a trading window the Live chart opens on that window's chart (M5 London, M15 New York).
+// A timeframe picked on the ring holds until the next window opens.
+let lastTrading = null;
+function windowKey(trading) {
+  const active = trading && trading.active;
+  return active ? `${active.name}@${active.start_utc}` : null;
+}
+
+function preferredTf(trading) {
+  const key = windowKey(trading);
+  if (!key) return savedTf();
+  try {
+    const pick = JSON.parse(localStorage.getItem("gna.tf.pick") || "null");
+    if (pick && pick.window === key && RING_TFS.includes(pick.tf)) return pick.tf;
+  } catch { /* unreadable: use the window's chart */ }
+  return trading.active.timeframe;
+}
+
+function followTradingWindow(trading) {
+  lastTrading = trading;
+  const state = charts.live;
+  const tf = preferredTf(trading);
+  if (state && currentPage === "live" && tf !== state.tf) showTf(tf);
+}
+
 async function chooseTf(tf) {
+  try {
+    localStorage.setItem("gna.tf", tf);
+    localStorage.setItem("gna.tf.pick", JSON.stringify({ tf, window: windowKey(lastTrading) }));
+  } catch { /* private window: just not remembered */ }
+  await showTf(tf);
+}
+
+async function showTf(tf) {
   $("#tf-ring").hidden = true;
   const state = charts.live;
   if (!state) return;
   state.tf = tf;
-  try { localStorage.setItem("gna.tf", tf); } catch { /* private window: just not remembered */ }
   markTf(tf);
   await loadChart(state);
   drawSignal(state, lastState ? lastState.active : null);
@@ -711,8 +761,29 @@ async function refreshForecast() {
       liveCountdown(f.until_utc, "·", "candle baru")));
   }
   box.append(el("p", { class: "muted", text: f.reasons.join(" · ") }));
+  const accuracy = accuracyLines(f.accuracy);
+  if (accuracy) box.append(...accuracy);
   drawForecast(state, f);
   tickLiveCountdowns();
+}
+
+// Walk-forward hit rate of this forecast (server: forecast_score.py). 50% is a coin flip, so the
+// verdict only claims an edge when the whole 95% interval is above it.
+function accuracyLines(a) {
+  if (!a) return null;
+  const f = a.forecast;
+  const scope = a.scope === "window" ? `jam trading ${a.windows.join(" + ")}` : "semua jam";
+  if (!f.calls) {
+    return [el("p", { class: "muted", text: `Akurasi prediksi ${a.tf} (${scope}): belum ada data. Dihitung otomatis dari candle yang sudah lewat setelah agent berjalan.` })];
+  }
+  const [lo, hi] = f.ci95;
+  const verdict = lo > 0.5 ? "lebih baik dari tebakan acak ✅" : hi < 0.5 ? "lebih buruk dari acak ⚠️ jangan diandalkan" : "belum terbukti lebih baik dari acak (50%)";
+  const part = (label, x) => `${label} ${x.calls ? `${pct(x.rate)} dari ${x.calls}` : "–"}`;
+  return [
+    el("p", { class: `accuracy ${lo > 0.5 ? "BUY" : hi < 0.5 ? "SELL" : ""}`,
+      text: `Akurasi prediksi ${a.tf} (${scope}, ${a.days} hari): ${pct(f.rate)} benar dari ${f.calls} candle (95%: ${pct(lo)}–${pct(hi)}) · ${verdict}` }),
+    el("p", { class: "muted", text: `${part("berita saja", a.news_only)} · ${part("indikator saja", a.chart_only)} · ${a.abstained} candle netral/tunggu data tidak dihitung` }),
+  ];
 }
 
 function drawForecast(state, f) {
@@ -1075,6 +1146,8 @@ const loaders = {
     renderPrice(state.context);
     renderNews(news);
     const chart = makeChart("live", $("#chart"), false);
+    lastTrading = state.trading;
+    chart.tf = preferredTf(state.trading);
     markTf(chart.tf);
     await loadChart(chart);
     drawSignal(chart, state.active);

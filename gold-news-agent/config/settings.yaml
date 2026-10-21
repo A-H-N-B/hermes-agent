@@ -45,6 +45,15 @@ trading:
     trend: [H1, H4]
   news_trading: false # Q8: false = never trade into a release; wait for price confirmation
   post_release_confirm_seconds: 60 # 30–120; FLASH alerts still go out immediately
+  # Your trading hours and the chart you trade in each. Inside a window the engine sizes entry,
+  # SL/TP and validity on that timeframe, times the entry on it, and the dashboard opens on it.
+  # Outside every window BUY/SELL is held back ("di luar jam trading"); news alerts still go out.
+  # zone Asia/Jakarta keeps the WIB clock fixed. Europe/London or America/New_York times follow
+  # their DST instead (London 08:00 = 14:00 WIB in summer, 15:00 WIB from late October).
+  # [] = signals around the clock.
+  windows:
+    - { name: London, zone: Asia/Jakarta, start: "14:00", end: "17:00", timeframe: M5 }
+    - { name: New York, zone: Asia/Jakarta, start: "19:00", end: "23:00", timeframe: M15 }
 
 price_feed:
   primary: binance_paxg # Q2: mt5 | mt5_bridge | twelvedata | binance_paxg
@@ -115,7 +124,11 @@ signal_engine:
   cooldown_minutes: 10
   event_blackout_minutes: 15
   conflict_threshold: 0.5 # news and price both beyond this but opposite -> WAIT
-  validity_minutes: { scalping: 30, intraday: 120, swing: 1440 }
+  validity_minutes: { scalping: 30, intraday: 120, swing: 1440 } # outside trading windows
+  # Inside a window: valid for this many candles of its timeframe (M5 30 min, M15 90 min), about
+  # the time a 2R target needs at normal volatility.
+  validity_bars: 6
+  max_chase_atr: 2.0 # price this many ATR past the EMA20 of the window timeframe: wait for a pullback
   publish_state_seconds: 60
   evaluate_seconds: 5
   levels:

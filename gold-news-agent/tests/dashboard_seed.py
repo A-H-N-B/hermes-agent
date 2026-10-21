@@ -75,7 +75,19 @@ async def seed_dashboard(ctx: AppContext, settings: Settings) -> None:
         )
         for i in range(60)
     ]
-    await ctx.market.upsert_candles(bars)
+    quarters = [  # the same hours as M15 bars: the New York trading window's chart
+        bars[i].model_copy(
+            update={
+                "tf": "M15",
+                "close_time": bars[i + 2].close_time,
+                "high": max(b.high for b in bars[i : i + 3]),
+                "low": min(b.low for b in bars[i : i + 3]),
+                "close": bars[i + 2].close,
+            }
+        )
+        for i in range(0, 60, 3)
+    ]
+    await ctx.market.upsert_candles(bars + quarters)
 
     cpi = event(at=NOW + timedelta(hours=2))
     await ctx.calendar.upsert_events([cpi], NOW)

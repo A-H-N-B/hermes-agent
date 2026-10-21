@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from gold_agent.config import Settings
+from gold_agent.config import Settings, load_settings
 from gold_agent.core.app import AppContext
 from gold_agent.core.clock import ManualClock
 from gold_agent.services.dashboard import DashboardService
@@ -33,8 +33,12 @@ async def dashboard(
     clock.set(NOW)
     await seed_dashboard(ctx, settings)
     ctx.env["DASHBOARD_PASSWORD"] = PASSWORD
+    shipped = load_settings().trading.windows  # London M5 14-17, New York M15 19-23 WIB
     ctx.settings = settings.model_copy(
-        update={"dashboard": settings.dashboard.model_copy(update={"port": 0})}
+        update={
+            "dashboard": settings.dashboard.model_copy(update={"port": 0}),
+            "trading": settings.trading.model_copy(update={"windows": shipped}),
+        }
     )
     service = DashboardService(ctx)
     stop = asyncio.Event()
@@ -122,6 +126,13 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         assert "BUY SEKARANG" in timing and "2649.60 – 2650.40" in timing and "2643.60" in timing
         assert "sampai 21:35 WIB" in timing
         assert "Semua jadwal peluang" in (await page.text_content("#timing-details") or "")
+        # 19:35 WIB is inside the New York window: the board says so and the chart opens on M15.
+        trading = await page.text_content("#timing .trading-line.on") or ""
+        assert "Jam trading New York · chart M15 · sampai 23:00 WIB" in trading
+        assert await page.evaluate("charts.live.tf") == "M15"
+        await page.wait_for_selector("#tf-forecast .forecast-head:has-text('M15 · 15 menit')")
+        accuracy = await page.text_content("#tf-forecast") or ""
+        assert "Akurasi prediksi M15 (jam trading New York)" in accuracy
         assert "Hitungan alat berita sekarang" in (
             await page.text_content("#timing .gauge-wrap") or ""
         )
@@ -140,6 +151,8 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         )
         assert await page.evaluate("charts.live.tf") == "M1"
         assert await page.is_hidden("#tf-ring")
+        await page.evaluate("renderTiming(lastTiming)")  # a refresh keeps the user's pick
+        assert await page.evaluate("charts.live.tf") == "M1"
         await page.click("#tf-button")
         await page.click(".tf-item[data-tf=M5]")
         await page.wait_for_selector(

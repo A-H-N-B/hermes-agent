@@ -62,6 +62,8 @@ class Signal(BaseModel):
     trigger_summary: str | None = None
     trigger_source: str | None = None
     trigger_category: str | None = None  # news category of the trigger (per-category stats)
+    timeframe: str | None = None  # chart the levels and validity were sized on
+    trading_window: str | None = None  # e.g. "London M5 14:00–17:00 WIB"; None = no windows set
 
 
 class SignalState(BaseModel):

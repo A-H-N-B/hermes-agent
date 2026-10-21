@@ -189,12 +189,32 @@ class Timeframes(StrictModel):
     trend: tuple[Timeframe, ...]
 
 
+WindowTimeframe = Literal["M1", "M5", "M15", "M30", "H1"]
+
+
+class TradingWindow(StrictModel):
+    """One block of the user's trading hours and the chart they trade in it."""
+
+    name: str = Field(min_length=1, max_length=40)
+    zone: Zone = "Asia/Jakarta"
+    start: HHMM
+    end: HHMM  # earlier than start: the window runs past midnight
+    timeframe: WindowTimeframe
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> Self:
+        if self.start == self.end:
+            raise ValueError(f"trading window {self.name}: start and end are the same time")
+        return self
+
+
 class TradingSettings(StrictModel):
     symbol: str
     style: Literal["scalping", "intraday", "swing"]
     timeframes: Timeframes
     news_trading: bool
     post_release_confirm_seconds: int = Field(ge=0, le=600)
+    windows: tuple[TradingWindow, ...] = ()
 
 
 PriceFeedName = Literal["mt5", "mt5_bridge", "twelvedata", "binance_paxg"]
@@ -277,6 +297,8 @@ class SignalEngineSettings(StrictModel):
     event_blackout_minutes: int = Field(ge=0)
     conflict_threshold: float = Field(gt=0, le=1)
     validity_minutes: dict[Literal["scalping", "intraday", "swing"], int]
+    validity_bars: int = Field(ge=1, le=96)  # inside a trading window, in its timeframe's candles
+    max_chase_atr: float = Field(gt=0)  # no entry further than this many ATR from the EMA20
     publish_state_seconds: float = Field(gt=0)
     evaluate_seconds: float = Field(gt=0)
     levels: LevelSettings

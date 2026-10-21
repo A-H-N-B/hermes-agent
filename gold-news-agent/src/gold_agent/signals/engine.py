@@ -20,6 +20,7 @@ from gold_agent.signals.levels import TradeLevels, compute_levels, position_size
 from gold_agent.signals.scoring import PriceAt, ScoreBreakdown, confidence, score
 from gold_agent.timeutils.risky import risky_flags
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wib, to_wib
+from gold_agent.timeutils.windows import TradingHours, WindowSpan
 
 CONFIG_FILES = ("settings.yaml", "gold_drivers.yaml", "keywords.yaml", "events.yaml")
 TREND_ID = {"up": "naik", "down": "turun", "flat": "datar"}
@@ -28,6 +29,7 @@ KV_HALT = "trading_halt"  # {"halted": bool, "by": user id, "at": iso}, written 
 KV_PAPER_DAILY = "paper_daily"  # {"day": WIB date, "r": realised R, "trades"}, paper tracker
 KV_EVENT_MOVES = "event_moves"  # event_key -> typical 60-min |move| $, from the event study
 KEEP_CLOSED_IDS = 200
+TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60}
 
 
 def config_hash(directory: Path = CONFIG_DIR) -> str:
@@ -114,6 +116,7 @@ class SignalEngine:
         self._settings = settings
         self._sessions = sessions
         self._config_version = config_version
+        self.hours = TradingHours(settings.trading.windows, sessions)
 
     # ------------------------------------------------------------------ filters
 
@@ -134,6 +137,10 @@ class SignalEngine:
         status = self._sessions.status(now)
         if not status.open:
             reasons.append(f"pasar tutup: {status.reason}")
+        if self.hours.enabled and self.hours.current(now) is None:
+            upcoming = self.hours.next(now)
+            later = f"; berikutnya {upcoming.label_from(now)}" if upcoming else ""
+            reasons.append(f"di luar jam trading Anda ({self.hours.summary(now)}){later}")
         if context.mid is None:
             reasons.append("data harga tidak tersedia")
         elif context.stale:
@@ -240,10 +247,16 @@ class SignalEngine:
             since = (now - last.created_at_utc).total_seconds() / 60
             if since < engine.cooldown_minutes:
                 return wait([f"cooldown {engine.cooldown_minutes} mnt sejak sinyal terakhir"])
-        levels = compute_levels(side, context, engine.levels)
+        span = self.hours.current(now)
+        tf = span.timeframe if span else engine.levels.sl_atr_timeframe
+        if span is not None:
+            late = self._entry_timing(side, context, tf)
+            if late:
+                return wait([late])
+        levels = compute_levels(side, context, engine.levels, tf)
         if levels is None:
-            return wait(["level SL/TP belum bisa dihitung (ATR M15 belum tersedia)"])
-        signal = self._build_signal(side, now, context, breakdown, conf, levels, events)
+            return wait([f"level SL/TP belum bisa dihitung (ATR {tf} belum tersedia)"])
+        signal = self._build_signal(side, now, context, breakdown, conf, levels, events, span)
         return Decision(
             state=SignalState(
                 ts=now,
@@ -259,6 +272,26 @@ class SignalEngine:
             signal=signal,
             replaced=replaced,
         )
+
+    def _entry_timing(self, side: Action, context: MarketContext, tf: str) -> str | None:
+        """Inside a trading window the entry is timed on its chart: price back on the trade's
+        side of that timeframe's EMA20, and not chased further than `max_chase_atr` past it."""
+        state = context.timeframes.get(tf)
+        mid = context.mid
+        if state is None or state.ema20 is None or not state.atr14 or mid is None:
+            return f"menunggu data {tf} (EMA20/ATR {tf} belum tersedia)"
+        sign = 1 if side == "BUY" else -1
+        gap = sign * (mid - state.ema20) / state.atr14
+        if gap <= 0:
+            where = "di atas" if side == "BUY" else "di bawah"
+            return f"timing {tf}: tunggu harga kembali {where} EMA20 {tf} ({state.ema20:.2f})"
+        limit = self._settings.signal_engine.max_chase_atr
+        if gap > limit:
+            return (
+                f"timing {tf}: harga sudah {gap:.1f} ATR dari EMA20 {tf} ({state.ema20:.2f}); "
+                f"tunggu pullback ke ≤ {limit:g} ATR"
+            )
+        return None
 
     # ------------------------------------------------------------------ signal assembly
 
@@ -336,9 +369,14 @@ class SignalEngine:
         conf: int,
         levels: TradeLevels,
         events: Sequence[CalendarEvent],
+        span: WindowSpan | None = None,
     ) -> Signal:
         cfg = self._settings
-        validity = timedelta(minutes=cfg.signal_engine.validity_minutes[cfg.trading.style])
+        engine = cfg.signal_engine
+        if span is not None:
+            validity = timedelta(minutes=engine.validity_bars * TF_MINUTES[span.timeframe])
+        else:
+            validity = timedelta(minutes=engine.validity_minutes[cfg.trading.style])
         valid_until = now + validity
         lots, lot_note = position_size(
             sl_distance=levels.sl_distance,
@@ -357,6 +395,13 @@ class SignalEngine:
             f"TP1 belum tersentuh sampai {fmt_wib(valid_until)} WIB",
             f"spread melebar di atas {cfg.risk.max_spread_usd:.2f}",
         ]
+        timed = context.timeframes.get(span.timeframe) if span else None
+        if span is not None and timed is not None and timed.ema20 is not None:
+            back = "di bawah" if side == "BUY" else "di atas"
+            invalidation.append(
+                f"candle {span.timeframe} ditutup kembali {back} EMA20 {span.timeframe} "
+                f"({timed.ema20:.2f})"
+            )
         invalidation += [
             f"rilis {e.title} pukul {fmt_wib(e.scheduled_at)} WIB bisa membalikkan arah"
             for e in upcoming
@@ -423,4 +468,6 @@ class SignalEngine:
             trigger_summary=trigger.analysis.triage.summary_id if trigger else None,
             trigger_source=(trigger.analysis.source_ids or ["-"])[0] if trigger else None,
             trigger_category=trigger.analysis.triage.category if trigger else None,
+            timeframe=span.timeframe if span else engine.levels.sl_atr_timeframe,
+            trading_window=span.label if span else None,
         )

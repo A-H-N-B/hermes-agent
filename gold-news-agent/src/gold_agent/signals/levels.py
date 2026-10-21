@@ -30,15 +30,25 @@ class TradeLevels:
 
 
 def compute_levels(
-    side: Side, context: MarketContext, settings: LevelSettings
+    side: Side, context: MarketContext, settings: LevelSettings, timeframe: str | None = None
 ) -> TradeLevels | None:
-    m15 = context.timeframes.get("M15")
-    atr = m15.atr14 if m15 else None
-    if context.bid is None or context.ask is None or context.mid is None or not atr:
+    """Entry zone, stop and targets sized on `timeframe` (the trading window's chart, else
+    `sl_atr_timeframe`): its ATR(14), and the stop goes beyond its nearest swing when that
+    lies within 3 ATR, else 1.2 ATR from the entry."""
+    tf = timeframe or settings.sl_atr_timeframe
+    state = context.timeframes.get(tf)
+    if state is None or not state.atr14 or context.bid is None or context.ask is None:
         return None
+    if context.mid is None:
+        return None
+    atr = state.atr14
     sign = 1.0 if side == "BUY" else -1.0
     entry = context.ask if side == "BUY" else context.bid
     swings = [lvl for lvl in context.levels if lvl.kind in SWING_KINDS]
+    if side == "BUY" and state.swing_low is not None:
+        swings.append(Level(name=f"swing low {tf}", price=state.swing_low, kind="support"))
+    if side == "SELL" and state.swing_high is not None:
+        swings.append(Level(name=f"swing high {tf}", price=state.swing_high, kind="resistance"))
     if side == "BUY":
         swing = nearest_below(swings, entry, min_distance=0.1 * atr)
     else:

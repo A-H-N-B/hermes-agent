@@ -99,6 +99,16 @@ class SignalRepo:
             )
             return [SignalState.model_validate(r.payload) for r in rows]
 
+    async def scores_between(self, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
+        """(time, composite score) of the stored engine states, oldest first (no payloads)."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SignalStateRow.ts, SignalStateRow.composite_score)
+                .where(SignalStateRow.ts >= start, SignalStateRow.ts < end)
+                .order_by(SignalStateRow.ts)
+            )
+            return [(ts, float(score)) for ts, score in rows]
+
     # ------------------------------------------------------------------ outcomes (paper)
 
     async def save_outcome(self, outcome: SignalOutcome) -> None:

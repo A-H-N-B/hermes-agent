@@ -53,7 +53,7 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
     assert lines[1] == "🕐 19:35 WIB · Sesi London–New York"
     assert lines[2] == "💵 Harga 2649.90/2650.10 · Spread 0.20"
     assert lines[3] == "🎯 Entry 2649.60–2650.40 (market)"
-    assert lines[4] == "🛑 SL 2643.60 (6.50$ · 1.62×ATR)"
+    assert lines[4] == "🛑 SL 2643.60 (6.50$ · 1.62×ATR M15)"
     assert lines[5] == "✅ TP1 2656.60 (1R) · TP2 2663.10 (2R) · TP3 2668.00 (high kemarin)"
     assert lines[6] == "⏳ Berlaku s/d Selasa 13 Okt 21:35 WIB"
     assert lines[7] == (

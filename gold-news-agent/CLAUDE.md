@@ -164,5 +164,19 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   start unticked (created on tick, removed with their pane on untick; choice kept in
   localStorage); the board shows a SELL↔BUY gauge of the engine score vs entry_threshold and
   refreshes every 30 s; a mirrored-market test pins BUY/SELL symmetry of the forecast.
+  Trading windows (`trading.windows`, `timeutils/windows.py`; shipped: London M5 14:00–17:00 and
+  New York M15 19:00–23:00 WIB, zone-aware so Europe/London times would follow DST; tests strip
+  them in the `settings` fixture and opt in): outside every window the engine WAITs ("di luar jam
+  trading", next window named); inside, levels use that TF's ATR14 + nearest fractal swing
+  (`TimeframeState.swing_high/low`, context now carries M1..D1), validity = `validity_bars` (6)
+  candles, and the entry is timed on the TF (price back past its EMA20, at most
+  `max_chase_atr` ATR beyond it). Signals carry `timeframe` / `trading_window` (Telegram line).
+  The timing board shows the open/next window and offers only outlook hours inside windows; the
+  Live chart follows the window TF until the user picks one for that window. Forecast accuracy
+  (`dashboard/forecast_score.py`): walk-forward over stored bars + `signal_states` scores
+  (`SignalRepo.scores_between`), next-close hit rate with a Wilson 95% interval, news-only and
+  chart-only on the same bars, NETRAL/TUNGGU DATA abstain, bars without an engine score
+  skipped; served inside `/api/forecast` (cached 5 min). The forecast's chart state is the market
+  service's own `timeframe_state` (one trend rule, `market/context.py:trend_of`).
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

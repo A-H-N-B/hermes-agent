@@ -244,3 +244,8 @@ details.more summary { cursor: pointer; color: var(--info); }
   background: linear-gradient(90deg, var(--down), var(--panel-2) 50%, var(--up)); }
 .gauge-marker { position: absolute; top: -4px; width: 6px; height: 20px; margin-left: -3px; border-radius: 3px;
   background: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+.trading-line { margin: 0 0 .4rem; padding: .35rem .6rem; border-radius: 6px; background: var(--panel-2); color: var(--muted); font-weight: 600; }
+.trading-line.on { color: var(--accent); border: 1px solid var(--accent); }
+.accuracy { font-weight: 600; }
+.accuracy.BUY { color: var(--up); }
+.accuracy.SELL { color: var(--down); }

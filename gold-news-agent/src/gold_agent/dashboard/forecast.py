@@ -24,7 +24,7 @@ from typing import Any
 
 from gold_agent.config import Settings
 from gold_agent.dashboard.indicators_view import momentum, timeframe_read
-from gold_agent.market import indicators as ind
+from gold_agent.market.context import timeframe_state
 from gold_agent.models import CalendarEvent, Candle, MarketContext, Signal, SignalState
 from gold_agent.models.market import TimeframeState
 from gold_agent.timeutils.sessions import NEW_YORK, fmt_wib
@@ -90,29 +90,9 @@ def aggregate(daily: Sequence[Candle], tf: str) -> list[Candle]:
 
 
 def chart_state(tf: str, bars: Sequence[Candle]) -> TimeframeState:
-    """The same TimeframeState the market service keeps, computed from any timeframe's bars."""
-    closes = [b.close for b in bars]
-    highs, lows = [b.high for b in bars], [b.low for b in bars]
-
-    def last(values: Any) -> float | None:
-        return ind.last(values) if len(bars) else None
-
-    ema20, ema50 = last(ind.ema(closes, 20)), last(ind.ema(closes, 50))
-    close = closes[-1] if closes else None
-    trend = None
-    if close is not None and ema20 is not None and ema50 is not None:
-        trend = "up" if close > ema20 > ema50 else "down" if close < ema20 < ema50 else "flat"
-    return TimeframeState.model_construct(
-        tf=tf,
-        close=close,
-        ema20=ema20,
-        ema50=ema50,
-        ema200=last(ind.ema(closes, 200)),
-        rsi14=last(ind.rsi(closes, 14)),
-        atr14=last(ind.atr(highs, lows, closes, 14)),
-        trend=trend,
-        bars=len(bars),
-    )
+    """The market service's own TimeframeState (same indicators, same trend rule) for any
+    timeframe's bars; W1/MN only relabel it, the computation does not depend on the name."""
+    return timeframe_state("D1", bars).model_copy(update={"tf": tf})
 
 
 def news_score(state: SignalState | None, active: Signal | None, threshold: float) -> float:
