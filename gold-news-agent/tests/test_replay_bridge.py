@@ -41,18 +41,20 @@ def item(n: int, title: str, at: datetime, source: str = "feed") -> NewsItem:
 
 
 def history(tf: Timeframe, end: datetime, bars: int) -> list[Candle]:
+    """A slow climb that ends where the recorded ticks start (2640), like real history."""
     step = timedelta(minutes=TF_MINUTES[tf])
     start = end - step * bars
+    base = 2640 - bars * 0.05
     return [
         Candle(
             source="mt5",
             tf=tf,
             open_time=start + step * i,
             close_time=start + step * (i + 1),
-            open=2600 + i * 0.05,
-            high=2600 + i * 0.05 + 1.5,
-            low=2600 + i * 0.05 - 1.5,
-            close=2600 + (i + 1) * 0.05,
+            open=base + i * 0.05,
+            high=base + i * 0.05 + 1.5,
+            low=base + i * 0.05 - 1.5,
+            close=base + (i + 1) * 0.05,
         )
         for i in range(bars)
     ]
@@ -115,7 +117,8 @@ async def test_replay_runs_the_recorded_window_through_the_pipeline(
     assert summary.releases == 1  # the CPI headline took the fast path, no LLM involved
     assert summary.notifications.get("flash") == 1  # fresh: processing took no replay time
     assert [s.split()[0] for s in summary.signals] == ["BUY"]  # soft CPI + rally
-    assert summary.outcomes == ["open"]  # the paper tracker filled it; the window ended first
+    (outcome,) = summary.outcomes  # the paper tracker filled it and the rally reached TP2
+    assert outcome.startswith("tp2 +")
     assert not [kind for _, kind, _ in log if kind == "health"]  # no spurious stale price
     text = summary.render()
     assert text.startswith("Replay 2026-10-13 19:25 – 2026-10-13 19:45 WIB")

@@ -260,15 +260,15 @@ yang selalu aktif di Opus 5.5 dan makin panjang pada effort lebih tinggi:
 | Deep (effort high) | 40 | 6k / 3k / 6k | ±$5,30 |
 | Outlook per jam (effort medium) | 24 | 6k / 5k / 5k | ±$2,90 |
 | Brief harian (effort high) | 1 | – / 30k / 8k | ±$0,30 |
+| Keputusan akhir sinyal (desk, effort high) | ≤ 48 (biasanya < 10) | 4k / 5k / 3k | ≤ ±$4 (biasanya < $1) |
 | Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 4–6k | ±$2,50 |
 | **Total tanpa rem** | | | **±$21/hari** |
 
 `budget.llm_daily_usd` (bawaan $3) adalah rem: setelah biaya hari itu (hari WIB) mencapai angka
 itu, hanya berita high-impact (rilis data, impact ≥ 4) yang masih dianalisis Opus; sisanya memakai
-aturan sampai pukul 00:00 WIB. `budget.window_reserve_pct` (bawaan 50) menyimpan separuhnya untuk
-jam trading: di luar jendela, berita biasa dan narasi outlook berhenti memakai Opus begitu separuh
-pertama terpakai, jadi pagi yang ramai berita tidak menghabiskan jatah jam 14–17 dan 19–23 WIB.
-Dengan rem $3 biaya harian ±$3–5 (berita high-impact tetap jalan).
+aturan sampai pukul 00:00 WIB. Keputusan akhir Opus atas sinyal tidak terkena rem ini (keputusan
+itu yang paling penting) tetapi dibatasi `llm.desk_reviews_per_day` (48). Dengan rem $3 biaya
+harian ±$3–6 (berita high-impact dan keputusan sinyal tetap jalan).
 Supaya **semua** berita dianalisis Opus sepanjang hari, naikkan ke ±$20–25. Biaya nyata per hari
 terlihat di header dashboard (saldo kredit), `/stats`, dan laporan harian.
 

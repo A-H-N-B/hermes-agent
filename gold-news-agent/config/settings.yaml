@@ -38,22 +38,19 @@ collectors:
 
 trading:
   symbol: XAUUSD
-  style: intraday # Q1: scalping | intraday | swing
-  timeframes:
-    entry: M5
-    signal: M15
-    trend: [H1, H4]
   news_trading: false # Q8: false = never trade into a release; wait for price confirmation
   post_release_confirm_seconds: 60 # 30–120; FLASH alerts still go out immediately
-  # Your trading hours and the chart you trade in each. Inside a window the engine sizes entry,
-  # SL/TP and validity on that timeframe, times the entry on it, and the dashboard opens on it.
-  # Outside every window BUY/SELL is held back ("di luar jam trading"); news alerts still go out.
-  # zone Asia/Jakarta keeps the WIB clock fixed. Europe/London or America/New_York times follow
-  # their DST instead (London 08:00 = 14:00 WIB in summer, 15:00 WIB from late October).
-  # [] = signals around the clock.
-  windows:
-    - { name: London, zone: Asia/Jakarta, start: "14:00", end: "17:00", timeframe: M5 }
-    - { name: New York, zone: Asia/Jakarta, start: "19:00", end: "23:00", timeframe: M15 }
+  # The chart a trade is sized (entry/SL/TP, validity) and timed on. `auto` chooses it at every
+  # evaluation: of the timeframes whose spread stays small next to the stop, the one with the best
+  # measured accuracy in the current session (walk-forward, 30 days; the lower end of its 95%
+  # interval must beat a coin flip); without that evidence, the session default below. Opus 5.5
+  # makes the final pick when it reviews a signal. A fixed M1 | M5 | M15 | M30 | H1 also works.
+  timeframe:
+    select: auto
+    # Sessions follow London/New York DST: London opens 14:00 WIB in summer, 15:00 in winter;
+    # the overlap starts at the New York open (19:00 / 20:00 WIB).
+    session_prior: { asia: M5, london: M5, overlap: M15, new_york: M15 }
+    max_cost_ratio: 0.15 # spread / stop distance (1.2 ATR of that timeframe) above this: skip it
 
 price_feed:
   # auto = your broker's own XAUUSD from MT5 when this computer runs MT5 (terminal open and
@@ -93,10 +90,9 @@ risk:
   volume_step: 0.01
 
 budget:
-  llm_daily_usd: 3.0 # Q4: above this, only high-impact news (release or impact >= 4) uses the LLM
-  # Share of that budget kept for your trading windows: outside them, routine news and the
-  # outlook narrative stop using Claude once the rest is spent (high-impact news never does).
-  window_reserve_pct: 50
+  # Q4: above this, only high-impact news (release or impact >= 4) and Opus's final review of a
+  # signal (capped by llm.desk_reviews_per_day) still use the LLM.
+  llm_daily_usd: 3.0
   paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
 
 notifications:
@@ -129,16 +125,14 @@ signal_engine:
   cooldown_minutes: 10
   event_blackout_minutes: 15
   conflict_threshold: 0.5 # news and price both beyond this but opposite -> WAIT
-  validity_minutes: { scalping: 30, intraday: 120, swing: 1440 } # outside trading windows
-  # Inside a window: valid for this many candles of its timeframe (M5 30 min, M15 90 min), about
-  # the time a 2R target needs at normal volatility.
+  # A signal is valid for this many candles of its timeframe (M5 30 min, M15 90 min), about the
+  # time a 2R target needs at normal volatility.
   validity_bars: 6
-  max_chase_atr: 2.0 # price this many ATR past the EMA20 of the window timeframe: wait for a pullback
+  max_chase_atr: 2.0 # price this many ATR past the EMA20 of the signal's timeframe: wait for a pullback
   publish_state_seconds: 60
   evaluate_seconds: 5
   levels:
     sl_atr_multiple: 1.2
-    sl_atr_timeframe: M15
     tp_r_multiples: [1.0, 2.0] # TP3 = next structure level
     move_sl_to_breakeven_after_tp1: true
 
@@ -192,6 +186,12 @@ llm:
     effort: high
     timeout_seconds: 300
     max_tokens: 16000
+  desk:
+    model: claude-opus-5-5 # the final BUY / SELL / WAIT and timeframe of every signal
+    effort: high # accuracy over speed: prices are re-read after the review anyway
+    timeout_seconds: 90
+    max_tokens: 16000
+  desk_reviews_per_day: 48 # beyond this the engine decides alone (labelled "tanpa review AI")
   fallbacks: default # a refused request is retried server-side on the recommended model
   circuit_breaker:
     failures: 5

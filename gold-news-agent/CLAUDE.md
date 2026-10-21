@@ -158,26 +158,33 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   `/api/credit`, kv `llm_credit`): no API returns a prepaid balance for a normal key, so the user
   enters it once and `llm_usage` costs since then are subtracted; the POST is same-origin JSON only.
   MT5-style timeframe ring on the Live chart (M1..MN; W1/MN aggregated from D1 by NY trading
-  date) with a next-candle forecast (`dashboard/forecast.py`, `/api/forecast`): 0.6 × engine score
+  date) with a next-candle forecast (`signals/forecast.py`, `/api/forecast`): 0.6 × engine score
   (active signal = ±1) + 0.4 × that TF's indicator vote, range = TF ATR14, TUNGGU DATA when a
   high-impact release falls inside the horizon. Not a calibrated probability. Live indicators
   start unticked (created on tick, removed with their pane on untick; choice kept in
   localStorage); the board shows a SELL↔BUY gauge of the engine score vs entry_threshold and
   refreshes every 30 s; a mirrored-market test pins BUY/SELL symmetry of the forecast.
-  Trading windows (`trading.windows`, `timeutils/windows.py`; shipped: London M5 14:00–17:00 and
-  New York M15 19:00–23:00 WIB, zone-aware so Europe/London times would follow DST; tests strip
-  them in the `settings` fixture and opt in): outside every window the engine WAITs ("di luar jam
-  trading", next window named); inside, levels use that TF's ATR14 + nearest fractal swing
-  (`TimeframeState.swing_high/low`, context now carries M1..D1), validity = `validity_bars` (6)
-  candles, and the entry is timed on the TF (price back past its EMA20, at most
-  `max_chase_atr` ATR beyond it). Signals carry `timeframe` / `trading_window` (Telegram line).
-  The timing board shows the open/next window and offers only outlook hours inside windows; the
-  Live chart follows the window TF until the user picks one for that window. Forecast accuracy
-  (`dashboard/forecast_score.py`): walk-forward over stored bars + `signal_states` scores
-  (`SignalRepo.scores_between`), next-close hit rate with a Wilson 95% interval, news-only and
-  chart-only on the same bars, NETRAL/TUNGGU DATA abstain, bars without an engine score
-  skipped; served inside `/api/forecast` (cached 5 min). The forecast's chart state is the market
-  service's own `timeframe_state` (one trend rule, `market/context.py:trend_of`).
+  Automatic timeframe (`trading.timeframe`, `signals/timeframe.py`): every evaluation picks the
+  chart a trade is sized, timed and valid on from M1..H1: usable = EMA20 + ATR14 present and
+  spread / (1.2 ATR) <= `max_cost_ratio`; the usable one with the best walk-forward accuracy in
+  the current session wins when proven (>= MIN_CALLS calls, Wilson lower bound > 0.5, hysteresis
+  0.02), else `session_prior` (Asia/London M5, overlap/New York M15), else the nearest usable.
+  Signals carry `timeframe` / `timeframe_reason`; levels use that TF's ATR14 + nearest fractal
+  swing (`TimeframeState.swing_high/low`; context carries M1..D1 with Stoch/SAR); validity =
+  `validity_bars` (6) candles; entry timing (`engine.entry_timing`: back past EMA20, at most
+  `max_chase_atr` ATR beyond). Accuracy: `signals/forecast_score.py` (walk-forward over stored
+  bars + `signal_states` scores via `SignalRepo.scores_between`, Wilson 95%, news-only and
+  chart-only on the same bars, by session) loaded by `signals/accuracy.py` (cached 1 h, numeric
+  part in a thread); the forecast and the per-TF vote moved to `signals/forecast.py` and
+  `market/reads.py`. Opus decision desk (`signals/desk.py`, route `llm.desk`, effort high,
+  prompt `prompts/desk_system.md` + driver KB): the engine's candidate goes to Opus in the
+  background (state WAIT "menunggu keputusan AI"); the next evaluation applies the verdict on
+  fresh prices. Guardrails: approve or WAIT only (a flip is held as WAIT), timeframe must be
+  usable (else the selector's), levels always the engine's (re-evaluated on Opus's chart). A
+  WAIT stands 10 min unless |S| moves 0.10 or the side changes; approvals live 2 min; at most
+  `llm.desk_reviews_per_day`; no AI (disabled, outage, cap) = engine alone with
+  `SignalReview(model=None, note=...)`. Reviews logged in kv `desk_reviews`; Performa compares
+  approved vs held-back candidates by first touch (TP1 vs SL) on M1 bars.
   This computer's settings live in git-ignored `config/local.yaml` (deep-merged over
   settings.yaml) and `config/sources.local.yaml` (per-id fields); `gold_agent/local_config.py`
   is stdlib+PyYAML only so the Windows updater (`scripts/windows/perbarui.ps1`, desktop shortcut
@@ -190,8 +197,6 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   (`pick_gold_symbol`: Market Watch first, XAUUSD before GOLD, other quote currencies excluded).
   A feed switch (PAXG <-> MT5) resets the candle builder and reloads history from the feed now
   producing ticks (`FailoverAdapter.history` asks the active feed first), so two instruments'
-  bars are never mixed. `budget.window_reserve_pct` (50): outside the trading windows, non
-  high-impact LLM calls stop once the unreserved part of the daily budget is spent (no budget
-  alert: only a spent-out day raises one).
+  bars are never mixed.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

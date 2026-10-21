@@ -130,7 +130,7 @@ def test_buy_stop_sits_beyond_the_swing_low_and_targets_follow_r_multiples(
         Level(name="swing low H1", price=2644.0, kind="support"),
         Level(name="high kemarin", price=2668.0, kind="resistance"),
     ]
-    trade = compute_levels("BUY", market(levels=levels), settings.signal_engine.levels)
+    trade = compute_levels("BUY", market(levels=levels), settings.signal_engine.levels, "M15")
     assert trade is not None
     assert trade.entry == pytest.approx(2650.1)  # buy at the ask
     assert trade.sl_distance == pytest.approx(6.5)  # swing 6.1 below + 0.1 ATR buffer > 1.2 ATR
@@ -143,14 +143,15 @@ def test_buy_stop_sits_beyond_the_swing_low_and_targets_follow_r_multiples(
 
 def test_sell_uses_the_atr_floor_when_no_structure_is_near(settings: Settings) -> None:
     far_swing = [Level(name="swing high H1", price=2680.0, kind="resistance")]
-    trade = compute_levels("SELL", market(levels=far_swing), settings.signal_engine.levels)
+    trade = compute_levels("SELL", market(levels=far_swing), settings.signal_engine.levels, "M15")
     assert trade is not None
     assert trade.entry == pytest.approx(2649.9)  # sell at the bid
     assert trade.sl_distance == pytest.approx(4.8)  # 1.2 x ATR(M15) 4.0; 30$ swing is ignored
     assert trade.stop_loss == pytest.approx(2654.7)
     assert trade.tp2 == pytest.approx(2640.3)
     assert (trade.tp3, trade.tp3_source) == (pytest.approx(2635.5), "3R")
-    assert compute_levels("SELL", market(atr_m15=None), settings.signal_engine.levels) is None
+    levels = settings.signal_engine.levels
+    assert compute_levels("SELL", market(atr_m15=None), levels, "M15") is None
 
 
 def test_lot_size_is_never_guessed(settings: Settings) -> None:

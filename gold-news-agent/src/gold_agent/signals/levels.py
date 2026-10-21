@@ -30,12 +30,10 @@ class TradeLevels:
 
 
 def compute_levels(
-    side: Side, context: MarketContext, settings: LevelSettings, timeframe: str | None = None
+    side: Side, context: MarketContext, settings: LevelSettings, tf: str
 ) -> TradeLevels | None:
-    """Entry zone, stop and targets sized on `timeframe` (the trading window's chart, else
-    `sl_atr_timeframe`): its ATR(14), and the stop goes beyond its nearest swing when that
-    lies within 3 ATR, else 1.2 ATR from the entry."""
-    tf = timeframe or settings.sl_atr_timeframe
+    """Entry zone, stop and targets sized on the trade's chart `tf`: its ATR(14), and the stop
+    goes beyond its nearest swing when that lies within 3 ATR, else 1.2 ATR from the entry."""
     state = context.timeframes.get(tf)
     if state is None or not state.atr14 or context.bid is None or context.ask is None:
         return None

@@ -51,15 +51,18 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
     lines = text.split("\n")
     assert lines[0] == "🟢 <b>BUY XAUUSD</b> | Confidence 100/100"
     assert lines[1] == "🕐 19:35 WIB · Sesi London–New York"
-    assert lines[2] == "💵 Harga 2649.90/2650.10 · Spread 0.20"
-    assert lines[3] == "🎯 Entry 2649.60–2650.40 (market)"
-    assert lines[4] == "🛑 SL 2643.60 (6.50$ · 1.62×ATR M15)"
-    assert lines[5] == "✅ TP1 2656.60 (1R) · TP2 2663.10 (2R) · TP3 2668.00 (high kemarin)"
-    assert lines[6] == "⏳ Berlaku s/d Selasa 13 Okt 21:35 WIB"
-    assert lines[7] == (
+    assert lines[2] == (
+        "📊 Chart M15 (bawaan sesi London–New York; belum ada timeframe yang terbukti lebih akurat)"
+    )
+    assert lines[3] == "💵 Harga 2649.90/2650.10 · Spread 0.20"
+    assert lines[4] == "🎯 Entry 2649.60–2650.40 (market)"
+    assert lines[5] == "🛑 SL 2643.60 (6.50$ · 1.62×ATR M15)"
+    assert lines[6] == "✅ TP1 2656.60 (1R) · TP2 2663.10 (2R) · TP3 2668.00 (high kemarin)"
+    assert lines[7] == "⏳ Berlaku s/d Selasa 13 Okt 21:05 WIB"  # 6 candles of M15
+    assert lines[8] == (
         "📰 Pemicu: Serangan rudal memicu permintaan aset aman. — wire (diterima 300 dtk)"
     )
-    assert lines[8].startswith("📊 Berita +0.66 · Makro +0.57 · Teknikal +0.62")
+    assert lines[9].startswith("📊 Berita +0.66 · Makro +0.57 · Teknikal +0.62")
     assert any(line.startswith("⚠️ Batal jika: harga menembus SL 2643.60") for line in lines)
     assert "📅 Event berikutnya: USD Retail Sales m/m pukul 21:35 WIB (2 jam lagi)" in lines
     assert any("isi risk.account_equity" in line for line in lines)  # no guessed lot size

@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from gold_agent.config import Settings
-from gold_agent.dashboard.forecast import aggregate, forecast_next
 from gold_agent.models import Candle, SignalComponents, SignalState
+from gold_agent.signals.forecast import aggregate, forecast_next
 from tests.builders import T0, event, market
 from tests.test_notify_templates import make_signal
 from tests.test_replay_bridge import history

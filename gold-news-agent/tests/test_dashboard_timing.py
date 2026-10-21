@@ -149,7 +149,7 @@ def test_summary_counts_timeframes_and_lists_levels_with_session_extremes() -> N
         prev_day_low=2630.0,
     )
     summary = indicator_summary(context)
-    assert [r["tf"] for r in summary["timeframes"]] == ["M15", "H1", "H4"]
+    assert [r["tf"] for r in summary["timeframes"]] == ["M5", "M15", "H1", "H4"]
     assert {lvl["name"] for lvl in summary["levels"]} == {"R1", "High Asia", "Low kemarin"}
     assert summary["nearest_above"] == {"name": "R1", "price": 2658.0}
     assert indicator_summary(None)["timeframes"] == []

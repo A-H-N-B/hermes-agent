@@ -26,6 +26,7 @@ from gold_agent.models.signals import (
     Signal,
     SignalComponents,
     SignalOutcome,
+    SignalReview,
     SignalState,
 )
 
@@ -55,6 +56,7 @@ __all__ = [
     "Signal",
     "SignalComponents",
     "SignalOutcome",
+    "SignalReview",
     "SignalState",
     "SourceHealth",
     "SurpriseInfo",

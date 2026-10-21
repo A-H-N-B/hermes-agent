@@ -18,9 +18,9 @@ from gold_agent.models.common import Action
 from gold_agent.models.signals import SetupType
 from gold_agent.signals.levels import TradeLevels, compute_levels, position_size
 from gold_agent.signals.scoring import PriceAt, ScoreBreakdown, confidence, score
+from gold_agent.signals.timeframe import TfChoice, choose_timeframe
 from gold_agent.timeutils.risky import risky_flags
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wib, to_wib
-from gold_agent.timeutils.windows import TradingHours, WindowSpan
 
 CONFIG_FILES = ("settings.yaml", "gold_drivers.yaml", "keywords.yaml", "events.yaml")
 TREND_ID = {"up": "naik", "down": "turun", "flat": "datar"}
@@ -107,6 +107,25 @@ class Decision:
     replaced: Signal | None = None  # the opposite signal this one reverses
 
 
+def entry_timing(side: str, context: MarketContext, tf: str, max_chase_atr: float) -> str | None:
+    """Why the entry is not timed yet on the trade's chart, or None: price must be back on the
+    trade's side of that timeframe's EMA20 and not chased more than `max_chase_atr` ATR past it."""
+    state = context.timeframes.get(tf)
+    mid = context.mid
+    if state is None or state.ema20 is None or not state.atr14 or mid is None:
+        return f"menunggu data {tf} (EMA20/ATR {tf} belum tersedia)"
+    gap = (1 if side == "BUY" else -1) * (mid - state.ema20) / state.atr14
+    if gap <= 0:
+        where = "di atas" if side == "BUY" else "di bawah"
+        return f"timing {tf}: tunggu harga kembali {where} EMA20 {tf} ({state.ema20:.2f})"
+    if gap > max_chase_atr:
+        return (
+            f"timing {tf}: harga sudah {gap:.1f} ATR dari EMA20 {tf} ({state.ema20:.2f}); "
+            f"tunggu pullback ke ≤ {max_chase_atr:g} ATR"
+        )
+    return None
+
+
 def _direction_word(value: float) -> str:
     return "naik" if value > 0 else "turun"
 
@@ -116,7 +135,6 @@ class SignalEngine:
         self._settings = settings
         self._sessions = sessions
         self._config_version = config_version
-        self.hours = TradingHours(settings.trading.windows, sessions)
 
     # ------------------------------------------------------------------ filters
 
@@ -137,10 +155,6 @@ class SignalEngine:
         status = self._sessions.status(now)
         if not status.open:
             reasons.append(f"pasar tutup: {status.reason}")
-        if self.hours.enabled and self.hours.current(now) is None:
-            upcoming = self.hours.next(now)
-            later = f"; berikutnya {upcoming.label_from(now)}" if upcoming else ""
-            reasons.append(f"di luar jam trading Anda ({self.hours.summary(now)}){later}")
         if context.mid is None:
             reasons.append("data harga tidak tersedia")
         elif context.stale:
@@ -191,9 +205,19 @@ class SignalEngine:
         state: EngineState,
         price_at: PriceAt,
         reliability: Callable[[Analysis], float] | None = None,
+        timeframe: TfChoice | None = None,
     ) -> Decision:
+        """`timeframe`: the chart to size and time a trade on (signals/timeframe.py). Without
+        one (backtest, replay) the session default for this moment applies."""
         engine = self._settings.signal_engine
         weights = engine.weights
+        choice = timeframe or choose_timeframe(
+            context=context,
+            session=self._sessions.session(now),
+            settings=self._settings,
+            accuracy={},
+        )
+        tf = choice.tf
         breakdown = score(
             analyses, context, weights=weights, now=now, price_at=price_at, reliability=reliability
         )
@@ -217,6 +241,8 @@ class SignalEngine:
                     wait_reasons=list(dict.fromkeys([*reasons, *extra])),
                     active_signal_id=active.signal_id if active else None,
                     halted=state.halted,
+                    timeframe=tf,
+                    timeframe_reason=choice.reason,
                 ),
                 breakdown=breakdown,
             )
@@ -247,16 +273,13 @@ class SignalEngine:
             since = (now - last.created_at_utc).total_seconds() / 60
             if since < engine.cooldown_minutes:
                 return wait([f"cooldown {engine.cooldown_minutes} mnt sejak sinyal terakhir"])
-        span = self.hours.current(now)
-        tf = span.timeframe if span else engine.levels.sl_atr_timeframe
-        if span is not None:
-            late = self._entry_timing(side, context, tf)
-            if late:
-                return wait([late])
+        late = entry_timing(side, context, tf, engine.max_chase_atr)
+        if late:
+            return wait([late])
         levels = compute_levels(side, context, engine.levels, tf)
         if levels is None:
             return wait([f"level SL/TP belum bisa dihitung (ATR {tf} belum tersedia)"])
-        signal = self._build_signal(side, now, context, breakdown, conf, levels, events, span)
+        signal = self._build_signal(side, now, context, breakdown, conf, levels, events, choice)
         return Decision(
             state=SignalState(
                 ts=now,
@@ -267,31 +290,13 @@ class SignalEngine:
                 reasons=signal.top_reasons,
                 active_signal_id=signal.signal_id,
                 halted=state.halted,
+                timeframe=tf,
+                timeframe_reason=choice.reason,
             ),
             breakdown=breakdown,
             signal=signal,
             replaced=replaced,
         )
-
-    def _entry_timing(self, side: Action, context: MarketContext, tf: str) -> str | None:
-        """Inside a trading window the entry is timed on its chart: price back on the trade's
-        side of that timeframe's EMA20, and not chased further than `max_chase_atr` past it."""
-        state = context.timeframes.get(tf)
-        mid = context.mid
-        if state is None or state.ema20 is None or not state.atr14 or mid is None:
-            return f"menunggu data {tf} (EMA20/ATR {tf} belum tersedia)"
-        sign = 1 if side == "BUY" else -1
-        gap = sign * (mid - state.ema20) / state.atr14
-        if gap <= 0:
-            where = "di atas" if side == "BUY" else "di bawah"
-            return f"timing {tf}: tunggu harga kembali {where} EMA20 {tf} ({state.ema20:.2f})"
-        limit = self._settings.signal_engine.max_chase_atr
-        if gap > limit:
-            return (
-                f"timing {tf}: harga sudah {gap:.1f} ATR dari EMA20 {tf} ({state.ema20:.2f}); "
-                f"tunggu pullback ke ≤ {limit:g} ATR"
-            )
-        return None
 
     # ------------------------------------------------------------------ signal assembly
 
@@ -369,15 +374,11 @@ class SignalEngine:
         conf: int,
         levels: TradeLevels,
         events: Sequence[CalendarEvent],
-        span: WindowSpan | None = None,
+        choice: TfChoice,
     ) -> Signal:
         cfg = self._settings
-        engine = cfg.signal_engine
-        if span is not None:
-            validity = timedelta(minutes=engine.validity_bars * TF_MINUTES[span.timeframe])
-        else:
-            validity = timedelta(minutes=engine.validity_minutes[cfg.trading.style])
-        valid_until = now + validity
+        tf = choice.tf
+        valid_until = now + timedelta(minutes=cfg.signal_engine.validity_bars * TF_MINUTES[tf])
         lots, lot_note = position_size(
             sl_distance=levels.sl_distance,
             risk=cfg.risk,
@@ -395,12 +396,11 @@ class SignalEngine:
             f"TP1 belum tersentuh sampai {fmt_wib(valid_until)} WIB",
             f"spread melebar di atas {cfg.risk.max_spread_usd:.2f}",
         ]
-        timed = context.timeframes.get(span.timeframe) if span else None
-        if span is not None and timed is not None and timed.ema20 is not None:
+        timed = context.timeframes.get(tf)
+        if timed is not None and timed.ema20 is not None:
             back = "di bawah" if side == "BUY" else "di atas"
             invalidation.append(
-                f"candle {span.timeframe} ditutup kembali {back} EMA20 {span.timeframe} "
-                f"({timed.ema20:.2f})"
+                f"candle {tf} ditutup kembali {back} EMA20 {tf} ({timed.ema20:.2f})"
             )
         invalidation += [
             f"rilis {e.title} pukul {fmt_wib(e.scheduled_at)} WIB bisa membalikkan arah"
@@ -468,6 +468,6 @@ class SignalEngine:
             trigger_summary=trigger.analysis.triage.summary_id if trigger else None,
             trigger_source=(trigger.analysis.source_ids or ["-"])[0] if trigger else None,
             trigger_category=trigger.analysis.triage.category if trigger else None,
-            timeframe=span.timeframe if span else engine.levels.sl_atr_timeframe,
-            trading_window=span.label if span else None,
+            timeframe=tf,
+            timeframe_reason=choice.reason,
         )

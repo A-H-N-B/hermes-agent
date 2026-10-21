@@ -160,13 +160,16 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      beberapa dolar dari XAUUSD spot dan diberi label *proxy* di setiap sinyal.
 4. **[Windows]** Agar log tersimpan saat berjalan otomatis (langkah 10), isi `logging.file`
    dengan `data/logs/gold-agent.log` (dirotasi otomatis 10 MB × 5).
-5. Jam trading (`trading.windows`, bawaan London M5 14:00–17:00 dan New York M15 19:00–23:00
-   WIB). Di luar jam itu tidak ada sinyal BUY/SELL (berita tetap dikirim). Di dalamnya entry,
-   SL/TP, dan masa berlaku memakai chart jendela itu. Contoh mengganti jam (satu baris):
-   `uv run gold-agent config set trading.windows "[{name: London, start: '15:00', end: '18:00', timeframe: M5}]"`.
-   `[]` berarti sinyal sepanjang hari. Catatan: London mundur sejam setelah 25 Okt (buka 15:00
-   WIB) dan New York setelah 1 Nov (data AS 20:30 WIB). Jendela bisa mengikuti jam London
-   otomatis dengan `zone: Europe/London, start: '08:00', end: '11:00'`.
+5. Timeframe (`trading.timeframe`, bawaan `auto`). Sinyal jalan sepanjang hari, dan chart yang
+   dipakai untuk entry, SL/TP, timing, dan masa berlaku dipilih otomatis setiap saat:
+   - bawaan per sesi: pagi sampai sore (sesi Asia dan London) **M5**, mulai pembukaan New York
+     (19:00 WIB musim panas, 20:00 WIB musim dingin) **M15**;
+   - setelah ada data, timeframe yang terbukti paling akurat di sesi itu (akurasi prediksi
+     30 hari, batas bawah 95%-nya di atas 50%) menggantikan bawaan;
+   - timeframe yang spread-nya terlalu besar dibanding SL (`max_cost_ratio`) dilewati;
+   - **Opus 5.5 memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
+     chart-nya dari timeframe yang layak. Angka harga, SL, dan TP tetap dihitung sistem.
+   Timeframe tetap juga bisa: `uv run gold-agent config set trading.timeframe.select M5`.
 
 Jam tenang (00:00–05:00 WIB), ambang sinyal, dan batas rugi harian juga ada di
 `config\settings.yaml` dan bisa ditimpa dengan cara yang sama.

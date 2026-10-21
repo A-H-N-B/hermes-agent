@@ -249,3 +249,5 @@ details.more summary { cursor: pointer; color: var(--info); }
 .accuracy { font-weight: 600; }
 .accuracy.BUY { color: var(--up); }
 .accuracy.SELL { color: var(--down); }
+.ai-review { margin: .6rem 0 .2rem; color: var(--info); }
+table.plan tr.chosen td { color: var(--accent); font-weight: 700; }

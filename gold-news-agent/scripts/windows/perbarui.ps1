@@ -68,7 +68,8 @@ function Update-GoldNewsAgent {
     Ok 'Versi terbaru terpasang'
 
     Step 5 'Memeriksa pengaturan'
-    & $Python -c 'from gold_agent.config import load_settings, load_sources; load_settings(); load_sources()'
+    # Settings this version no longer has are dropped from config\local.yaml (and listed).
+    & (Join-Path $Root '.venv\Scripts\gold-agent.exe') config repair
     if ($LASTEXITCODE -ne 0) {
         Fail 'Pengaturan tidak valid untuk versi baru (lihat tulisan merah: nama field-nya disebut).'
         Fail 'Perbaiki atau hapus baris itu di config\local.yaml, lalu klik "Jalankan Gold News Agent".'

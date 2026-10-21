@@ -21,6 +21,7 @@ from gold_agent.core.clock import ManualClock
 from gold_agent.market.series import PriceSeries
 from gold_agent.models import Candle, Level, MarketContext, ReleaseReading
 from gold_agent.services.signal import SignalService
+from gold_agent.signals.desk import KV_DESK, DeskDecision
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT
 from gold_agent.signals.outlook import OutlookNarrative
 from tests.builders import T0, analysis, market
@@ -43,19 +44,43 @@ async def service_factory(
 
     async def make(
         *script: Any, at: datetime = T0, settings: Settings | None = None
-    ) -> tuple[SignalService, AppContext]:
+    ) -> tuple[SignalService, AppContext, FakeAnthropic]:
         # Same SQLite file on every call: a second call is a restart.
         context = ctx_factory(settings_override=settings)
         await context.db.create_all()
         contexts.append(context)
         clock.set(at)
-        service = SignalService(context, anthropic_client=FakeAnthropic(*script))
+        fake = FakeAnthropic(*script)
+        service = SignalService(context, anthropic_client=fake)
         await service.load()
-        return service, context
+        return service, context, fake
 
     yield make
     for context in contexts:
         await context.close()
+
+
+def desk_says(
+    decision: str, timeframe: str = "M15", reason: str = "berita dan chart M15 searah"
+) -> Any:
+    """Opus's scripted final decision on a candidate."""
+    return parsed(
+        DeskDecision.model_validate(
+            {
+                "decision": decision,
+                "timeframe": timeframe,
+                "confidence": 72,
+                "reasons_id": [reason],
+                "caution_id": "rilis data AS bisa membalikkan arah",
+            }
+        )
+    )
+
+
+async def decided(service: SignalService) -> None:
+    """Let Opus's (scripted) review finish; the service then applies it on fresh prices."""
+    assert service.review_task is not None
+    await service.review_task
 
 
 def msg(stream: str, payload: Any) -> Message:
@@ -86,14 +111,26 @@ async def feed_rally(service: SignalService, clock: ManualClock) -> None:
 async def test_news_with_confirming_price_publishes_and_persists_one_signal(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context = await service_factory()
+    service, context, fake = await service_factory(desk_says("BUY"))
     await feed_rally(service, clock)
     story = analysis(first_seen=T0)
     await context.news.save_analysis(story)  # what the analyzer does before publishing
     await service.handle_analysis(msg("news.analyses", story))
+    assert await drain(context, STREAM_SIGNALS) == []  # Opus decides first
+    assert service.last_state is not None and service.last_state.action == "WAIT"
+    assert service.last_state.wait_reasons[0].startswith("menunggu keputusan AI (Opus 5.5)")
+    await decided(service)
 
     signals = await drain(context, STREAM_SIGNALS)
     assert [s["action"] for s in signals] == ["BUY"]
+    review = signals[0]["review"]
+    assert review["model"] == "claude-opus-5-5" and review["confidence"] == 72
+    assert review["reasons"] == ["berita dan chart M15 searah"]
+    (request,) = fake.requests
+    assert request["output_config"]["effort"] == "high"
+    assert '<kandidat arah="BUY"' in request["messages"][0]["content"]
+    logged = await context.ops.kv_get(KV_DESK)
+    assert logged is not None and [r["decision"] for r in logged["reviews"]] == ["BUY"]
     stored = await context.signals.latest_signals()
     assert [s.signal_id for s in stored] == [signals[0]["signal_id"]]
     states = await drain(context, STREAM_STATE)
@@ -106,7 +143,7 @@ async def test_news_with_confirming_price_publishes_and_persists_one_signal(
     assert {"type": "outlook.refresh", "reason": "sinyal BUY baru"}.items() <= events[-1].items()
 
     # Restart: the active signal and the daily count survive, the same evidence is not re-sent.
-    restarted, context2 = await service_factory(at=NOW + timedelta(minutes=1))
+    restarted, context2, _ = await service_factory(at=NOW + timedelta(minutes=1))
     assert restarted.state.last_signal is not None
     assert restarted.state.count_today(clock.now()) == 1
     await restarted.handle_context(msg("market.context", bullish(clock.now(), 2650.5)))
@@ -117,7 +154,7 @@ async def test_news_with_confirming_price_publishes_and_persists_one_signal(
 async def test_stop_halts_signals_and_survives_a_restart(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context = await service_factory()
+    service, context, _ = await service_factory()
     await feed_rally(service, clock)
     await service.handle_event(msg(STREAM_EVENTS, {"type": "signal.halt", "halted": True}))
     await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
@@ -128,7 +165,7 @@ async def test_stop_halts_signals_and_survives_a_restart(
     halt = await context.ops.kv_get(KV_HALT)
     assert halt is not None and halt["halted"] is True
 
-    restarted, _ = await service_factory(at=NOW)
+    restarted, _, _ = await service_factory(at=NOW)
     assert restarted.state.halted
 
 
@@ -141,7 +178,7 @@ def without_llm(settings: Settings) -> Settings:
 async def test_silent_market_feed_turns_the_state_stale(
     service_factory: Factory, clock: ManualClock, settings: Settings
 ) -> None:
-    service, _ = await service_factory(settings=without_llm(settings))
+    service, _, _ = await service_factory(settings=without_llm(settings))
     await feed_rally(service, clock)
     clock.advance(120)  # the market service stopped publishing
     await service.tick()
@@ -153,7 +190,7 @@ async def test_silent_market_feed_turns_the_state_stale(
 async def test_a_parsed_release_holds_entries_for_the_confirmation_window(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context = await service_factory()
+    service, context, _ = await service_factory(desk_says("BUY"))
     await feed_rally(service, clock)
     release = ReleaseReading(
         event_key="us_cpi_mom",
@@ -172,7 +209,76 @@ async def test_a_parsed_release_holds_entries_for_the_confirmation_window(
     assert "menunggu konfirmasi harga setelah rilis CPI m/m" in service.last_state.wait_reasons
     clock.advance(60)
     await service.handle_context(msg("market.context", bullish(clock.now(), 2650.2)))
+    await decided(service)
     assert [s["action"] for s in await drain(context, STREAM_SIGNALS)] == ["BUY"]
+
+
+# ------------------------------------------------------------------ Opus's final decision
+
+
+async def test_opus_can_hold_a_candidate_and_is_not_asked_again_until_something_changes(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    held = desk_says("WAIT", reason="harga sudah naik jauh sebelum berita, risiko mengejar")
+    service, context, fake = await service_factory(held, desk_says("BUY"))
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    await decided(service)
+    assert await drain(context, STREAM_SIGNALS) == []
+    state = service.last_state
+    assert state is not None and state.action == "WAIT"
+    assert state.wait_reasons == [
+        "AI (Opus 5.5) menahan BUY: harga sudah naik jauh sebelum berita, risiko mengejar"
+    ]
+    clock.advance(30)
+    await service.handle_context(msg("market.context", bullish(clock.now(), 2650.3)))
+    assert len(fake.requests) == 1  # the same evidence is not sent to Opus again
+    clock.advance(600)  # the hold lapses: the candidate is reviewed again
+    await service.handle_context(msg("market.context", bullish(clock.now(), 2650.4)))
+    await decided(service)
+    assert len(fake.requests) == 2
+    assert [s["action"] for s in await drain(context, STREAM_SIGNALS)] == ["BUY"]
+
+
+async def test_opus_picks_the_chart_and_the_trade_is_sized_on_it(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    service, context, _ = await service_factory(desk_says("BUY", timeframe="M5"))
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    await decided(service)
+    (signal,) = await drain(context, STREAM_SIGNALS)
+    assert (signal["timeframe"], signal["timeframe_reason"]) == ("M5", "M5 dipilih Opus 5.5")
+    assert signal["sl_distance"] == 2.4  # 1.2 ATR of M5 (2.0), not of M15
+    created = datetime.fromisoformat(signal["created_at_utc"])
+    assert datetime.fromisoformat(signal["valid_until_utc"]) - created == timedelta(minutes=30)
+
+
+async def test_without_the_ai_the_engine_decides_alone_and_says_so(
+    service_factory: Factory, clock: ManualClock, settings: Settings
+) -> None:
+    rules_only = settings.model_copy(
+        update={"llm": settings.llm.model_copy(update={"enabled": False})}
+    )
+    service, context, fake = await service_factory(settings=rules_only)
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    (signal,) = await drain(context, STREAM_SIGNALS)
+    assert signal["review"]["model"] is None
+    assert signal["review"]["note"].startswith("AI tidak aktif")
+    assert fake.requests == []
+
+
+async def test_a_failed_ai_call_falls_back_to_the_engine_with_a_note(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    service, context, _ = await service_factory(timeout_error())
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    await decided(service)
+    (signal,) = await drain(context, STREAM_SIGNALS)
+    assert signal["review"]["model"] is None
+    assert signal["review"]["note"].startswith("AI gagal memutuskan")
 
 
 # ------------------------------------------------------------------ outlook scheduling
@@ -182,7 +288,7 @@ async def test_hourly_outlook_is_built_once_per_hour_with_an_ai_narrative(
     service_factory: Factory, clock: ManualClock, settings: Settings
 ) -> None:
     narrative = OutlookNarrative(narrative_id="Jam 19:30 WIB ada CPI; tunggu konfirmasi.")
-    service, context = await service_factory(parsed(narrative), timeout_error())
+    service, context, _ = await service_factory(parsed(narrative), timeout_error())
     await feed_rally(service, clock)
     await service.scheduled_outlooks(clock.now())
     await service.scheduled_outlooks(clock.now() + timedelta(minutes=10))  # same hour
@@ -194,7 +300,7 @@ async def test_hourly_outlook_is_built_once_per_hour_with_an_ai_narrative(
     assert first["model"] == settings.llm.outlook.model
     assert len(first["rows"]) == 24
 
-    restarted, context2 = await service_factory(at=clock.now() + timedelta(minutes=15))
+    restarted, context2, _ = await service_factory(at=clock.now() + timedelta(minutes=15))
     await restarted.scheduled_outlooks(clock.now())
     assert await drain(context2, STREAM_OUTLOOK) == []  # a restart does not resend this hour's
 
@@ -210,7 +316,7 @@ async def test_hourly_outlook_is_built_once_per_hour_with_an_ai_narrative(
 async def test_important_news_refreshes_the_outlook_at_most_every_few_minutes(
     service_factory: Factory, clock: ManualClock, settings: Settings
 ) -> None:
-    service, context = await service_factory(settings=without_llm(settings))
+    service, context, _ = await service_factory(settings=without_llm(settings))
     await feed_rally(service, clock)
     refresh = {"type": "outlook.refresh", "reason": "Serangan rudal"}
     await service.handle_event(msg(STREAM_EVENTS, refresh))
@@ -226,7 +332,7 @@ async def test_weekend_builds_only_the_monday_open_outlook(
     service_factory: Factory, clock: ManualClock, settings: Settings
 ) -> None:
     sunday = datetime(2026, 10, 18, 9, 5, tzinfo=UTC)  # Sunday 16:05 WIB
-    service, context = await service_factory(at=sunday, settings=without_llm(settings))
+    service, context, _ = await service_factory(at=sunday, settings=without_llm(settings))
     await service.scheduled_outlooks(sunday)
     await service.scheduled_outlooks(sunday + timedelta(hours=1))
     outlooks = await drain(context, STREAM_OUTLOOK)
@@ -259,7 +365,7 @@ async def test_profile_is_rebuilt_from_stored_h1_bars(
     ]
     await seed.market.upsert_candles(bars)
     await seed.close()
-    service, context = await service_factory()
+    service, context, _ = await service_factory()
     assert not service.profile.empty
     stats, computed_at = await context.signals.profile()
     assert computed_at is not None and len(stats) == 72  # 24 buckets x 3 clocks

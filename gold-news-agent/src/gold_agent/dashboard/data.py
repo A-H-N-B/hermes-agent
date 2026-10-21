@@ -8,26 +8,27 @@ from typing import Any
 
 from gold_agent.analysis.llm_client import wib_day_start
 from gold_agent.core.app import AppContext
-from gold_agent.dashboard.forecast import SPAN, aggregate, forecast_next
-from gold_agent.dashboard.forecast_score import Held, forecast_accuracy
 from gold_agent.dashboard.indicators_view import (
     SUMMARY_TFS,
     WARMUP_BARS,
     indicator_series,
     indicator_summary,
-    momentum,
 )
-from gold_agent.dashboard.timing import timing_view, trading_hours, trading_view
+from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
+from gold_agent.market.reads import momentum
 from gold_agent.models import Analysis, CalendarEvent, Candle, MarketContext
 from gold_agent.ops.metrics import summarize as latency_summary
+from gold_agent.signals.accuracy import WARMUP_BARS as FORECAST_BARS
+from gold_agent.signals.accuracy import AccuracyBook
+from gold_agent.signals.desk import KV_DESK, compare_reviews
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT, EngineState
+from gold_agent.signals.forecast import aggregate, forecast_next
+from gold_agent.signals.timeframe import KV_TIMEFRAME, session_key
 from gold_agent.signals.tvcode import tradingview_code
-from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
+from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wib
 
 JSON = dict[str, Any]
-FORECAST_BARS = 460  # enough for EMA200 to have forgotten its seed
-ACCURACY_TTL = timedelta(minutes=5)
 
 
 def _iso(moment: datetime | None) -> str | None:
@@ -83,7 +84,8 @@ def event_view(event: CalendarEvent, now: datetime) -> JSON:
 class DashboardData:
     def __init__(self, ctx: AppContext) -> None:
         self._ctx = ctx
-        self._accuracy: dict[str, tuple[datetime, JSON | None]] = {}
+        self.book = AccuracyBook(ctx)
+        self._sessions = SessionClock(ctx.settings.sessions)
 
     async def _source(self) -> str | None:
         context = await self._ctx.market.latest_context()
@@ -109,7 +111,7 @@ class DashboardData:
             "next_event": event_view(upcoming, now) if upcoming else None,
             "tradingview_symbol": ctx.settings.dashboard.tradingview_symbol,
             "tradingview_code": tradingview_code(active) if active else None,
-            "trading": trading_view(trading_hours(ctx.settings), now),
+            "timeframe": await ctx.ops.kv_get(KV_TIMEFRAME),
         }
 
     async def candles(self, tf: str, limit: int) -> list[JSON]:
@@ -154,55 +156,13 @@ class DashboardData:
             ),
             context=await ctx.market.latest_context(),
         )
-        return forecast | {"accuracy": await self.forecast_accuracy(tf)}
-
-    async def forecast_accuracy(self, tf: str) -> JSON | None:
-        """Walk-forward hit rate of the forecast on this timeframe (cached for 5 minutes):
-        the last 30 days (M1: 7), inside the trading windows that use this timeframe."""
-        ctx = self._ctx
-        now = ctx.clock.now()
-        cached = self._accuracy.get(tf)
-        if cached is not None and now - cached[0] < ACCURACY_TTL:
-            return cached[1]
-        result = None
-        if tf not in ("W1", "MN"):
-            result = await self._score_forecast(tf, now)
-        self._accuracy[tf] = (now, result)
-        return result
-
-    async def _score_forecast(self, tf: str, now: datetime) -> JSON:
-        ctx = self._ctx
-        start = now - timedelta(days=7 if tf == "M1" else 30)
-        warmup = start - SPAN[tf] * FORECAST_BARS
-        bars = await ctx.market.candles(tf, warmup, now, source=await self._source())
-        signals = await ctx.signals.signals_between(start - timedelta(days=2), now)
-        closed = {o.signal_id: o.closed_at for o in await ctx.signals.outcomes_between(start, now)}
-        held: list[Held] = sorted(
-            (
-                s.created_at_utc,
-                min(s.valid_until_utc, closed.get(s.signal_id) or s.valid_until_utc),
-                1.0 if s.action == "BUY" else -1.0,
-            )
-            for s in signals
-        )
-        windows = [w.name for w in ctx.settings.trading.windows if w.timeframe == tf]
-        spans = None
-        if windows:
-            all_spans = trading_hours(ctx.settings).spans(start, now)
-            spans = [s for s in all_spans if s.timeframe == tf]
-        result = forecast_accuracy(
-            tf=tf,
-            bars=bars,
-            scores=await ctx.signals.scores_between(start - timedelta(minutes=10), now),
-            held=held,
-            events=await ctx.calendar.between(start - timedelta(hours=1), now),
-            spans=spans,
-            threshold=ctx.settings.signal_engine.entry_threshold,
-            confirm=timedelta(seconds=ctx.settings.trading.post_release_confirm_seconds),
-            now=now,
-            start=start,
-        )
-        return result | {"windows": windows, "days": (now - start).days}
+        accuracy = await self.book.accuracy(tf, source=await self._source())
+        session = session_key(self._sessions.session(now))
+        return forecast | {
+            "accuracy": accuracy,
+            "session": session,
+            "session_label": SESSION_LABEL_ID.get(session, session),
+        }
 
     async def indicators(self, tf: str, limit: int) -> JSON:
         ctx = self._ctx
@@ -230,6 +190,7 @@ class DashboardData:
             outlook=await ctx.signals.latest_outlook(),
             events=await ctx.calendar.between(now - timedelta(hours=1), now + timedelta(days=2)),
             context=await ctx.market.latest_context(),
+            choice=await ctx.ops.kv_get(KV_TIMEFRAME),
         )
 
     async def markers(self, hours: float) -> JSON:
@@ -288,7 +249,19 @@ class DashboardData:
             await ctx.signals.signals_between(since, until),
             await ctx.signals.outcomes_between(since, until),
         )
-        return dataclasses.asdict(perf)
+        return dataclasses.asdict(perf) | {"desk": await self._desk(now)}
+
+    async def _desk(self, now: datetime) -> JSON:
+        """How the candidates Opus approved did against the ones it held back (signals/desk.py)."""
+        stored = await self._ctx.ops.kv_get(KV_DESK) or {}
+        reviews: list[JSON] = list(stored.get("reviews") or [])
+        bars: list[Candle] = []
+        if reviews:
+            start = min(datetime.fromisoformat(r["at"]) for r in reviews)
+            end = max(datetime.fromisoformat(r["valid_until"]) for r in reviews)
+            source = reviews[-1].get("source") or await self._source()
+            bars = await self._ctx.market.candles("M1", start, min(end, now), source=source)
+        return compare_reviews(reviews, bars, now)
 
     async def health(self) -> JSON:
         ctx = self._ctx

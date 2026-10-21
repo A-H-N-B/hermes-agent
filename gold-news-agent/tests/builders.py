@@ -84,6 +84,12 @@ def market(
     liquidity: float = 1.0,
     **extra: Any,
 ) -> MarketContext:
+    # The intraday charts a trade is timed on: EMA20 sits on the trend's side of the price.
+    lean = {"up": -1.0, "down": 1.0, "flat": 0.0}[trend_h1]
+    intraday = {
+        "M5": TimeframeState(tf="M5", atr14=2.0, ema20=mid + lean * 0.5, trend=trend_h1, bars=200),
+        "M15": TimeframeState(tf="M15", atr14=atr_m15, ema20=mid + lean, trend="up", bars=200),
+    }
     return MarketContext.model_validate(
         {
             "ts": ts,
@@ -99,7 +105,7 @@ def market(
             "session": session,
             "liquidity_factor": liquidity,
             "timeframes": {
-                "M15": TimeframeState(tf="M15", atr14=atr_m15, trend="up", bars=200),
+                **intraday,
                 "H1": TimeframeState(tf="H1", atr14=atr_h1, trend=trend_h1, rsi14=rsi_h1, bars=200),
                 "H4": TimeframeState(tf="H4", trend=trend_h4, bars=200),
                 "D1": TimeframeState(tf="D1", atr14=atr_d1, bars=200),

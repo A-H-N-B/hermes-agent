@@ -77,9 +77,9 @@ def test_aligned_evidence_produces_a_complete_buy_signal(engine: SignalEngine) -
         2663.1,
         2668.0,
     )
-    assert signal.valid_until_utc == NOW + timedelta(minutes=120)  # intraday validity
+    assert signal.valid_until_utc == NOW + timedelta(minutes=90)  # 6 candles of M15
     assert signal.created_at_wib == "Selasa 13 Okt 19:35 WIB"
-    assert signal.valid_until_wib == "Selasa 13 Okt 21:35 WIB"
+    assert signal.valid_until_wib == "Selasa 13 Okt 21:05 WIB"
     assert signal.session == "London–New York"
     assert signal.setup_type == "news_momentum"
     assert signal.confidence == 100 and signal.composite_score > 0.6

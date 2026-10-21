@@ -4,26 +4,26 @@ For every closed bar of a timeframe the forecast is rebuilt as it stood at that 
 chart vote from the bars up to it, and the engine's score as stored just before (an active
 signal counts in full). The next bar's close says whether NAIK / TURUN was right. NETRAL and
 TUNGGU DATA are abstentions, not misses. Bars with no stored engine score (agent not running)
-are skipped, and with trading windows set only bars inside the windows that use this timeframe
-count. A coin flip scores 50%, so the 95% interval says whether there is a real edge.
+are skipped. Results are also split by trading session (Asia, London, overlap, New York), which
+is what the automatic timeframe choice reads. A coin flip scores 50%, so the 95% interval says
+whether there is a real edge.
 """
 
 from __future__ import annotations
 
 import bisect
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from gold_agent.dashboard.forecast import CHART_WEIGHT, NEUTRAL_BAND, NEWS_WEIGHT, SPAN
-from gold_agent.dashboard.indicators_view import SAR, STOCH, timeframe_read
 from gold_agent.market import indicators as ind
 from gold_agent.market.context import trend_of
+from gold_agent.market.reads import SAR, STOCH, timeframe_read
 from gold_agent.models import CalendarEvent, Candle
 from gold_agent.models.market import TimeframeState
-from gold_agent.timeutils.windows import WindowSpan
+from gold_agent.signals.forecast import CHART_WEIGHT, NEUTRAL_BAND, NEWS_WEIGHT, SPAN
 
 JSON = dict[str, Any]
 Held = tuple[datetime, datetime, float]  # an active signal: from, until (or its close), ±1
@@ -125,19 +125,20 @@ def forecast_accuracy(
     scores: Sequence[tuple[datetime, float]],
     held: Sequence[Held],
     events: Sequence[CalendarEvent],
-    spans: Sequence[WindowSpan] | None,
     threshold: float,
     confirm: timedelta,
     now: datetime,
     start: datetime,
+    session_of: Callable[[datetime], str],
 ) -> JSON:
-    """Hit rate of the next-candle direction (and of the news-only / chart-only parts on the
-    same bars). `scores` and `held` sorted by time; `spans`: the trading windows using `tf`,
-    None counts every hour."""
+    """Hit rate of the next-candle direction, in total and per session (the session of the bar
+    whose close made the call), plus the news-only / chart-only parts on the same bars.
+    `scores` and `held` sorted by time."""
     step = SPAN[tf]
     chart = chart_scores(tf, bars)
     releases = sorted(e.scheduled_at for e in events if e.impact == "high" and not e.all_day)
     blend, news_only, chart_only = Tally(), Tally(), Tally()
+    sessions: dict[str, Tally] = {}
     abstained = skipped = 0
     cursor = [0]
     for i in range(len(bars) - 1):
@@ -145,8 +146,6 @@ def forecast_accuracy(
         at = bar.close_time
         if at < start or after.open_time != at or after.close_time > now:
             continue  # warm-up, a gap (closed market, missing data), or the next bar still open
-        if spans is not None and not any(s.start <= at < s.end for s in spans):
-            continue
         news = _news(at, scores, held, threshold, cursor)
         if news is None:
             skipped += 1
@@ -160,6 +159,7 @@ def forecast_accuracy(
             abstained += 1
         else:
             blend.add(score * moved > 0)
+            sessions.setdefault(session_of(at), Tally()).add(score * moved > 0)
         if news:
             news_only.add(news * moved > 0)
         if chart[i]:
@@ -167,8 +167,8 @@ def forecast_accuracy(
     return {
         "tf": tf,
         "since": start.isoformat(),
-        "scope": "window" if spans is not None else "all",
         "forecast": blend.to_json(),
+        "by_session": {name: tally.to_json() for name, tally in sorted(sessions.items())},
         "news_only": news_only.to_json(),
         "chart_only": chart_only.to_json(),
         "abstained": abstained,

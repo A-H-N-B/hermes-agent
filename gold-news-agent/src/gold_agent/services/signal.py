@@ -1,6 +1,11 @@
 """Signal service: analyses + releases + market context + calendar -> SignalState / Signal, plus
 the hourly outlook (11.3), the Monday-open outlook (11.6) and the weekly hourly-profile rebuild.
 
+Every evaluation first picks the chart to trade on (signals/timeframe.py, fed by the measured
+accuracy in signals/accuracy.py). A candidate the engine produces then goes to Opus 5.5 for the
+final BUY / SELL / WAIT and timeframe (signals/desk.py); the review runs in the background and the
+next evaluation, on fresh prices, applies it. Without the AI the engine decides alone, labelled.
+
 State that must survive a restart lives in kv_state: `signal_engine` (last signal, daily count,
 last release), `trading_halt` (/stop) and `paper_daily` (realised R, written by the paper tracker).
 """
@@ -8,12 +13,14 @@ last release), `trading_halt` (/stop) and `paper_daily` (realised R, written by 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
 
+from gold_agent.analysis.drivers import DriverKB
 from gold_agent.analysis.llm_client import LlmClient, LlmFailed, LlmUnavailable
 from gold_agent.analysis.prompts import load_prompt
 from gold_agent.core.app import AppContext
@@ -40,7 +47,18 @@ from gold_agent.models import (
     Outlook,
     ReleaseReading,
     Signal,
+    SignalReview,
     SignalState,
+)
+from gold_agent.signals.accuracy import AccuracyBook
+from gold_agent.signals.desk import (
+    KEEP_REVIEWS,
+    KV_DESK,
+    Desk,
+    DeskDecision,
+    Verdict,
+    desk_brief,
+    verify,
 )
 from gold_agent.signals.engine import (
     KV_ENGINE,
@@ -63,6 +81,7 @@ from gold_agent.signals.outlook import (
 )
 from gold_agent.signals.profile import HourlyProfile, compute_profile
 from gold_agent.signals.scoring import STALE_NEWS_HALF_LIVES
+from gold_agent.signals.timeframe import KV_TIMEFRAME, TfChoice, choose_timeframe
 from gold_agent.timeutils.sessions import SessionClock, last_weekly
 
 log = structlog.get_logger(__name__)
@@ -74,6 +93,8 @@ PROFILE_REFRESH = timedelta(days=7)
 TICK_SECONDS = 15.0
 SCORE_CHANGE = 0.05  # publish the state again when |S| moves this much
 WEEKEND_TRIGGER = "pembukaan Senin"
+PENDING_REVIEW = "menunggu keputusan AI (Opus 5.5) atas kandidat ini"
+CHOICE_SAVE = timedelta(seconds=60)  # the dashboard's copy of the timeframe table
 MOMENT_NAMES = {
     "tokyo_open": "Tokyo",
     "sge_open": "Shanghai",
@@ -99,6 +120,12 @@ class SignalService:
             clock=ctx.clock,
             client=anthropic_client,
         )
+        self.accuracy = AccuracyBook(ctx)
+        self.desk = Desk(settings.llm.desk_reviews_per_day)
+        self.desk_prompt = load_prompt("desk", DriverKB.from_file())
+        self.choice: TfChoice | None = None
+        self._choice_saved: tuple[datetime, tuple[Any, ...]] | None = None
+        self.review_task: asyncio.Task[None] | None = None  # Opus deciding a candidate
         self.state = EngineState()
         self.context: MarketContext | None = None
         self.analyses: dict[str, Analysis] = {}
@@ -238,19 +265,205 @@ class SignalService:
                 return None
             self._last_eval = now
             self._prune(now)
-            decision = self.engine.evaluate(
-                now=now,
-                context=context,
-                analyses=list(self.analyses.values()),
-                events=await self.events(now),
-                state=self.state,
-                price_at=self.prices.at,
-                reliability=self.reliability if self._learned else None,
-            )
+            events = await self.events(now)
+            choice = await self._choose_timeframe(now, context)
+
+            def run(timeframe: TfChoice) -> Decision:
+                return self.engine.evaluate(
+                    now=now,
+                    context=context,
+                    analyses=list(self.analyses.values()),
+                    events=events,
+                    state=self.state,
+                    price_at=self.prices.at,
+                    reliability=self.reliability if self._learned else None,
+                    timeframe=timeframe,
+                )
+
+            decision = run(choice)
+            if decision.signal is not None:
+                decision = await self._decide(
+                    decision, decision.signal, choice, run, now, context, events
+                )
             if decision.signal is not None:
                 await self._emit(decision.signal, decision.replaced)
             await self._publish_state(decision.state, now, force=force_publish)
             return decision
+
+    # ------------------------------------------------------------------ timeframe + AI decision
+
+    async def _choose_timeframe(self, now: datetime, context: MarketContext) -> TfChoice:
+        table = await self.accuracy.table(source=context.source)
+        choice = choose_timeframe(
+            context=context,
+            session=self.sessions.session(now),
+            settings=self._ctx.settings,
+            accuracy=table,
+            current=self.choice.tf if self.choice else None,
+        )
+        self.choice = choice
+        summary = (choice.tf, choice.basis, choice.reason, tuple(choice.eligible))
+        saved = self._choice_saved
+        if saved is None or saved[1] != summary or now - saved[0] >= CHOICE_SAVE:
+            self._choice_saved = (now, summary)
+            await self._ctx.ops.kv_set(KV_TIMEFRAME, choice.to_json(), now)
+        return choice
+
+    def _hold(self, decision: Decision, now: datetime, reason: str) -> Decision:
+        """The candidate is not sent (yet): publish WAIT with the reason instead."""
+        active = self.state.active(now)
+        state = decision.state.model_copy(
+            update={
+                "action": "WAIT",
+                "active_signal_id": active.signal_id if active else None,
+                "wait_reasons": [reason],
+            }
+        )
+        return Decision(state=state, breakdown=decision.breakdown)
+
+    @staticmethod
+    def _reviewed(
+        decision: Decision, signal: Signal, review: SignalReview, reason: str | None = None
+    ) -> Decision:
+        update: dict[str, Any] = {"review": review}
+        if reason is not None:
+            update["timeframe_reason"] = reason
+        return dataclasses.replace(decision, signal=signal.model_copy(update=update))
+
+    async def _decide(
+        self,
+        decision: Decision,
+        candidate: Signal,
+        choice: TfChoice,
+        run: Callable[[TfChoice], Decision],
+        now: datetime,
+        context: MarketContext,
+        events: list[CalendarEvent],
+    ) -> Decision:
+        """Opus's final say on the engine's candidate (signals/desk.py)."""
+        verdict = self.desk.standing(candidate, now)
+        if verdict is None:
+            if self.desk.busy:
+                return self._hold(decision, now, PENDING_REVIEW)
+            why = self._cannot_review(now)
+            if why is None:
+                self._start_review(decision, candidate, choice, context, events, now)
+                return self._hold(decision, now, PENDING_REVIEW)
+            verdict = Verdict(
+                side=candidate.action,
+                decision="UNAVAILABLE",
+                at=now,
+                composite=candidate.composite_score,
+                note=why,
+            )
+            self.desk.last = verdict
+        if verdict.decision == "UNAVAILABLE":
+            return self._reviewed(decision, candidate, verdict.review())
+        if not verdict.approved:
+            reason = verdict.reasons[0] if verdict.reasons else "tanpa alasan"
+            return self._hold(decision, now, f"AI (Opus 5.5) menahan {candidate.action}: {reason}")
+        self.desk.last = None  # an approval answers this one candidate
+        tf = verdict.timeframe or choice.tf
+        if tf != choice.tf:
+            picked = TfChoice(tf, "opus", f"{tf} dipilih Opus 5.5", choice.session, choice.options)
+            redo = run(picked)
+            if redo.signal is not None and redo.signal.action == candidate.action:
+                return self._reviewed(redo, redo.signal, verdict.review())
+            note = f"chart {tf} pilihan AI belum siap entry, dipakai {choice.tf}"
+            return self._reviewed(decision, candidate, verdict.review(note=note))
+        reason = f"{choice.reason}; disetujui Opus 5.5"
+        return self._reviewed(decision, candidate, verdict.review(), reason)
+
+    def _cannot_review(self, now: datetime) -> str | None:
+        if not self.llm.available:
+            return "AI tidak aktif (rules-only, tanpa API key, atau Claude sedang bermasalah)"
+        if not self.desk.take(wib_day(now)):
+            cap = self._ctx.settings.llm.desk_reviews_per_day
+            return f"batas {cap} review AI per hari tercapai"
+        return None
+
+    def _start_review(
+        self,
+        decision: Decision,
+        candidate: Signal,
+        choice: TfChoice,
+        context: MarketContext,
+        events: list[CalendarEvent],
+        now: datetime,
+    ) -> None:
+        brief = desk_brief(
+            candidate=candidate,
+            choice=choice,
+            breakdown=decision.breakdown,
+            context=context,
+            analyses=list(self.analyses.values()),
+            events=events,
+            active=self.state.active(now),
+            settings=self._ctx.settings,
+            now=now,
+        )
+        self.desk.busy = True
+        self.review_task = asyncio.create_task(self._ask_desk(candidate, choice, brief))
+
+    async def _ask_desk(self, candidate: Signal, choice: TfChoice, brief: str) -> None:
+        try:
+            verdict = await self._consult(candidate, choice, brief)
+        finally:
+            self.desk.busy = False
+        self.desk.last = verdict
+        log.info(
+            "desk.verdict",
+            candidate=candidate.signal_id,
+            decision=verdict.decision,
+            timeframe=verdict.timeframe,
+        )
+        if verdict.decision != "UNAVAILABLE":
+            await self._log_review(verdict, candidate)
+        await self.evaluate(force_publish=True)
+
+    async def _consult(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict:
+        try:
+            result = await self.llm.structured(
+                "desk",
+                system=self.desk_prompt.text,
+                user=brief,
+                schema=DeskDecision,
+                ref_id=candidate.signal_id,
+                high_impact=True,  # the decision itself: never skipped for the daily budget
+            )
+        except (LlmUnavailable, LlmFailed) as exc:
+            return Verdict(
+                side=candidate.action,
+                decision="UNAVAILABLE",
+                at=self._ctx.clock.now(),
+                composite=candidate.composite_score,
+                note=f"AI gagal memutuskan ({exc})",
+            )
+        return verify(
+            result.value,
+            candidate=candidate,
+            choice=choice,
+            model=result.model,
+            at=self._ctx.clock.now(),
+        )
+
+    async def _log_review(self, verdict: Verdict, candidate: Signal) -> None:
+        ops = self._ctx.ops
+        stored = await ops.kv_get(KV_DESK) or {}
+        entries: list[dict[str, Any]] = list(stored.get("reviews") or [])
+        entries.append(
+            verdict.to_json()
+            | {
+                "candidate_tf": candidate.timeframe,
+                "entry_low": candidate.entry_low,
+                "entry_high": candidate.entry_high,
+                "stop_loss": candidate.stop_loss,
+                "tp1": candidate.tp1,
+                "valid_until": candidate.valid_until_utc.isoformat(),
+                "source": candidate.price_source,
+            }
+        )
+        await ops.kv_set(KV_DESK, {"reviews": entries[-KEEP_REVIEWS:]}, self._ctx.clock.now())
 
     async def _emit(self, signal: Signal, replaced: Signal | None) -> None:
         ctx = self._ctx
@@ -522,3 +735,5 @@ class SignalService:
         finally:
             for task in tasks:
                 task.cancel()
+            if self.review_task is not None:
+                self.review_task.cancel()

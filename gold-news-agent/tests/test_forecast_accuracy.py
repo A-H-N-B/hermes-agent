@@ -1,6 +1,7 @@
 """Forecast accuracy, walk-forward: each bar's forecast is rebuilt from what was known at its
 close and scored on the next close. Abstentions (NETRAL, TUNGGU DATA) and bars without a stored
-engine score never count as calls, and the news and chart parts are scored on the same bars."""
+engine score never count as calls, the news and chart parts are scored on the same bars, and the
+result is split by session for the automatic timeframe choice."""
 
 from __future__ import annotations
 
@@ -10,13 +11,15 @@ from typing import Any
 
 import pytest
 
-from gold_agent.dashboard.forecast_score import Held, forecast_accuracy, wilson
+from gold_agent.config import load_settings
 from gold_agent.models import Candle
-from gold_agent.timeutils.windows import WindowSpan
+from gold_agent.signals.forecast_score import Held, forecast_accuracy, wilson
+from gold_agent.timeutils.sessions import SessionClock
 from tests.builders import T0, event
 
 STEP = timedelta(minutes=5)
 BARS = 260
+SESSIONS = SessionClock(load_settings(local=False).sessions)
 WARMUP = 30  # bars before the measured period, as the dashboard loads them
 CALLS = BARS - 1 - WARMUP  # every measured bar that has a closed next bar
 
@@ -64,7 +67,7 @@ def measure(
     if scores is None:
         assert score is not None
         scores = every_minute(T0, bars[-1].close_time, score)
-    options: dict[str, Any] = {"held": [], "events": [], "spans": None} | extra
+    options: dict[str, Any] = {"held": [], "events": [], "session_of": SESSIONS.session} | extra
     return forecast_accuracy(
         tf="M5",
         bars=bars,
@@ -120,11 +123,13 @@ def test_no_engine_score_means_skipped_and_a_release_means_tunggu_data() -> None
     assert result["forecast"]["calls"] == CALLS - (99 - WARMUP) - 1
 
 
-def test_only_bars_inside_the_trading_windows_count() -> None:
-    bars = rising()
-    span = WindowSpan("London", "M5", bars[200].open_time, bars[210].open_time)
-    result = measure(bars, 0.35, spans=[span])
-    assert result["scope"] == "window" and result["forecast"]["calls"] == 10
+def test_calls_are_split_by_the_session_they_were_made_in() -> None:
+    bars = rising()  # measured from 22:05 WIB: New York, then Asia the next morning
+    result = measure(bars, 0.35)
+    by_session = result["by_session"]
+    assert {"new_york", "asia"} <= set(by_session)
+    assert sum(tally["calls"] for tally in by_session.values()) == CALLS
+    assert all(tally["rate"] == 1.0 for tally in by_session.values())
 
 
 def test_an_active_signal_counts_at_full_strength() -> None:

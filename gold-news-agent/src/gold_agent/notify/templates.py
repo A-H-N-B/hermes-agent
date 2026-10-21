@@ -66,10 +66,19 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         f"{icon} <b>{signal.action} XAUUSD</b> | Confidence {signal.confidence}/100",
         f"🕐 {wib_clock(signal.created_at_utc)} WIB · Sesi {esc(signal.session)}",
     ]
-    if signal.trading_window:
+    if signal.timeframe:
+        why = f" ({esc(signal.timeframe_reason)})" if signal.timeframe_reason else ""
+        lines.append(f"📊 Chart {esc(signal.timeframe)}{why}")
+    review = signal.review
+    if review is not None and review.model:
         lines.append(
-            f"📊 Chart {esc(signal.timeframe or '-')} · jam trading {esc(signal.trading_window)}"
+            f"🤖 Diputuskan Opus 5.5 · confidence AI {review.confidence or '-'}/100"
+            + (f" · {esc(review.reasons[0])}" if review.reasons else "")
         )
+        if review.caution:
+            lines.append(f"⚠️ Catatan AI: {esc(review.caution)}")
+    elif review is not None:
+        lines.append(f"⚙️ Tanpa review AI: {esc(review.note or 'AI tidak tersedia')}")
     lines += [
         f"💵 Harga {price(signal.bid)}/{price(signal.ask)} · Spread {signal.spread:.2f}",
         f"🎯 Entry {price(signal.entry_low)}–{price(signal.entry_high)} ({signal.entry_type})",

@@ -109,6 +109,17 @@ function renderSignalCard(payload) {
       levelBox("Berlaku s/d", active.valid_until_wib),
       levelBox("Lot", active.lot_size !== null ? String(active.lot_size) : "–")));
     if (active.lot_note) card.append(el("p", { class: "muted", text: `Lot: ${active.lot_note}` }));
+    const review = active.review;
+    if (review && review.model) {
+      card.append(el("p", { class: "ai-review" }, el("b", { text: `🤖 Diputuskan Opus 5.5 · chart ${active.timeframe} · confidence AI ${review.confidence ?? "–"}/100` })));
+      const why = el("ul", { class: "notes" });
+      for (const reason of review.reasons) why.append(el("li", { text: reason }));
+      card.append(why);
+      if (review.caution) card.append(el("p", { class: "agree WARN", text: `⚠️ ${review.caution}` }));
+      if (review.note) card.append(el("p", { class: "muted", text: review.note }));
+    } else if (review) {
+      card.append(el("p", { class: "muted", text: `⚙️ Tanpa review AI: ${review.note || "AI tidak tersedia"}` }));
+    }
     const reasons = el("ul", { class: "notes" });
     for (const reason of active.top_reasons) reasons.append(el("li", { text: reason }));
     card.append(el("h2", { text: "Alasan" }), reasons);
@@ -486,7 +497,7 @@ function bigBox(label, value, note, cls = "") {
 
 function renderTiming(t) {
   lastTiming = t;
-  followTradingWindow(t.trading);
+  followTimeframe(t.timeframe ? t.timeframe.tf : null);
   renderBoard();
   renderTimingDetails(t);
 }
@@ -514,24 +525,38 @@ function scoreGauge(t) {
   return wrap;
 }
 
-// Trading hours (config trading.windows): the window open now and its chart, or the next one.
-function tradingLine(trading) {
-  if (!trading) return null;
-  const a = trading.active;
-  if (a) {
-    return el("p", { class: "trading-line on" }, `🕑 Jam trading ${a.name} · chart ${a.timeframe} · sampai ${a.end_wib} WIB · `,
-      liveCountdown(a.end_utc, "sisa", "sudah selesai"));
+// The chart trading uses now: chosen automatically (signals/timeframe.py), or the active
+// signal's own chart (picked by Opus 5.5 when it reviewed the signal).
+const TF_SOURCE = { auto: "⚙️ Timeframe otomatis", signal: "📊 Sinyal aktif di chart", opus: "🤖 Sinyal aktif di chart" };
+function timeframeLine(tf) {
+  if (!tf) return null;
+  const by = tf.source === "opus" ? " · dipilih Opus 5.5" : "";
+  return el("p", { class: `trading-line ${tf.source === "auto" ? "" : "on"}` },
+    el("b", { text: `${TF_SOURCE[tf.source] || "Timeframe"}: ${tf.tf}` }), `${by}${tf.reason ? ` · ${tf.reason}` : ""}`);
+}
+
+// Why that timeframe: the per-timeframe table the choice was made from.
+function timeframeTable(tf) {
+  if (!tf || !tf.options || !tf.options.length) return null;
+  const table = el("table", { class: "plan" });
+  table.append(el("tr", {}, ...["Timeframe", "Bisa dipakai", "Akurasi sesi ini", "Spread/SL"].map((h) => el("th", { text: h }))));
+  for (const o of tf.options) {
+    const a = o.accuracy;
+    const accuracy = a && a.calls ? `${pct(a.rate)} dari ${a.calls} (95%: ${pct(a.ci95[0])}–${pct(a.ci95[1])})` : "belum ada data";
+    table.append(el("tr", { class: o.tf === tf.tf ? "chosen" : "" },
+      el("td", { text: o.tf === tf.tf ? `${o.tf} ✔` : o.tf }),
+      el("td", { text: o.eligible ? "ya" : o.note }),
+      el("td", { text: accuracy }),
+      el("td", { text: o.cost_ratio !== null && o.cost_ratio !== undefined ? pct(o.cost_ratio) : "–" })));
   }
-  const next = trading.next;
-  return el("p", { class: "trading-line" }, `💤 Di luar jam trading Anda (${trading.summary})`,
-    next ? el("span", {}, ` · berikutnya ${next.label} · `, liveCountdown(next.start_utc, "mulai dalam", "mulai sekarang")) : null);
+  return el("div", { class: "table-wrap" }, table);
 }
 
 function renderBoard() {
   const t = lastTiming;
   const box = clear($("#timing"));
   const n = t.now;
-  const line = tradingLine(t.trading);
+  const line = timeframeLine(t.timeframe);
   if (line) box.append(line);
   const boxes = el("div", { class: "big-boxes" });
   let direction = null;
@@ -549,11 +574,9 @@ function renderBoard() {
     if (next) {
       direction = next.action;
       boxes.append(bigBox("Prediksi berikutnya", `${next.action} jam ${next.label_wib.split("–")[0]} WIB`,
-        el("small", {}, liveCountdown(next.from_utc, "dalam", "sedang berlangsung"),
-          `${next.timeframe ? ` · chart ${next.timeframe}` : ""} · confidence ${next.confidence ?? "–"}`), next.action));
+        el("small", {}, liveCountdown(next.from_utc, "dalam", "sedang berlangsung"), ` · confidence ${next.confidence ?? "–"}`), next.action));
     } else {
-      boxes.append(bigBox("Prediksi berikutnya", "belum ada",
-        t.trading ? "belum ada jam trading Anda yang condong BUY/SELL" : "Outlook 24 jam belum condong BUY/SELL"));
+      boxes.append(bigBox("Prediksi berikutnya", "belum ada", "Outlook 24 jam belum condong BUY/SELL"));
     }
     if (t.blackout) {
       const b = t.blackout;
@@ -586,13 +609,15 @@ function renderTimingDetails(t) {
   const list = el("ul", { class: "timing-list" });
   for (const w of t.windows) {
     list.append(el("li", { class: w.action },
-      el("b", { text: `${w.action} · ${w.label_wib} WIB${w.timeframe ? ` · chart ${w.timeframe}` : ""}` }), " · ",
+      el("b", { text: `${w.action} · ${w.label_wib} WIB` }), " · ",
       liveCountdown(w.from_utc, "dalam", "sedang berlangsung"),
       ` · confidence ${w.confidence ?? "–"}${w.conditional ? " (bersyarat)" : ""}`,
       el("div", { class: "meta", text: w.scenario })));
   }
-  if (!t.windows.length) list.append(el("li", { class: "muted", text: t.trading ? "Belum ada jam trading Anda yang condong BUY atau SELL di Outlook 24 jam ke depan." : "Belum ada jam yang condong BUY atau SELL di Outlook 24 jam ke depan." }));
+  if (!t.windows.length) list.append(el("li", { class: "muted", text: "Belum ada jam yang condong BUY atau SELL di Outlook 24 jam ke depan." }));
   box.append(el("h2", { text: "Semua jadwal peluang" }), list);
+  const table = timeframeTable(t.timeframe);
+  if (table) box.append(el("h2", { text: "Kenapa timeframe ini" }), table);
   if (t.triggers) {
     const parts = [];
     if (t.triggers.buy_above) parts.push(`BUY bila tembus ke atas ${num(t.triggers.buy_above.price)} (${t.triggers.buy_above.name})`);
@@ -693,35 +718,29 @@ function buildRing() {
   $("#tf-close").addEventListener("click", () => { ring.hidden = true; });
 }
 
-// Inside a trading window the Live chart opens on that window's chart (M5 London, M15 New York).
-// A timeframe picked on the ring holds until the next window opens.
-let lastTrading = null;
-function windowKey(trading) {
-  const active = trading && trading.active;
-  return active ? `${active.name}@${active.start_utc}` : null;
-}
-
-function preferredTf(trading) {
-  const key = windowKey(trading);
-  if (!key) return savedTf();
+// The Live chart follows the timeframe the agent trades on now. A timeframe picked on the ring
+// holds until the agent switches to another one.
+let lastAutoTf = null;
+function preferredTf(auto) {
+  if (!auto) return savedTf();
   try {
     const pick = JSON.parse(localStorage.getItem("gna.tf.pick") || "null");
-    if (pick && pick.window === key && RING_TFS.includes(pick.tf)) return pick.tf;
-  } catch { /* unreadable: use the window's chart */ }
-  return trading.active.timeframe;
+    if (pick && pick.auto === auto && RING_TFS.includes(pick.tf)) return pick.tf;
+  } catch { /* unreadable: follow the agent */ }
+  return auto;
 }
 
-function followTradingWindow(trading) {
-  lastTrading = trading;
+function followTimeframe(auto) {
+  lastAutoTf = auto;
   const state = charts.live;
-  const tf = preferredTf(trading);
+  const tf = preferredTf(auto);
   if (state && currentPage === "live" && tf !== state.tf) showTf(tf);
 }
 
 async function chooseTf(tf) {
   try {
     localStorage.setItem("gna.tf", tf);
-    localStorage.setItem("gna.tf.pick", JSON.stringify({ tf, window: windowKey(lastTrading) }));
+    localStorage.setItem("gna.tf.pick", JSON.stringify({ tf, auto: lastAutoTf }));
   } catch { /* private window: just not remembered */ }
   await showTf(tf);
 }
@@ -761,7 +780,7 @@ async function refreshForecast() {
       liveCountdown(f.until_utc, "·", "candle baru")));
   }
   box.append(el("p", { class: "muted", text: f.reasons.join(" · ") }));
-  const accuracy = accuracyLines(f.accuracy);
+  const accuracy = accuracyLines(f.accuracy, f.session, f.session_label);
   if (accuracy) box.append(...accuracy);
   drawForecast(state, f);
   tickLiveCountdowns();
@@ -769,12 +788,14 @@ async function refreshForecast() {
 
 // Walk-forward hit rate of this forecast (server: forecast_score.py). 50% is a coin flip, so the
 // verdict only claims an edge when the whole 95% interval is above it.
-function accuracyLines(a) {
+function accuracyLines(a, session, sessionLabel) {
   if (!a) return null;
-  const f = a.forecast;
-  const scope = a.scope === "window" ? `jam trading ${a.windows.join(" + ")}` : "semua jam";
+  const all = a.forecast;
+  const here = (a.by_session || {})[session];
+  const f = here && here.calls ? here : all;
+  const scope = here && here.calls ? `sesi ${sessionLabel}` : "semua sesi";
   if (!f.calls) {
-    return [el("p", { class: "muted", text: `Akurasi prediksi ${a.tf} (${scope}): belum ada data. Dihitung otomatis dari candle yang sudah lewat setelah agent berjalan.` })];
+    return [el("p", { class: "muted", text: `Akurasi prediksi ${a.tf}: belum ada data. Dihitung otomatis dari candle yang sudah lewat setelah agent berjalan.` })];
   }
   const [lo, hi] = f.ci95;
   const verdict = lo > 0.5 ? "lebih baik dari tebakan acak ✅" : hi < 0.5 ? "lebih buruk dari acak ⚠️ jangan diandalkan" : "belum terbukti lebih baik dari acak (50%)";
@@ -782,7 +803,7 @@ function accuracyLines(a) {
   return [
     el("p", { class: `accuracy ${lo > 0.5 ? "BUY" : hi < 0.5 ? "SELL" : ""}`,
       text: `Akurasi prediksi ${a.tf} (${scope}, ${a.days} hari): ${pct(f.rate)} benar dari ${f.calls} candle (95%: ${pct(lo)}–${pct(hi)}) · ${verdict}` }),
-    el("p", { class: "muted", text: `${part("berita saja", a.news_only)} · ${part("indikator saja", a.chart_only)} · ${a.abstained} candle netral/tunggu data tidak dihitung` }),
+    el("p", { class: "muted", text: `${part("semua sesi", all)} · ${part("berita saja", a.news_only)} · ${part("indikator saja", a.chart_only)} · ${a.abstained} candle netral/tunggu data tidak dihitung` }),
   ];
 }
 
@@ -1085,6 +1106,10 @@ function renderPerformance(perf) {
     tile("Total", `${signed(perf.total_r)}R`), tile("Max drawdown", `${num(perf.max_drawdown_r)}R`));
   const notes = clear($("#perf-notes"));
   for (const note of perf.notes) notes.append(el("li", { text: note }));
+  const desk = clear($("#perf-desk"));
+  const deskTile = (label, d) => tile(label, !d || !d.n ? "belum ada" :
+    `${d.tp1_rate === null ? "–" : pct(d.tp1_rate)} TP1 dulu${d.ci95 ? ` [${pct(d.ci95[0])}–${pct(d.ci95[1])}]` : ""} · ${d.tp1}/${d.tp1 + d.sl} (${d.expired} kedaluwarsa, ${d.open} berjalan)`);
+  if (perf.desk) desk.append(deskTile("Disetujui AI", perf.desk.approved), deskTile("Ditahan AI (bayangan)", perf.desk.held));
   const groups = clear($("#perf-groups"));
   groups.append(groupTable("Per kategori berita", perf.by_category),
     groupTable("Per sesi", perf.by_session), groupTable("Per jam (WIB)", perf.by_hour),
@@ -1146,8 +1171,9 @@ const loaders = {
     renderPrice(state.context);
     renderNews(news);
     const chart = makeChart("live", $("#chart"), false);
-    lastTrading = state.trading;
-    chart.tf = preferredTf(state.trading);
+    const auto = (state.active && state.active.timeframe) || (state.timeframe && state.timeframe.tf) || (state.state && state.state.timeframe) || null;
+    lastAutoTf = auto;
+    chart.tf = preferredTf(auto);
     markTf(chart.tf);
     await loadChart(chart);
     drawSignal(chart, state.active);

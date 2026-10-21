@@ -19,7 +19,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -182,6 +182,41 @@ def migrate(config: Path, backups: Path) -> list[str]:
     return moved
 
 
+def _drop(data: dict[str, Any], loc: Sequence[Any]) -> bool:
+    """Delete the key at `loc` (and parents it leaves empty); False when it is not there."""
+    parent: Any = data
+    for key in loc[:-1]:
+        parent = parent.get(key) if isinstance(parent, dict) else None
+    if not isinstance(parent, dict) or loc[-1] not in parent:
+        return False
+    del parent[loc[-1]]
+    if not parent and len(loc) > 1:
+        _drop(data, loc[:-1])
+    return True
+
+
+def repair(config: Path, validate: Callable[[], object]) -> list[str]:
+    """After an update: drop from local.yaml the settings this version no longer has (the
+    loader reports them as `extra_forbidden`), so an old edit cannot stop the agent starting.
+    Anything else wrong is raised as is."""
+    removed: list[str] = []
+    while True:
+        try:
+            validate()
+        except Exception as exc:
+            errors = getattr(exc, "errors", None)  # a pydantic ValidationError has errors()
+            found = cast(list[dict[str, Any]], errors()) if callable(errors) else []
+            locs = [tuple(e["loc"]) for e in found if e.get("type") == "extra_forbidden"]
+            local: dict[str, Any] = read_yaml(config / LOCAL_SETTINGS) or {}
+            dropped = [loc for loc in locs if _drop(local, loc)]
+            if not dropped:
+                raise
+            write_local(config / LOCAL_SETTINGS, local, SETTINGS)
+            removed += [".".join(str(part) for part in loc) for loc in dropped]
+            continue
+        return removed
+
+
 # ------------------------------------------------------------------ command line
 
 
@@ -220,6 +255,7 @@ def main(argv: Sequence[str] | None = None, validate: Callable[[], object] | Non
     verified.add_argument("ids", nargs="+")
     move = sub.add_parser("migrate", help="pindahkan edit config ke file lokal sebelum update")
     move.add_argument("--backups", type=Path, default=None)
+    sub.add_parser("repair", help="buang pengaturan lama yang tidak dipakai versi ini")
     args = parser.parse_args(argv)
     config: Path = args.config_dir
     try:
@@ -229,6 +265,13 @@ def main(argv: Sequence[str] | None = None, validate: Callable[[], object] | Non
         elif args.action == "verified":
             _checked(config, lambda: mark_verified(config, args.ids), validate)
             print(f"{len(args.ids)} sumber ditandai verified di config/{LOCAL_SOURCES}")
+        elif args.action == "repair":
+            if validate is None:
+                raise ValueError("repair butuh pemuat config program (jalankan lewat gold-agent)")
+            removed = repair(config, validate)
+            print(
+                "\n".join(f"dibuang (tidak dipakai lagi): {key}" for key in removed) or "config OK"
+            )
         else:
             backups = args.backups or config.parent / "data" / "backups"
             moved = migrate(config, backups)

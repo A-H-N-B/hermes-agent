@@ -9,7 +9,8 @@ and so on. The forecast blends two things the agent already computes, with fixed
 
 The expected range is that timeframe's ATR(14), shifted by the score. A high-impact release
 inside the horizon makes it "TUNGGU DATA" (the engine's own rule), a closed market "PASAR TUTUP".
-The strength is a score, not a calibrated probability: the paper-trading stats say how good it is.
+The strength is a score, not a calibrated probability: forecast_score.py measures how often it
+is right per timeframe and session, which the automatic timeframe choice reads.
 
 W1 and MN are built here from D1 bars (weeks by New York trading date, months by calendar month),
 so they only reach back as far as the stored daily history.
@@ -23,8 +24,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from gold_agent.config import Settings
-from gold_agent.dashboard.indicators_view import momentum, timeframe_read
 from gold_agent.market.context import timeframe_state
+from gold_agent.market.reads import momentum, timeframe_read
 from gold_agent.models import CalendarEvent, Candle, MarketContext, Signal, SignalState
 from gold_agent.models.market import TimeframeState
 from gold_agent.timeutils.sessions import NEW_YORK, fmt_wib

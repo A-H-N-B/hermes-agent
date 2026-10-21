@@ -13,6 +13,7 @@ from gold_agent.config import Settings
 from gold_agent.market import indicators as ind
 from gold_agent.market.candles import CandleBuilder
 from gold_agent.market.levels import asia_range, compute_levels, previous_complete
+from gold_agent.market.reads import SAR, STOCH
 from gold_agent.market.usd import UsdTracker
 from gold_agent.models import Candle, MarketContext, Tick, TimeframeState
 from gold_agent.models.common import Timeframe
@@ -88,6 +89,9 @@ def timeframe_state(
     highs = [c.high for c in candles]
     lows = [c.low for c in candles]
     swing_high, swing_low = nearest_swings(candles, closes[-1], swing_half_width)
+    stoch_k, stoch_d = ind.stochastic(highs, lows, closes, *STOCH)
+    sar, sar_dir = ind.parabolic_sar(highs, lows, *SAR)
+    sar_now = ind.last(sar)
     ema20 = ind.last(ind.ema(closes, 20))
     ema50 = ind.last(ind.ema(closes, 50))
     mid, upper, lower = ind.bollinger(closes)
@@ -105,6 +109,10 @@ def timeframe_state(
         trend=trend_of(closes[-1], ema20, ema50),
         swing_high=swing_high,
         swing_low=swing_low,
+        stoch_k=ind.last(stoch_k),
+        stoch_d=ind.last(stoch_d),
+        sar=sar_now,
+        sar_up=bool(sar_dir[-1] > 0) if sar_now is not None else None,
         bars=len(candles),
     )
 

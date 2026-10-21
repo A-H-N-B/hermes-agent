@@ -17,9 +17,8 @@ from gold_agent.analysis.llm_client import (
     usage_cost,
 )
 from gold_agent.analysis.triage import TriageEngine, TriageInputs, build_user_message, cluster_items
-from gold_agent.config import Settings, TradingWindow
+from gold_agent.config import Settings
 from gold_agent.core.app import AppContext
-from gold_agent.core.clock import ManualClock
 from gold_agent.econ_calendar.events import load_events
 from gold_agent.econ_calendar.release_parser import ReleaseParser
 from gold_agent.models import DeepAnalysis, NewsCluster, TriageResult
@@ -177,28 +176,6 @@ async def test_daily_budget_keeps_only_high_impact_calls(ctx: AppContext) -> Non
         "triage", system="s", user="u", schema=TriageResult, high_impact=True
     )
     assert result.value.impact_score == 3 and client.budget_exceeded
-
-
-async def test_outside_trading_hours_half_the_budget_is_kept_for_them(ctx: AppContext) -> None:
-    london = TradingWindow(name="London", start="14:00", end="17:00", timeframe="M5")
-    trading = ctx.settings.trading.model_copy(update={"windows": (london,)})
-    settings = ctx.settings.model_copy(update={"trading": trading})
-    await ctx.ops.add_llm_usage(  # 08:00 WIB, 1.60 of 3.00 spent: past the half kept for London
-        ts=T0.replace(hour=1), route="triage", model="claude-opus-5-5", cost_usd=1.6, ok=True
-    )
-    fake = FakeAnthropic(parsed(triage_value()), parsed(triage_value()), parsed(triage_value()))
-    client = LlmClient(settings, api_key=None, ops=ctx.ops, clock=ctx.clock, client=fake)
-    assert isinstance(ctx.clock, ManualClock)
-    ctx.clock.set(T0.replace(hour=10, minute=30))  # 17:30 WIB: after the window
-    with pytest.raises(LlmUnavailable, match="disimpan untuk jam trading"):
-        await client.structured("triage", system="s", user="u", schema=TriageResult)
-    await client.structured(  # a release or impact >= 4 still gets Claude
-        "triage", system="s", user="u", schema=TriageResult, high_impact=True
-    )
-    assert not client.budget_exceeded  # a reserve, not an empty budget: no alert
-    ctx.clock.set(T0.replace(hour=7, minute=30))  # 14:30 WIB: inside London
-    await client.structured("triage", system="s", user="u", schema=TriageResult)
-    assert len(fake.requests) == 2
 
 
 async def test_rules_only_mode_and_missing_key(ctx: AppContext) -> None:

@@ -21,6 +21,18 @@ class SignalComponents(BaseModel):
     session_factor: float
 
 
+class SignalReview(BaseModel):
+    """Opus 5.5's final say on a signal (signals/desk.py). `model` None: the AI could not review
+    it (outage, budget, daily cap) and the engine decided alone; `note` says why."""
+
+    model: str | None
+    confidence: int | None = None
+    timeframe: str | None = None  # the chart the AI chose
+    reasons: list[str] = Field(default_factory=list)
+    caution: str | None = None
+    note: str | None = None
+
+
 class Signal(BaseModel):
     signal_id: str
     created_at_utc: datetime
@@ -62,12 +74,16 @@ class Signal(BaseModel):
     trigger_summary: str | None = None
     trigger_source: str | None = None
     trigger_category: str | None = None  # news category of the trigger (per-category stats)
-    timeframe: str | None = None  # chart the levels and validity were sized on
-    trading_window: str | None = None  # e.g. "London M5 14:00–17:00 WIB"; None = no windows set
+    timeframe: str | None = None  # chart the levels, validity and entry timing were sized on
+    timeframe_reason: str | None = None  # why that chart (signals/timeframe.py, or Opus)
+    review: SignalReview | None = None  # Opus 5.5's final decision; None = engine alone
 
 
 class SignalState(BaseModel):
     """What the engine thinks right now; WAIT carries its reasons."""
+
+    timeframe: str | None = None  # the chart chosen for trading right now
+    timeframe_reason: str | None = None
 
     ts: datetime
     action: Action

@@ -42,10 +42,10 @@ def test_nested_settings_merge_and_only_real_changes_are_kept() -> None:
 
 def test_local_files_override_the_shipped_config(config: Path) -> None:
     assert main(["--config-dir", str(config), "set", "risk.account_equity", "2500"]) == 0
-    assert main(["--config-dir", str(config), "set", "trading.windows", "[]"]) == 0
+    assert main(["--config-dir", str(config), "set", "trading.timeframe.select", "M15"]) == 0
     assert main(["--config-dir", str(config), "verified", "investinglive_rss"]) == 0
     settings = load_settings(config / "settings.yaml")
-    assert settings.risk.account_equity == 2500 and settings.trading.windows == ()
+    assert settings.risk.account_equity == 2500 and settings.trading.timeframe.select == "M15"
     assert settings.risk.max_spread_usd == 0.5  # untouched keys keep the shipped value
     source = load_sources(config / "sources.yaml").get("investinglive_rss")
     assert source.status.value == "verified"
@@ -100,3 +100,16 @@ def test_before_an_update_the_users_edits_move_to_the_local_files(
     registry = load_sources(sources)
     assert registry.get("investinglive_rss").status.value == "verified"
     assert main(["--config-dir", str(config), "migrate"]) == 0  # nothing left to move
+
+
+def test_after_an_update_settings_the_version_dropped_are_removed(
+    config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (config / "local.yaml").write_text(
+        "trading:\n  style: scalping\nrisk:\n  account_equity: 900\n", encoding="utf-8"
+    )
+    assert main(["--config-dir", str(config), "repair"], validate=validate(config)) == 0
+    assert "dibuang (tidak dipakai lagi): trading.style" in capsys.readouterr().out
+    assert load_settings(config / "settings.yaml").risk.account_equity == 900  # kept
+    (config / "local.yaml").write_text("risk:\n  risk_per_trade_pct: banyak\n", encoding="utf-8")
+    assert main(["--config-dir", str(config), "repair"], validate=validate(config)) == 1

@@ -35,11 +35,7 @@ def make_source(**overrides: Any) -> Source:
 
 @pytest.fixture
 def settings() -> Settings:
-    # Signals around the clock; tests of trading windows set `trading.windows` themselves.
-    shipped = load_settings(local=False)
-    return shipped.model_copy(
-        update={"trading": shipped.trading.model_copy(update={"windows": ()})}
-    )
+    return load_settings(local=False)
 
 
 @pytest.fixture

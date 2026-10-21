@@ -67,6 +67,10 @@ class TimeframeState(BaseModel):
     trend: Literal["up", "down", "flat"] | None = None
     swing_high: float | None = None  # nearest fractal high above the close (recent bars)
     swing_low: float | None = None  # nearest fractal low below the close
+    stoch_k: float | None = None  # Stochastic(5, 3, 3)
+    stoch_d: float | None = None
+    sar: float | None = None  # Parabolic SAR(0.02, 0.2)
+    sar_up: bool | None = None  # SAR below price (uptrend)
     bars: int = 0
 
 
