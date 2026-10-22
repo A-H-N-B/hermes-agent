@@ -10,6 +10,8 @@ collectors (async, 1 per sumber) ─► normalizer ─► dedup/cluster ─► R
       ─► prefilter (regex, <10 ms) ─┬─► fast path: parser angka rilis + playbook ─► FLASH
                                     └─► LLM triage (Opus 5.5, effort low) ─► deep analysis (Opus 5.5, effort high, impact ≥ 3)
 market context (tick, candle, DXY, yield, teknikal, kalender) ─► signal engine ─► Telegram / dashboard / paper tracker
+   ├─ pasar penggerak dari MT5 (ADR-018) + fundamental harian (ADR-019) ─► skor makro M
+   └─ statistik chart + peluang TP1/SL & EV (ADR-020) ─► gerbang EV, brief komite AI (ADR-021)
 scheduler: kalender, playbook T-60, outlook per jam, brief sesi, laporan
 ```
 
@@ -243,31 +245,137 @@ deep analysis LLM di latar belakang (`--llm`) tetap berjalan di waktu nyata. Loo
 memakai `Clock.wait` dan menunggu satu periode sebelum siklus pertama. Di produksi artinya siklus
 pertama bergeser 5–30 detik, tanpa efek lain.
 
+### ADR-018 Pasar penggerak emas dari terminal MT5 — Diterapkan
+
+Emas bereaksi dalam hitungan menit terhadap dolar, yield AS, dan selera risiko, dan bergerak
+bersama perak. Kutipan broker sendiri adalah sumber gratis tercepat untuk semua itu, jadi
+`market/cross_assets.py` membaca setiap instrumen terkait yang ada di broker, per menit:
+
+- **Nama simbol dicari sendiri** (`resolve_symbols`): Market Watch didahulukan, akhiran broker
+  (`m`, `.r`, `.cash`, `pro`, ...) dikenali, `market.mt5_symbols` menimpa bila nama broker aneh.
+- **DXY dari pasangan FX broker** dengan bobot ICE. Bila broker tidak punya keenamnya, indeks
+  parsial (EURUSD wajib) dengan keranjang tetap begitu terbaca, supaya levelnya tidak melompat
+  saat satu pasangan muncul/hilang. Indeks parsial hanya sebanding dalam gerak, bukan level.
+- **Futures obligasi dibalik** (kutipan "10 tahun" > 20 adalah harga, bukan yield) supaya
+  arahnya mengikuti yield.
+- Per pasar: perubahan 15 mnt/1 j/1 h/5 h, **z-score** gerak 15 mnt dan 1 jam terhadap gerak
+  sepanjang yang sama di riwayatnya, dan **korelasi return 5 menit dengan emas** selama
+  beberapa hari. Korelasi itu disusutkan ke hubungan yang lazim (bobot prior 150 pasang), lalu
+  menentukan seberapa besar pasar itu dihitung sekarang: hubungan yang putus memudar sendiri,
+  dan aset tanpa aturan tetap (saham) hanya dihitung bila datanya menunjukkan hubungan.
+- `usd_source: auto` memakai DXY broker bila MT5 ada, selain itu EURUSDT Binance. Sebelumnya
+  bawaannya EURUSDT, yang bisa terblokir di Indonesia sehingga skor makro kosong.
+
+Skor makro M = rata-rata berbobot pengaruh semua pasar yang ada (DXY 0,40, yield 10 th 0,20,
+USDJPY 0,10, perak 0,10, S&P 500 0,08, VIX 0,07, minyak 0,05, masing-masing dikali relevansinya)
+ditambah bias fundamental harian (0,15). Bobot ini prior, bukan hasil fit; halaman Performa dan
+`calibrate` mengukur apakah M layak bobotnya.
+
+### ADR-019 Fundamental harian — Diterapkan, sumber eksternal menunggu verifikasi di laptop
+
+Penggerak lambat yang tidak terlihat di chart menit dirangkum menjadi satu bias harian di
+[-1, 1] (`fundamentals/`), tiap faktor dengan satu kalimat penjelasan:
+
+| Faktor | Sumber | Bobot prior |
+|---|---|---|
+| Yield riil AS 10 th (TIPS), 5 sesi | Treasury AS (CSV harian, publik) | 0,25 |
+| Yield AS 2 th (arah The Fed) | Treasury AS | 0,20 |
+| Dolar 5 hari | DXY broker (ADR-018) | 0,15 |
+| Breakeven 10 th (nominal − riil) | Treasury AS | 0,10 |
+| Posisi managed money futures emas COMEX | CFTC COT (Socrata, publik) | 0,10 |
+| Kepemilikan ETF GLD, 20 sesi | SPDR (lihat di bawah) | 0,10 |
+| Kejutan data AS 30 hari (paruh waktu 7 hari) | parser rilis program sendiri | 0,07 |
+| Panas berita geopolitik 24 j vs rata-rata 14 hari | analisis berita program sendiri | 0,03 |
+
+- COT: long yang padat (15 % teratas 3 tahun) memperingatkan shake-out, short padat
+  memperingatkan squeeze; di antaranya perubahan mingguan menunjukkan arah spekulan.
+- Faktor tanpa data dihitung netral (0), bukan dianggap sama dengan rata-rata faktor lain: dua
+  faktor kecil tidak boleh berbicara atas nama yield dan dolar yang datanya belum ada. Nama
+  faktor yang kosong tampil di dashboard. Data lama yang terakhir bagus tetap dipakai sampai
+  unduhan berikutnya berhasil.
+- **Gerbang sumber tetap berlaku** (ADR-003): hanya sumber `verified` yang diunduh. Treasury dan
+  CFTC adalah data publik pemerintah AS; installer dan updater mengujinya dari laptop pengguna dan
+  menandai yang lolos. GLD tidak ditandai otomatis: syarat situs SPDR versi negara lain melarang
+  penyalinan tanpa izin tertulis dan versi AS-nya belum bisa dibaca dari lingkungan build, jadi
+  pengguna memutuskan sendiri setelah membaca syaratnya.
+- URL Treasury memuat `${YEAR}` (diisi program); di awal Januari file tahun lalu ikut dibaca.
+
+### ADR-020 Statistik chart, peluang TP1 sebelum SL, dan gerbang EV — Diterapkan
+
+Indikator klasik (EMA, RSI, BB) tidak mengatakan apakah sebuah gerak lebih dari kebetulan.
+`market/quant.py` menambahkan ukuran yang bisa diuji terhadap random walk:
+
+- **Volatilitas GARCH(1,1)** (maximum likelihood, variance targeting; EWMA bila fit gagal):
+  volatilitas mengelompok, jadi sigma beberapa bar ke depan diproyeksikan, bukan rata-rata lama.
+- **Rezim** dari efficiency ratio Kaufman, eksponen Hurst, ADX, dan persentil volatilitas.
+  Ambangnya dikalibrasi pada random walk: "trending" muncul ±5 % dan "ranging" ±7 % pada data
+  acak, sementara data yang benar-benar mean-reverting terbaca ranging 98 % dan data dengan drift
+  terbaca trending 62 % (test kalibrasi menjaganya).
+- **Filter Kalman pada drift**: t-statistiknya dikalibrasi sehingga |t| ≥ 2 hanya ±5 % pada
+  random walk (versi pertama 66 %, terlalu percaya diri, diperbaiki sebelum dipakai). Vote
+  per-TF hanya menghitung Kalman bila |t| ≥ 2, dan MACD lewat tanda histogramnya.
+- **Peluang TP1 sebelum SL** (`signals/odds.py`): gerak Brown dengan sigma chart dan drift yang
+  hanya bukan nol bila keunggulan di chart itu sudah terbukti (batas bawah Wilson akurasi
+  walk-forward > 50 %, drift = sigma × InvNorm(p)). Monte Carlo antitetik selama masa berlaku
+  sinyal memberi TP1 dulu / SL dulu / tidak tersentuh; TP2 setelah TP1 dari rumus first-passage.
+  Tanpa bukti keunggulan, target 1R adalah lempar koin dikurangi spread: jujur.
+- **Catatan setup** (`signals/setups.py`): setiap kandidat masa lalu di chart itu diputar ulang
+  satu trade sekali jalan (stop dihitung lebih dulu bila TP dan SL tersentuh di bar yang sama).
+  Model dihitung setara 20 setup (prior Dirichlet): dengan sedikit catatan model yang bicara,
+  dengan banyak catatan, rekamnya.
+- **EV dalam R** = TP1 × (porsi TP1 × R1 + sisa × R2 × peluang runner) − SL − spread/risiko.
+  **Gerbang EV**: bila seluruh pita 95 % EV negatif dengan ≥ `signal_engine.ev_gate_min_setups`
+  (30) setup tercatat, sinyal menunggu ("setup serupa di M15 historis rugi"). Peluang dan EV
+  tampil di sinyal Telegram, kartu Live, dan brief komite AI.
+
+### ADR-021 Komite keputusan dengan Claude Fable 5.1 — Diterapkan
+
+- Keputusan akhir (setuju atau TUNGGU) dijawab tiga suara paralel: **Fable 5.1** (`llm.desk`,
+  model Anthropic paling mampu, $10/$50 per juta token) dan dua **Opus 5.5** (`llm.desk_second`).
+  Dua model berbeda membuat kesalahannya lebih independen dibanding tiga sampel dari satu model,
+  dan biayanya separuh tiga suara Fable.
+- Suara Fable dihitung 2× dan mayoritas berbobot harus lebih dari separuh: trade lolos hanya bila
+  Fable setuju **dan** minimal satu Opus setuju. Bila Fable gagal (akses, gangguan), dua Opus
+  harus sepakat. Teks hitungan ("1/3 suara, suara Fable 5.1 dihitung 2×") tampil hanya bila bobot
+  berbeda, supaya "1/3" yang menahan tidak membingungkan.
+- Brief kini memuat peluang TP1/SL dan EV (ADR-020), statistik tiap timeframe (GARCH, rezim,
+  Kalman t, ADX, MACD), pasar penggerak (ADR-018), dan fundamental harian (ADR-019). Aturan
+  prompt baru: EV yang seluruh pita 95 %-nya negatif adalah alasan kuat untuk TUNGGU; pasar
+  terkait yang searah menguatkan dan gerak kuat yang berlawanan adalah risiko; melawan bias
+  fundamental yang kuat butuh bukti intraday lebih kuat; momentum di rezim sideways atau sangat
+  volatil lebih sering gagal.
+- Fable 5.1 adalah *Covered Model*: retensi data 30 hari wajib (organisasi ZDR ditolak). Isi
+  permintaan hanya berita publik dan angka pasar.
+
 ## Estimasi biaya LLM (untuk Q4)
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):
 
 | Model | Input | Output | Tulis cache (5 mnt) | Baca cache |
 |---|---|---|---|---|
-| Opus 5.5 (semua rute) | $4 | $20 | $5 | $0,20 |
+| Fable 5.1 (suara utama komite keputusan) | $10 | $50 | $12,50 | $0,25 |
+| Opus 5.5 (semua rute lain + 2 suara komite) | $4 | $20 | $5 | $0,20 |
 | Opus 5 / Opus 4.8 (hanya saat fallback refusal) | $5 | $25 | $6,25 | $0,50 |
 
 Asumsi berikut harus **diganti dengan data `llm_usage` nyata**. Output sudah termasuk thinking,
-yang selalu aktif di Opus 5.5 dan makin panjang pada effort lebih tinggi:
+yang selalu aktif di Opus 5.5 dan Fable 5.1 dan makin panjang pada effort lebih tinggi:
 
 | Tugas | Volume/hari | Token per panggilan (cache / baru / output+thinking) | Biaya/hari |
 |---|---|---|---|
 | Triage berita biasa (`triage`, effort low) | 550 cluster | 1,2k / 0,7k / 0,65k | ±$8,80 |
 | Triage rilis data & berita dampak ≥ 4 (`triage_high`, effort medium) | 50 | 1,2k / 0,7k / 2k | ±$2,20 |
 | Deep (effort high) | 40 | 0,9k / 3k / 6k | ±$5,30 |
-| Outlook per jam (effort medium) | 24 | – / 5k / 5k | ±$2,90 |
+| Narasi outlook per jam (effort low; tabelnya tidak memakai AI) | 24 | – / 5k / 2k | ±$1,45 |
 | Brief harian (effort high) | 1 | – / 30k / 8k | ±$0,30 |
-| Keputusan akhir sinyal (desk, effort high, 3 suara paralel) | ≤ 48 review = ≤ 144 panggilan (biasanya < 10 review) | 1,4k / 6k / 3k | ±$0,25 per review: ≤ ±$12 (biasanya ±$2,50) |
+| Keputusan akhir sinyal (komite, effort high): 1 suara Fable 5.1 | ≤ 30 review (biasanya < 10) | 1,9k / 3k / 5k | ±$0,28 per review |
+| … dan 2 suara Opus 5.5 paralel | 2 per review | 1,9k / 3k / 3,5k | ±$0,17 per review; komite **±$0,45 per review: ≤ ±$13,50 (biasanya ±$4,50)** |
 | Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 1–1,5k | ±$0,60 |
-| **Total tanpa rem, hari ramai (desk ±10 review)** | | | **±$23/hari** |
+| **Total tanpa rem, hari ramai (komite ±10 review)** | | | **±$23/hari** |
 
 Kolom cache memakai ukuran system prompt + KB yang diukur (triage ±4.400 karakter, deep ±3.300,
-desk ±5.100). Prompt outlook dan brief di bawah minimum cache 512 token, jadi tidak di-cache.
+desk ±6.600). Brief komite yang terisi penuh (8 berita dengan analisis mendalam, 5 timeframe,
+7 pasar penggerak, 8 faktor fundamental, peluang) diukur ±7.700 karakter. Prompt outlook dan
+brief harian di bawah minimum cache 512 token, jadi tidak di-cache.
 
 `budget.llm_daily_usd` (bawaan **$20**) adalah plafon keras per hari WIB. Setiap panggilan lebih
 dulu mencatat biaya terburuknya (seluruh prompt dihitung sebagai tulis cache + `max_tokens`
@@ -276,16 +384,16 @@ hari itu. Catatan sementara itu diganti biaya nyata saat panggilan selesai. Kare
 tabel bersama, panggilan yang berjalan bersamaan, dari proses mana pun, tidak bisa bersama-sama
 melewati plafon. Panggilan rutin (berita biasa, narasi outlook, laporan, deep untuk dampak 3)
 berhenti di `100 − budget.priority_reserve_pct` % (bawaan 75 % = $15). Sisanya hanya untuk
-keputusan sinyal (desk Opus) dan berita berdampak tinggi (rilis data, dampak ≥ 4). Setelah itu
+keputusan sinyal (komite AI) dan berita berdampak tinggi (rilis data, dampak ≥ 4). Setelah itu
 berita biasa memakai aturan sampai 00:00 WIB, dan setelah plafon tercapai sinyal keluar tanpa
 review AI (ditandai di setiap sinyal). Kedua peristiwa itu dikirim sebagai alert sekali per hari.
 Panggilan yang timeout dicatat tanpa biaya, karena klien tidak tahu apa yang ditagih server untuk
 panggilan yang ditinggalkannya. Karena itu pasang juga *spend limit* bulanan di Claude Console
 (mis. $600) sebagai pengaman kedua.
 
-Uang ekstra dipakai untuk akurasi di tiga tempat: (1) desk meminta `llm.desk_votes` (3) jawaban
-Opus yang independen secara paralel dan mengikuti mayoritas (seri = WAIT), jadi satu sampel yang
-kebetulan meleset tidak bisa mengirim atau menahan trade sendirian; (2) rilis data dan berita
+Uang ekstra dipakai untuk akurasi di tiga tempat: (1) keputusan akhir dijawab komite tiga suara
+paralel, Fable 5.1 (dihitung 2×) dan dua Opus 5.5 (ADR-021), jadi satu jawaban yang kebetulan
+meleset tidak bisa mengirim trade sendirian; (2) rilis data dan berita
 yang oleh aturan sudah dinilai dampak ≥ 4 di-triage dengan effort medium (`triage_high`), karena
 skor berita paling bergantung pada pembacaan itu; (3) brief desk kini memuat hasil analisis
 mendalam (arah, keyakinan, narasi, risiko) di samping arah dan keyakinan triage, jadi keputusan

@@ -22,18 +22,44 @@ class SignalComponents(BaseModel):
 
 
 class SignalReview(BaseModel):
-    """Opus 5.5's final say on a signal (signals/desk.py). `model` None: the AI could not review
-    it (outage, budget, daily cap) and the engine decided alone; `note` says why."""
+    """The AI committee's final say on a signal (signals/desk.py). `model` (the lead answer's)
+    None: the AI could not review it (outage, budget, daily cap) and the engine decided alone;
+    `note` says why."""
 
     model: str | None
+    models: list[str] = Field(default_factory=list)  # every model that answered
     confidence: int | None = None
     timeframe: str | None = None  # the chart the AI chose
     reasons: list[str] = Field(default_factory=list)
     caution: str | None = None
     note: str | None = None
-    votes: int | None = None  # independent Opus answers counted
+    votes: int | None = None  # independent committee answers counted
     agree: int | None = None  # how many of them back this decision
     dissent: str | None = None  # the strongest opposing answer's main reason
+
+
+class TradeOdds(BaseModel):
+    """Chances of the trade plan within its validity (signals/odds.py): the volatility model
+    blended with how past setups like it ended. Probabilities, not promises."""
+
+    tp1: float  # TP1 reached before the stop
+    stop: float  # the stop first
+    neither: float  # neither before the signal expires
+    tp1_ci95: tuple[float, float] | None = None
+    tp2_after_tp1: float  # the runner reaching TP2 before breakeven, once TP1 is hit
+    ev_r: float  # expected result per trade in R (after the spread)
+    ev_r_ci95: tuple[float, float] | None = None
+    model_tp1: float  # the volatility model alone
+    setups: int = 0  # past setups behind the blend
+    setups_tp1: int = 0
+    setups_stop: int = 0
+    setups_neither: int = 0
+    drift_basis: str  # what the model assumes about direction, in words
+    sigma: float  # volatility per bar used ($)
+    sigma_model: str  # garch | ewma | atr
+    horizon_bars: int
+    cost_r: float  # the spread as a share of the risk
+    note: str  # one line for people
 
 
 class Signal(BaseModel):
@@ -78,8 +104,9 @@ class Signal(BaseModel):
     trigger_source: str | None = None
     trigger_category: str | None = None  # news category of the trigger (per-category stats)
     timeframe: str | None = None  # chart the levels, validity and entry timing were sized on
-    timeframe_reason: str | None = None  # why that chart (signals/timeframe.py, or Opus)
-    review: SignalReview | None = None  # Opus 5.5's final decision; None = engine alone
+    timeframe_reason: str | None = None  # why that chart (signals/timeframe.py, or the AI)
+    review: SignalReview | None = None  # the AI committee's final say; None = engine alone
+    odds: TradeOdds | None = None  # chances of TP1 / stop and the expected value
 
 
 class SignalState(BaseModel):

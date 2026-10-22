@@ -16,7 +16,15 @@ from gold_agent.models.common import (
     Priority,
     utc_now,
 )
-from gold_agent.models.market import Candle, Level, MarketContext, Tick, TimeframeState
+from gold_agent.models.fundamentals import Factor, FundamentalSnapshot
+from gold_agent.models.market import (
+    Candle,
+    CrossAsset,
+    Level,
+    MarketContext,
+    Tick,
+    TimeframeState,
+)
 from gold_agent.models.news import NewsCluster, NewsItem, PrefilterResult
 from gold_agent.models.notify import Notification
 from gold_agent.models.ops import Alert, LatencyStage, SourceHealth
@@ -28,6 +36,7 @@ from gold_agent.models.signals import (
     SignalOutcome,
     SignalReview,
     SignalState,
+    TradeOdds,
 )
 
 __all__ = [
@@ -37,9 +46,12 @@ __all__ = [
     "CalendarEvent",
     "Candle",
     "Category",
+    "CrossAsset",
     "DeepAnalysis",
     "Direction",
     "EventType",
+    "Factor",
+    "FundamentalSnapshot",
     "LatencyStage",
     "Level",
     "MarketContext",
@@ -62,6 +74,7 @@ __all__ = [
     "SurpriseInfo",
     "Tick",
     "TimeframeState",
+    "TradeOdds",
     "TriageResult",
     "utc_now",
 ]

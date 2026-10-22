@@ -2,7 +2,9 @@
 
 The overlays use the same numpy indicators as the market service (EMA, Bollinger, RSI), computed on
 extra warm-up bars so EMA200 is defined from the first bar shown. The per-timeframe BUY/SELL read
-is `market/reads.py`, shown beside the agent's signal; it never creates a signal.
+is `market/reads.py` (with the chart statistics of market/quant.py), shown beside the agent's
+signal; it never creates a signal. The summary also carries the related markets read from the
+broker, the macro score they make, and the day's fundamentals.
 """
 
 from __future__ import annotations
@@ -14,7 +16,8 @@ from typing import Any
 from gold_agent.market import indicators as ind
 from gold_agent.market.levels import nearest_above, nearest_below
 from gold_agent.market.reads import SAR, STOCH, timeframe_read
-from gold_agent.models import Candle, MarketContext
+from gold_agent.models import Candle, FundamentalSnapshot, MarketContext
+from gold_agent.signals.scoring import macro_component, macro_parts
 
 JSON = dict[str, Any]
 WARMUP_BARS = 200  # EMA200 needs this many bars before its first value
@@ -56,9 +59,39 @@ def indicator_series(bars: Sequence[Candle], keep: int) -> list[JSON]:
     return rows
 
 
-def indicator_summary(context: MarketContext | None, extras: dict[str, JSON] | None = None) -> JSON:
+def drivers(context: MarketContext, fundamentals: FundamentalSnapshot | None) -> JSON:
+    """Related markets, the macro score they make (M), and the day's fundamentals."""
+    value, available = macro_component(context)
+    parts = macro_parts(context)
+    total = sum(weight for _, weight, _ in parts) or 1.0
+    return {
+        "cross": [asset.model_dump(mode="json") for asset in context.cross.values()],
+        "macro": {
+            "value": round(value, 3) if available else None,
+            "parts": [
+                {"label": label, "pull": round(weight * pull / total, 3)}
+                for label, weight, pull in sorted(parts, key=lambda p: -abs(p[1] * p[2]))
+            ],
+        },
+        "fundamentals": fundamentals.model_dump(mode="json") if fundamentals else None,
+    }
+
+
+def indicator_summary(
+    context: MarketContext | None,
+    extras: dict[str, JSON] | None = None,
+    fundamentals: FundamentalSnapshot | None = None,
+) -> JSON:
     if context is None:
-        return {"timeframes": [], "overall": None, "levels": [], "vwap": None}
+        return {
+            "timeframes": [],
+            "overall": None,
+            "levels": [],
+            "vwap": None,
+            "cross": [],
+            "macro": {"value": None, "parts": []},
+            "fundamentals": fundamentals.model_dump(mode="json") if fundamentals else None,
+        }
     extras = extras or {}
     reads = [
         timeframe_read(context.timeframes[tf], extras.get(tf))
@@ -93,4 +126,5 @@ def indicator_summary(context: MarketContext | None, extras: dict[str, JSON] | N
         "vwap_is_twap": context.vwap_is_twap,
         "atr_m15": context.atr_m15,
         "dxy_z_1h": context.dxy_z_1h,
+        **drivers(context, fundamentals),
     }

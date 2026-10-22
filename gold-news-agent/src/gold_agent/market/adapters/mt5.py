@@ -197,7 +197,7 @@ class Mt5Adapter:
         return float(info.volume_step) if info else None
 
     def quotes(self, symbols: dict[str, str]) -> dict[str, float]:
-        """Mid prices for the DXY component pairs (logical name -> broker symbol)."""
+        """Mid prices of other instruments (logical name -> broker symbol)."""
         self._ensure()
         result: dict[str, float] = {}
         for logical, broker_symbol in symbols.items():
@@ -206,3 +206,26 @@ class Mt5Adapter:
             if tick is not None and tick.bid and tick.ask:
                 result[logical] = (float(tick.bid) + float(tick.ask)) / 2
         return result
+
+    def symbol_list(self) -> list[Any]:
+        """Every symbol the broker offers (for finding related markets by name)."""
+        self._ensure()
+        return list(self._mt5.symbols_get() or ())
+
+    @property
+    def gold_symbol(self) -> str:
+        return self._symbol
+
+    def closes(self, symbol: str, count: int) -> list[tuple[datetime, float]]:
+        """Minute closes of any symbol in UTC, oldest first; empty until the server offset is
+        known (a fresh gold tick reveals it)."""
+        if self._offset is None:
+            return []
+        self._ensure()
+        self._mt5.symbol_select(symbol, True)
+        rates = self._mt5.copy_rates_from_pos(symbol, self._mt5.TIMEFRAME_M1, 0, count)
+        if rates is None:
+            return []
+        return [
+            (server_to_utc(float(row["time"]), self._offset), float(row["close"])) for row in rates
+        ]

@@ -1,4 +1,4 @@
-"""Mandatory test (section 21): replay one whole recorded day end to end. About two minutes of
+"""Mandatory test (section 21): replay one whole recorded day end to end. About four minutes of
 processing, so it is marked slow: `uv run pytest -m slow`."""
 
 from __future__ import annotations

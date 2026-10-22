@@ -1,9 +1,11 @@
-"""Opus 5.5's final say on every signal: BUY / SELL / WAIT, and the chart to trade it on.
+"""The AI committee's final say on every signal: BUY / SELL / WAIT, and the chart to trade it on.
 
 The engine proposes a candidate: a direction from news + macro + technical + price, every hard
-filter passed, levels computed. Opus reviews the whole picture and decides: `llm.desk_votes`
-independent answers run in parallel and the majority wins (a tie holds), so one unlucky sample
-cannot send or block a trade alone. Guardrails keep that safe:
+filter passed, levels computed, its odds estimated. A committee reviews the whole picture in
+parallel: the lead (route `llm.desk`, Claude Fable 5.1) and `llm.desk_votes - 1` second
+opinions (route `llm.desk_second`, Opus 5.5). The lead's vote counts double and the weighted
+majority wins (a tie holds), so a trade needs the lead to approve and at least one other model
+to agree: one unlucky answer cannot send or block a trade alone. Guardrails keep that safe:
 
 * it may approve the engine's direction or WAIT, never flip it: an opposite call is held as WAIT,
   since no evidence the system computed produced that trade;
@@ -28,13 +30,16 @@ from pydantic import BaseModel, Field
 
 from gold_agent.analysis.prompts import untrusted
 from gold_agent.config import Settings
+from gold_agent.market.quant import REGIME_ID
 from gold_agent.models import (
     Analysis,
     CalendarEvent,
     Candle,
+    FundamentalSnapshot,
     MarketContext,
     Signal,
     SignalReview,
+    TimeframeState,
 )
 from gold_agent.signals.engine import TF_MINUTES, entry_timing
 from gold_agent.signals.forecast_score import wilson
@@ -44,6 +49,14 @@ from gold_agent.signals.timeframe import RANK, TfChoice, TfOption
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
 
 JSON = dict[str, Any]
+LEAD_WEIGHT = 2.0  # the lead model's vote (llm.desk) next to each second opinion's 1
+MODEL_NAMES = {
+    "claude-fable-5-1": "Fable 5.1",
+    "claude-opus-5-5": "Opus 5.5",
+    "claude-opus-5": "Opus 5",
+    "claude-opus-4-8": "Opus 4.8",
+    "claude-sonnet-5-5": "Sonnet 5.5",
+}
 KV_DESK = "desk_reviews"  # {"reviews": [...]}, newest last, for the Performa comparison
 KEEP_REVIEWS = 300
 COOLDOWN = timedelta(minutes=10)  # a WAIT stands this long ...
@@ -53,6 +66,18 @@ UNAVAILABLE_TTL = timedelta(minutes=5)  # then try the AI again
 TREND_ID = {"up": "naik", "down": "turun", "flat": "datar"}
 
 Reason = Annotated[str, Field(max_length=300)]
+
+
+def model_name(model: str | None) -> str:
+    return MODEL_NAMES.get(model or "", model or "AI")
+
+
+def desk_label(settings: Settings) -> str:
+    """Who decides, for people: "Fable 5.1 + Opus 5.5", or one name."""
+    names = [model_name(settings.llm.desk.model)]
+    if settings.llm.desk_votes > 1:
+        names.append(model_name(settings.llm.desk_second.model))
+    return " + ".join(dict.fromkeys(names))
 
 
 class DeskDecision(BaseModel):
@@ -78,6 +103,8 @@ class Verdict:
     votes: int = 1  # answers counted
     agree: int = 1  # answers backing `decision`
     dissent: str | None = None  # an approval's strongest opposing reason
+    models: tuple[str, ...] = ()  # every model that answered
+    doubled: str | None = None  # the lead whose double vote decided against the head count
 
     @property
     def approved(self) -> bool:
@@ -86,7 +113,10 @@ class Verdict:
     @property
     def count(self) -> str:
         """The tally for a message, e.g. " (2/3 suara)"; empty for a single answer."""
-        return f" ({self.agree}/{self.votes} suara)" if self.votes > 1 else ""
+        if self.votes <= 1:
+            return ""
+        doubled = f", suara {self.doubled} dihitung 2×" if self.doubled else ""
+        return f" ({self.agree}/{self.votes} suara{doubled})"
 
     def review(self, note: str | None = None) -> SignalReview:
         decided = self.decision != "UNAVAILABLE"
@@ -100,6 +130,7 @@ class Verdict:
             votes=self.votes if decided else None,
             agree=self.agree if decided else None,
             dissent=self.dissent,
+            models=list(self.models),
         )
 
     def to_json(self) -> JSON:
@@ -117,6 +148,7 @@ class Verdict:
             "votes": self.votes,
             "agree": self.agree,
             "dissent": self.dissent,
+            "models": list(self.models),
         }
 
 
@@ -128,7 +160,7 @@ def verify(
     model: str,
     at: datetime,
 ) -> Verdict:
-    """Apply the guardrails to what Opus answered."""
+    """Apply the guardrails to what one committee member answered."""
     reasons = tuple(text.strip() for text in value.reasons_id if text.strip())
     decision: Literal["BUY", "SELL", "WAIT"] = value.decision
     timeframe = value.timeframe if value.timeframe in choice.eligible else choice.tf
@@ -156,18 +188,24 @@ def tally(
     candidate: Signal,
     choice: TfChoice,
     at: datetime,
+    weights: Sequence[float] | None = None,
 ) -> Verdict:
-    """Opus's independent answers to one candidate (each already through `verify`) as one
-    verdict. The trade goes ahead only when more than half of the answers counted approve it (a
-    tie holds). The chart is the one most approving answers chose (a tie: the selector's pick if
-    tied, else the most confident answer's). Reasons come from the most confident answer on the
-    winning side, confidence is that side's mean, and an approval carries the strongest dissent.
-    `failures` are answers that never came (timeout, budget): they count for nothing."""
+    """The committee's answers to one candidate (each already through `verify`) as one
+    verdict. The trade goes ahead only when the approving answers carry more than half of the
+    weight counted (a tie holds); `weights` defaults to one each (the lead gets LEAD_WEIGHT).
+    The chart is the one most approving answers chose (a tie: the selector's pick if tied, else
+    the leading answer's). Reasons come from the lead when it is on the winning side, else from
+    the most confident answer there; confidence is that side's mean, and an approval carries the
+    strongest dissent. `failures` are answers that never came (timeout, budget): they count
+    for nothing."""
+    weight = list(weights) if weights is not None else [1.0] * len(votes)
     approving = [vote for vote in votes if vote.approved]
     holding = [vote for vote in votes if not vote.approved]
-    approved = 2 * len(approving) > len(votes)
+    approved = 2 * sum(w for w, v in zip(weight, votes, strict=True) if v.approved) > sum(weight)
     side, other = (approving, holding) if approved else (holding, approving)
-    lead = max(side, key=lambda vote: vote.confidence or 0)
+    heaviest = max(range(len(votes)), key=lambda i: weight[i])
+    weighted_lead = votes[heaviest] in side and weight[heaviest] > min(weight)
+    lead = votes[heaviest] if weighted_lead else max(side, key=lambda vote: vote.confidence or 0)
     chosen = Counter(vote.timeframe for vote in side if vote.timeframe)
     timeframe = lead.timeframe
     if chosen:
@@ -201,6 +239,8 @@ def tally(
         votes=len(votes),
         agree=len(side),
         dissent=dissent,
+        models=tuple(dict.fromkeys(vote.model for vote in votes if vote.model)),
+        doubled=model_name(lead.model) if weighted_lead and 2 * len(side) <= len(votes) else None,
     )
 
 
@@ -256,7 +296,7 @@ def first_touch(side: str, stop: float, target: float, bars: Sequence[Candle]) -
 
 
 def compare_reviews(reviews: Sequence[JSON], m1: Sequence[Candle], now: datetime) -> JSON:
-    """Approved candidates against those Opus held back, both scored the same way on M1 bars
+    """Approved candidates against those the AI held back, both scored the same way on M1 bars
     (TP1 before SL), so the page shows whether the AI's filter adds anything."""
     opens = [bar.open_time for bar in m1]
     counts: dict[str, Counter[str]] = {"approved": Counter(), "held": Counter()}
@@ -331,12 +371,78 @@ def _timeframe_row(option: TfOption, side: Side, context: MarketContext, setting
             f"RSI {_num(state.rsi14, '{:.0f}')}",
             f"Stoch {stoch}",
             f"SAR {sar}",
+            _statistics(state),
             f"timing: {timing}",
             plan,
             f"berlaku {engine.validity_bars * TF_MINUTES[tf]} mnt",
             f"akurasi sesi ini {_accuracy(option)}",
         ]
     )
+
+
+def _statistics(state: TimeframeState) -> str:
+    """The quant reads of one chart (market/quant.py) in one short field."""
+    macd = "-" if state.macd_hist is None else ("naik" if state.macd_hist > 0 else "turun")
+    vol = "-"
+    if state.sigma is not None:
+        pct = f", persentil {state.vol_pct:.0%}" if state.vol_pct is not None else ""
+        vol = f"{state.sigma:.2f}$/bar ({state.sigma_model}{pct})"
+    return (
+        f"rezim {REGIME_ID.get(state.regime or '', '-')} (ER {_num(state.efficiency)}, "
+        f"Hurst {_num(state.hurst)}, ADX {_num(state.adx, '{:.0f}')}) · MACD {macd} · "
+        f"tren Kalman t {_num(state.kalman_t, '{:+.1f}')} · volatilitas {vol}"
+    )
+
+
+def _cross_lines(context: MarketContext) -> list[str]:
+    lines = ["<lintas_aset>"]
+    for asset in context.cross.values():
+        moves = ", ".join(
+            f"{span} {_num(value, '{:+.2f}')}%"
+            for span, value in (
+                ("15m", asset.change_15m_pct),
+                ("1j", asset.change_1h_pct),
+                ("1h", asset.change_1d_pct),
+            )
+        )
+        lines.append(
+            f"- {asset.label} [{untrusted(asset.symbol, 40)}]: {moves} · "
+            f"z 1j {_num(asset.z_1h, '{:+.1f}')} · korelasi dengan emas {asset.corr:+.2f} "
+            f"(bobot kini {asset.relevance:.0%}) · tarikan ke emas {_num(asset.effect, '{:+.2f}')}"
+        )
+    if len(lines) == 1:
+        lines.append("- data pasar terkait (MT5) tidak tersedia")
+    lines.append("</lintas_aset>")
+    return lines
+
+
+def _fundamental_lines(snapshot: FundamentalSnapshot | None) -> list[str]:
+    if snapshot is None:
+        return ["<fundamental>data fundamental harian tidak tersedia</fundamental>"]
+    lines = [f"<fundamental>{snapshot.summary}"]
+    for factor in snapshot.factors:
+        lines.append(
+            f"- {factor.label}: {factor.value}"
+            + (f" ({factor.change})" if factor.change else "")
+            + f" → {factor.note} [tarikan {factor.effect:+.2f}, data {factor.as_of or '-'}]"
+        )
+    if snapshot.missing:
+        lines.append("- tanpa data: " + ", ".join(snapshot.missing))
+    lines.append("</fundamental>")
+    return lines
+
+
+def _odds_lines(candidate: Signal) -> list[str]:
+    odds = candidate.odds
+    if odds is None:
+        return ["<peluang>tidak bisa dihitung (volatilitas belum tersedia)</peluang>"]
+    band = f" (95%: {odds.ev_r_ci95[0]:+.2f}…{odds.ev_r_ci95[1]:+.2f}R)" if odds.ev_r_ci95 else ""
+    return [
+        f"<peluang>{odds.note}; EV{band}; TP2 setelah TP1 {odds.tp2_after_tp1:.0%}; "
+        f"model saja {odds.model_tp1:.0%}; {odds.drift_basis}; volatilitas {odds.sigma:.2f}$/bar "
+        f"({odds.sigma_model}) selama {odds.horizon_bars} candle; biaya spread {odds.cost_r:.2f}R"
+        "</peluang>"
+    ]
 
 
 def desk_brief(
@@ -350,8 +456,10 @@ def desk_brief(
     active: Signal | None,
     settings: Settings,
     now: datetime,
+    fundamentals: FundamentalSnapshot | None = None,
 ) -> str:
-    """Everything Opus needs, as tagged plain text (news text neutralised: it is data)."""
+    """Everything the committee needs, as tagged plain text (news text neutralised: it is
+    data)."""
     c = breakdown.components
     session = SESSION_LABEL_ID.get(context.session, context.session)
     lines = [
@@ -367,6 +475,7 @@ def desk_brief(
         f"harga {c.P:+.2f} (faktor sesi {c.session_factor:.2f})",
         "alasan mesin: " + "; ".join(candidate.top_reasons),
         "</kandidat>",
+        *_odds_lines(candidate),
     ]
     if active is not None:
         lines.append(
@@ -427,4 +536,6 @@ def desk_brief(
         f"{_num(context.us10y_change_1d, '{:+.2f}')}; riil Δ1d "
         f"{_num(context.real_yield_change_1d, '{:+.2f}')}</makro>"
     )
+    lines += _cross_lines(context)
+    lines += _fundamental_lines(fundamentals)
     return "\n".join(lines)

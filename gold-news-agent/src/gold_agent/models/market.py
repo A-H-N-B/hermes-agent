@@ -71,7 +71,45 @@ class TimeframeState(BaseModel):
     stoch_d: float | None = None
     sar: float | None = None  # Parabolic SAR(0.02, 0.2)
     sar_up: bool | None = None  # SAR below price (uptrend)
+    macd: float | None = None  # MACD(12, 26, 9)
+    macd_signal: float | None = None
+    macd_hist: float | None = None
+    adx: float | None = None  # ADX(14): trend strength, any direction
+    plus_di: float | None = None
+    minus_di: float | None = None
+    efficiency: float | None = None  # Kaufman efficiency ratio (20 bars), 0..1
+    hurst: float | None = None  # 0.5 random walk, > 0.5 trending, < 0.5 mean-reverting
+    kalman_slope: float | None = None  # Kalman trend slope, price units per bar
+    kalman_t: float | None = None  # slope / its standard error
+    sigma: float | None = None  # next bar's volatility in price units (GARCH, else EWMA)
+    sigma_model: Literal["garch", "ewma"] | None = None
+    vol_persistence: float | None = None  # GARCH alpha + beta
+    vol_pct: float | None = None  # current 20-bar volatility within recent history, 0..1
+    regime: Literal["trending", "ranging", "volatile", "normal"] | None = None
     bars: int = 0
+
+
+class CrossAsset(BaseModel):
+    """A market that moves gold, read from the broker (market/cross_assets.py)."""
+
+    key: str  # DXY, US10Y, USDJPY, XAGUSD, WTI, US500, VIX
+    label: str
+    symbol: str  # the broker's name, or how a synthetic value was built
+    note: str | None = None
+    value: float | None = None
+    change_15m_pct: float | None = None
+    change_1h_pct: float | None = None
+    change_1d_pct: float | None = None
+    change_5d_pct: float | None = None
+    z_15m: float | None = None  # this move vs all 15-minute moves of the last days
+    z_1h: float | None = None
+    corr_measured: float | None = None  # 5-minute return correlation with gold, last days
+    corr: float  # the same, shrunk towards the usual relationship
+    pairs: int = 0  # return pairs behind corr_measured
+    relevance: float  # 0-1: how much it counts now
+    effect: float | None = None  # its pull on gold now, -1 (bearish) .. +1 (bullish)
+    weight: float  # its share of the intraday macro score
+    why: str
 
 
 class MarketContext(BaseModel):
@@ -112,4 +150,7 @@ class MarketContext(BaseModel):
     volume_step: float | None = None
     weekend_drift: float | None = None  # proxy move since Friday's close (Monday gap estimate)
     weekend_reference: float | None = None
+    cross: dict[str, CrossAsset] = Field(default_factory=lambda: dict[str, CrossAsset]())
+    fundamental_bias: float | None = None  # daily fundamentals, -1 (bearish) .. +1 (bullish)
+    fundamental_as_of: str | None = None
     notes: list[str] = Field(default_factory=list)

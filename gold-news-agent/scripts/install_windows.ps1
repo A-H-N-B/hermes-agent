@@ -23,7 +23,7 @@ function Install-GoldNewsAgent {
         'fed_press_all', 'fed_press_monetary', 'fed_speeches', 'bls_latest', 'bea_releases',
         'ecb_press', 'boj_whatsnew', 'google_news_gold', 'google_news_fed', 'cnbc_economy',
         'gdelt_gold', 'cftc_cot_gold', 'bls_schedule_ics', 'treasury_auctions_upcoming',
-        'fomc_calendar_page'
+        'fomc_calendar_page', 'treasury_yield_curve', 'treasury_real_yield_curve'
     )
 
     function Step($n, $text) { Write-Host ""; Write-Host "=== LANGKAH $n/9: $text ===" -ForegroundColor Cyan }

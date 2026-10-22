@@ -92,7 +92,7 @@ def _blackout(events: Sequence[CalendarEvent], now: datetime, settings: Settings
 def _timeframe(
     state: SignalState | None, active: Signal | None, choice: JSON | None
 ) -> JSON | None:
-    """The chart trading uses now and why (signals/timeframe.py, or Opus's pick for the active
+    """The chart trading uses now and why (signals/timeframe.py, or the AI's pick for the active
     signal), with the per-timeframe table the choice was made from."""
     options = (choice or {}).get("options")
     if active is not None and active.timeframe:

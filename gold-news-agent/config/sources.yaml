@@ -251,18 +251,48 @@ sources:
     tos_note: Free tier 60 calls/min; personal use.
 
   - id: cftc_cot_gold
-    name: CFTC Commitments of Traders — COMEX gold (legacy, futures only)
+    name: CFTC Commitments of Traders — COMEX gold (disaggregated, futures only)
     kind: macro
     type: json
-    url: https://publicreporting.cftc.gov/resource/6dca-aqww.json?cftc_contract_market_code=088691&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=4
-    parse: { items: "", time_field: report_date_as_yyyy_mm_dd, time_format: iso, id_field: id }
+    # Three years of weekly managed-money positions; the parser also reads the legacy report.
+    url: https://publicreporting.cftc.gov/resource/72hh-3qpy.json?cftc_contract_market_code=088691&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=160
+    parse: { items: "", time_field: report_date_as_yyyy_mm_dd, time_format: iso }
     tier: 3
-    poll_seconds: 3600
+    poll_seconds: 21600
     reliability: 1.0
     enabled: true
     official: true
     status: candidate
-    tos_note: Weekly positioning (Tuesday data, released Friday 15:30 New York). Dataset id to verify.
+    tos_url: https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm
+    tos_note: US government public data (Socrata open data); weekly, Tuesday positions released Friday 15:30 New York.
+
+  - id: treasury_yield_curve
+    name: US Treasury daily par yield curve (2Y, 10Y)
+    kind: macro
+    type: csv
+    url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${YEAR}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${YEAR}&page&_format=csv
+    tier: 3
+    poll_seconds: 21600
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates
+    tos_note: US government public data, end of day (~15:30 New York); no key. ${YEAR} is filled by the program.
+
+  - id: treasury_real_yield_curve
+    name: US Treasury daily par real yield curve (10Y TIPS)
+    kind: macro
+    type: csv
+    url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${YEAR}/all?type=daily_treasury_real_yield_curve&field_tdr_date_value=${YEAR}&page&_format=csv
+    tier: 3
+    poll_seconds: 21600
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates
+    tos_note: Same terms as treasury_yield_curve. Breakeven inflation = nominal 10Y minus real 10Y.
 
   - id: spdr_gld_holdings
     name: SPDR Gold Shares (GLD) daily holdings

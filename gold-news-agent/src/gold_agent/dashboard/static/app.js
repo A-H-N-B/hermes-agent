@@ -66,6 +66,30 @@ async function api(path) {
 
 // ------------------------------------------------------------------ live page
 
+const MODEL_NAMES = {
+  "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-opus-5": "Opus 5",
+  "claude-opus-4-8": "Opus 4.8", "claude-sonnet-5-5": "Sonnet 5.5",
+};
+const modelName = (model) => MODEL_NAMES[model] || model || "AI";
+
+// The plan's chances within its validity (signals/odds.py): a three-part bar and one line.
+function oddsBlock(o) {
+  const bar = el("div", { class: "odds-bar", title: "hijau TP1 dulu · merah SL dulu · abu-abu tidak tersentuh" });
+  for (const [cls, value] of [["tp", o.tp1], ["sl", o.stop], ["none", o.neither]]) {
+    const part = el("span", { class: cls });
+    part.style.width = `${Math.max(0, value * 100).toFixed(1)}%`; // CSSOM: the CSP forbids inline styles
+    bar.append(part);
+  }
+  const band = o.ev_r_ci95 ? ` (95%: ${signed(o.ev_r_ci95[0])}…${signed(o.ev_r_ci95[1])}R)` : "";
+  const basis = o.setups ? `model + ${o.setups} setup serupa di masa lalu` : "model volatilitas (belum ada setup historis)";
+  return [
+    el("p", { class: "odds" }, el("b", { text: `🎲 Peluang TP1 sebelum SL ${pct(o.tp1)}` }),
+      ` · SL dulu ${pct(o.stop)} · tidak tersentuh ${pct(o.neither)} · EV ${signed(o.ev_r)}R${band}`),
+    bar,
+    el("p", { class: "muted", text: `${basis} · ${o.drift_basis} · volatilitas ${num(o.sigma)}$/candle (${o.sigma_model})` }),
+  ];
+}
+
 function levelBox(label, value) {
   return el("div", {}, el("span", { text: label }), el("b", { text: value }));
 }
@@ -112,7 +136,8 @@ function renderSignalCard(payload) {
     const review = active.review;
     if (review && review.model) {
       const count = review.votes > 1 ? ` · ${review.agree}/${review.votes} suara` : "";
-      card.append(el("p", { class: "ai-review" }, el("b", { text: `🤖 Diputuskan Opus 5.5${count} · chart ${active.timeframe} · confidence AI ${review.confidence ?? "–"}/100` })));
+      const names = [...new Set((review.models && review.models.length ? review.models : [review.model]).map(modelName))].join(" + ");
+      card.append(el("p", { class: "ai-review" }, el("b", { text: `🤖 Diputuskan AI (${names})${count} · chart ${active.timeframe} · confidence AI ${review.confidence ?? "–"}/100` })));
       const why = el("ul", { class: "notes" });
       for (const reason of review.reasons) why.append(el("li", { text: reason }));
       card.append(why);
@@ -122,6 +147,7 @@ function renderSignalCard(payload) {
     } else if (review) {
       card.append(el("p", { class: "muted", text: `⚙️ Tanpa review AI: ${review.note || "AI tidak tersedia"}` }));
     }
+    if (active.odds) card.append(...oddsBlock(active.odds));
     const reasons = el("ul", { class: "notes" });
     for (const reason of active.top_reasons) reasons.append(el("li", { text: reason }));
     card.append(el("h2", { text: "Alasan" }), reasons);
@@ -453,9 +479,15 @@ function renderIndicatorSummary(summary) {
       el("td", { class: "num", text: r.stoch_k === null || r.stoch_k === undefined ? "–" : `${num(r.stoch_k, 0)}/${num(r.stoch_d, 0)}` }),
       el("td", { class: r.sar_up === null || r.sar_up === undefined ? "muted" : r.sar_up ? "verdict-BUY" : "verdict-SELL",
         text: r.sar === null || r.sar === undefined ? "–" : `${num(r.sar)} ${r.sar_up ? "▲" : "▼"}` }),
+      el("td", { class: "num", text: r.macd_hist === null || r.macd_hist === undefined ? "–" : r.macd_hist > 0 ? "▲" : "▼" }),
+      el("td", { class: "num", text: num(r.adx, 0) }),
+      el("td", { class: "num", text: signed(r.kalman_t, 1) }),
+      el("td", { text: REGIME_TEXT[r.regime] || "–" }),
       el("td", { class: "muted", text: r.reasons.join(", ") })));
   }
-  if (!summary.timeframes.length) body.append(el("tr", {}, el("td", { colspan: 11, class: "muted", text: "data indikator belum tersedia" })));
+  if (!summary.timeframes.length) body.append(el("tr", {}, el("td", { colspan: 15, class: "muted", text: "data indikator belum tersedia" })));
+  renderTfDetail(summary.timeframes);
+  renderDrivers(summary);
   const overall = $("#ind-overall");
   overall.textContent = summary.overall ? `${summary.overall.verdict} (${summary.overall.buy} BUY · ${summary.overall.sell} SELL dari ${summary.overall.of})` : "";
   overall.className = `badge ${summary.overall ? summary.overall.verdict : ""}`;
@@ -466,6 +498,137 @@ function renderIndicatorSummary(summary) {
   if (summary.atr_m15 !== null && summary.atr_m15 !== undefined) extra.push(`ATR M15 ${num(summary.atr_m15)}`);
   if (summary.dxy_z_1h !== null && summary.dxy_z_1h !== undefined) extra.push(`DXY z-1j ${signed(summary.dxy_z_1h)}`);
   $("#ind-extra").textContent = extra.join(" · ");
+}
+
+// ------------------------------------------------------------------ detail per timeframe
+// One small card per timeframe: each indicator's value with a coloured one-word meaning, so the
+// numbers are there for those who want them and the meaning for everyone else.
+const REGIME_TEXT = { trending: "tren kuat", ranging: "sideways", volatile: "sangat volatil", normal: "normal" };
+
+function readRow(label, value, meaning, tone) {
+  return el("div", { class: "read-row" }, el("span", { class: "read-label", text: label }),
+    el("span", { class: "read-value", text: value }), el("span", { class: `tone ${tone || ""}`, text: meaning }));
+}
+
+function trendRead(r) {
+  if (r.ema20 === null || r.ema50 === null || r.ema20 === undefined) return ["–", "belum ada data", ""];
+  const up = r.ema20 > r.ema50 && r.close > r.ema50;
+  const down = r.ema20 < r.ema50 && r.close < r.ema50;
+  return [`EMA20 ${r.ema20 > r.ema50 ? ">" : "<"} EMA50`, up ? "naik" : down ? "turun" : "datar", up ? "up" : down ? "down" : ""];
+}
+
+function rsiRead(v) {
+  if (v === null || v === undefined) return ["–", "–", ""];
+  if (v >= 70) return [num(v, 0), "jenuh beli", "warn"];
+  if (v >= 55) return [num(v, 0), "kuat", "up"];
+  if (v <= 30) return [num(v, 0), "jenuh jual", "warn"];
+  if (v <= 45) return [num(v, 0), "lemah", "down"];
+  return [num(v, 0), "netral", ""];
+}
+
+function tfCard(r) {
+  const verdict = r.verdict || "NETRAL";
+  const head = el("h3", {}, el("span", { text: r.tf }),
+    el("span", { class: `badge ${verdict.startsWith("BUY") ? "BUY" : verdict.startsWith("SELL") ? "SELL" : "WAIT"}`, text: verdict }));
+  const card = el("div", { class: "tf-card" }, head);
+  const [trendValue, trendText, trendTone] = trendRead(r);
+  card.append(readRow("Tren", trendValue, trendText, trendTone));
+  const [rsiValue, rsiText, rsiTone] = rsiRead(r.rsi14);
+  card.append(readRow("RSI 14", rsiValue, rsiText, rsiTone));
+  if (r.macd_hist !== null && r.macd_hist !== undefined) {
+    card.append(readRow("MACD", `hist ${signed(r.macd_hist, 2)}`, r.macd_hist > 0 ? "momentum naik" : "momentum turun", r.macd_hist > 0 ? "up" : "down"));
+  }
+  if (r.stoch_k !== null && r.stoch_k !== undefined) {
+    const rising = r.stoch_k > r.stoch_d;
+    const edge = r.stoch_k >= 80 ? ", jenuh beli" : r.stoch_k <= 20 ? ", jenuh jual" : "";
+    card.append(readRow("Stoch", `${num(r.stoch_k, 0)}/${num(r.stoch_d, 0)}`, `${rising ? "naik" : "turun"}${edge}`, edge ? "warn" : rising ? "up" : "down"));
+  }
+  if (r.sar_up !== null && r.sar_up !== undefined) {
+    card.append(readRow("SAR", num(r.sar), r.sar_up ? "di bawah harga" : "di atas harga", r.sar_up ? "up" : "down"));
+  }
+  if (r.adx !== null && r.adx !== undefined) {
+    const lead = (r.plus_di ?? 0) >= (r.minus_di ?? 0);
+    const strong = r.adx >= 25;
+    card.append(readRow("ADX", num(r.adx, 0), strong ? `tren kuat ${lead ? "naik" : "turun"}` : r.adx < 20 ? "tren lemah" : "sedang", strong ? (lead ? "up" : "down") : ""));
+  }
+  if (r.kalman_t !== null && r.kalman_t !== undefined) {
+    const clear = Math.abs(r.kalman_t) >= 2;
+    card.append(readRow("Tren Kalman", `t ${signed(r.kalman_t, 1)}`, clear ? `jelas ${r.kalman_t > 0 ? "naik" : "turun"}` : "belum jelas", clear ? (r.kalman_t > 0 ? "up" : "down") : ""));
+  }
+  if (r.sigma !== null && r.sigma !== undefined) {
+    const p = r.vol_pct;
+    const word = p === null || p === undefined ? "–" : p >= 0.9 ? "sangat ramai" : p >= 0.7 ? "ramai" : p <= 0.3 ? "sepi" : "normal";
+    card.append(readRow("Volatilitas", `±$${num(r.sigma)}/candle`, word, p >= 0.9 ? "warn" : ""));
+  }
+  if (r.regime) {
+    const tone = r.regime === "volatile" ? "warn" : r.regime === "trending" ? "up" : "";
+    card.append(readRow("Kondisi", r.hurst !== null && r.hurst !== undefined ? `Hurst ${num(r.hurst)}` : "", REGIME_TEXT[r.regime], tone));
+  }
+  const up = r.reasons ? r.reasons.length : 0;
+  card.append(el("p", { class: "tf-foot", text: `skor ${signed(r.score, 0)} dari ${r.votes} indikator · ${up ? r.reasons.slice(0, 3).join(", ") : "–"}` }));
+  return card;
+}
+
+function renderTfDetail(reads) {
+  const grid = clear($("#ind-detail"));
+  for (const r of reads) grid.append(tfCard(r));
+}
+
+function pullTone(value) {
+  if (value === null || value === undefined) return ["–", ""];
+  if (value >= 0.05) return [`▲ mendukung (${signed(value)})`, "up"];
+  if (value <= -0.05) return [`▼ menekan (${signed(value)})`, "down"];
+  return [`• netral (${signed(value)})`, ""];
+}
+
+function renderDrivers(summary) {
+  const body = clear($("#cross-table tbody"));
+  for (const a of summary.cross || []) {
+    const [pull, tone] = pullTone(a.effect);
+    const symbol = a.note ? `${a.symbol} · ${a.note}` : a.symbol;
+    body.append(el("tr", {},
+      el("td", { "data-label": "Pasar" }, el("b", { text: a.label }), el("span", { class: "muted", text: ` ${symbol}` })),
+      el("td", { class: "num", "data-label": "Harga", text: num(a.value, a.value > 100 ? 2 : 4) }),
+      el("td", { class: "num", "data-label": "15 mnt", text: a.change_15m_pct === null ? "–" : `${signed(a.change_15m_pct)}%` }),
+      el("td", { class: "num", "data-label": "1 jam", text: a.change_1h_pct === null ? "–" : `${signed(a.change_1h_pct)}%` }),
+      el("td", { class: "num", "data-label": "1 hari", text: a.change_1d_pct === null ? "–" : `${signed(a.change_1d_pct)}%` }),
+      el("td", { class: "num", "data-label": "Korelasi", text: a.corr_measured === null ? `${signed(a.corr)} (bawaan)` : signed(a.corr_measured) }),
+      el("td", { class: "num", "data-label": "Bobot", text: pct(a.relevance) }),
+      el("td", { "data-label": "Tarikan ke emas" }, el("span", { class: `tone ${tone}`, text: pull }))));
+  }
+  if (!(summary.cross || []).length) {
+    body.append(el("tr", {}, el("td", { colspan: 8, class: "muted", text: "data pasar terkait belum tersedia (butuh MT5 terbuka dan login)" })));
+  }
+  const macro = summary.macro || {};
+  const badge = $("#macro-badge");
+  badge.textContent = macro.value === null || macro.value === undefined ? "" : `Makro ${signed(macro.value)}`;
+  badge.className = `badge ${macro.value > 0.05 ? "BUY" : macro.value < -0.05 ? "SELL" : "WAIT"}`;
+  $("#macro-parts").textContent = (macro.parts || []).length
+    ? "Skor makro dari: " + macro.parts.map((p) => `${p.label} ${signed(p.pull)}`).join(" · ")
+    : "Skor makro belum bisa dihitung.";
+  const fund = summary.fundamentals;
+  const fundBody = clear($("#fund-table tbody"));
+  const fundBadge = $("#fund-badge");
+  if (!fund) {
+    $("#fund-summary").textContent = "Data fundamental belum tersedia.";
+    fundBadge.textContent = "";
+    $("#fund-missing").textContent = "";
+    return;
+  }
+  $("#fund-summary").textContent = fund.summary;
+  fundBadge.textContent = fund.bias === null ? "" : signed(fund.bias);
+  fundBadge.className = `badge ${fund.bias > 0.1 ? "BUY" : fund.bias < -0.1 ? "SELL" : "WAIT"}`;
+  for (const f of fund.factors) {
+    const [pull, tone] = pullTone(f.effect);
+    fundBody.append(el("tr", {},
+      el("td", { "data-label": "Faktor", text: f.label }),
+      el("td", { "data-label": "Nilai", text: f.value }),
+      el("td", { "data-label": "Perubahan", text: f.change || "–" }),
+      el("td", { "data-label": "Dampak ke emas" }, el("span", { class: `tone ${tone}`, text: pull })),
+      el("td", { "data-label": "Artinya", class: "muted", text: f.note }),
+      el("td", { "data-label": "Data", class: "muted", text: f.as_of || "–" })));
+  }
+  $("#fund-missing").textContent = fund.missing && fund.missing.length ? `Belum ada data: ${fund.missing.join(", ")}.` : "";
 }
 
 // ------------------------------------------------------------------ timing ("Kapan klik BUY / SELL")
@@ -528,11 +691,11 @@ function scoreGauge(t) {
 }
 
 // The chart trading uses now: chosen automatically (signals/timeframe.py), or the active
-// signal's own chart (picked by Opus 5.5 when it reviewed the signal).
+// signal's own chart (picked by the AI committee when it reviewed the signal).
 const TF_SOURCE = { auto: "⚙️ Timeframe otomatis", signal: "📊 Sinyal aktif di chart", opus: "🤖 Sinyal aktif di chart" };
 function timeframeLine(tf) {
   if (!tf) return null;
-  const by = tf.source === "opus" ? " · dipilih Opus 5.5" : "";
+  const by = tf.source === "opus" ? " · dipilih komite AI" : "";
   return el("p", { class: `trading-line ${tf.source === "auto" ? "" : "on"}` },
     el("b", { text: `${TF_SOURCE[tf.source] || "Timeframe"}: ${tf.tf}` }), `${by}${tf.reason ? ` · ${tf.reason}` : ""}`);
 }

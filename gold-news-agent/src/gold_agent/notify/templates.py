@@ -31,6 +31,7 @@ from gold_agent.notify.format import (
     signed,
     wib_clock,
 )
+from gold_agent.signals.desk import model_name
 from gold_agent.signals.tvcode import tradingview_code
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
 
@@ -72,8 +73,10 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
     review = signal.review
     if review is not None and review.model:
         count = f" · {review.agree}/{review.votes} suara" if (review.votes or 0) > 1 else ""
+        names = " + ".join(dict.fromkeys(model_name(m) for m in review.models or [review.model]))
         lines.append(
-            f"🤖 Diputuskan Opus 5.5{count} · confidence AI {review.confidence or '-'}/100"
+            f"🤖 Diputuskan AI ({esc(names)}){count} · confidence AI "
+            f"{review.confidence or '-'}/100"
             + (f" · {esc(review.reasons[0])}" if review.reasons else "")
         )
         if review.caution:
@@ -103,6 +106,13 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         f"📊 Berita {signed(c.N)} · Makro {signed(c.M)} · Teknikal {signed(c.T)} · "
         f"Konfirmasi {signed(c.P)}"
     )
+    odds = signal.odds
+    if odds is not None:
+        basis = f"{odds.setups} setup historis" if odds.setups else "model volatilitas"
+        lines.append(
+            f"🎲 Peluang TP1 sebelum SL {odds.tp1:.0%} · SL dulu {odds.stop:.0%} · "
+            f"EV {odds.ev_r:+.2f}R ({basis})"
+        )
     lines.append("🧾 Alasan: " + "; ".join(esc(r) for r in signal.top_reasons))
     lines.append("⚠️ Batal jika: " + "; ".join(esc(r) for r in signal.invalidation[:4]))
     if next_event is not None:

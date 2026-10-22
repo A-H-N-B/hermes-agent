@@ -43,8 +43,8 @@ trading:
   # The chart a trade is sized (entry/SL/TP, validity) and timed on. `auto` chooses it at every
   # evaluation: of the timeframes whose spread stays small next to the stop, the one with the best
   # measured accuracy in the current session (walk-forward, 30 days; the lower end of its 95%
-  # interval must beat a coin flip); without that evidence, the session default below. Opus 5.5
-  # makes the final pick when it reviews a signal. A fixed M1 | M5 | M15 | M30 | H1 also works.
+  # interval must beat a coin flip); without that evidence, the session default below. The AI
+  # committee makes the final pick when it reviews a signal. A fixed M1 | M5 | M15 | M30 | H1 also works.
   timeframe:
     select: auto
     # Sessions follow London/New York DST: London opens 14:00 WIB in summer, 15:00 in winter;
@@ -70,13 +70,18 @@ market:
   spread_window_minutes: 30
   round_levels: [10, 50]
   swing_half_width: 3 # fractal width on H1 for swing highs/lows
-  usd_source: binance_eurusdt # binance_eurusdt (proxy) | mt5_synthetic (6 FX pairs) | none
+  # auto = the dollar index from your broker's own FX pairs when MT5 runs on this computer
+  # (with silver, oil, US yields, S&P 500 and VIX when the broker lists them), else EURUSDT.
+  usd_source: auto # auto | binance_eurusdt (proxy) | mt5_synthetic (MT5 FX pairs) | none
   usd_history_days: 5
   fred_refresh_minutes: 60
+  # Daily fundamentals (Treasury yields, CFTC positioning, GLD flows, US data surprises,
+  # geopolitical news): the bias is rebuilt this often; each source keeps its own pace.
+  fundamentals_refresh_minutes: 60
   twelvedata_symbol: XAU/USD
   twelvedata_poll_seconds: 60 # free plan: ~8 credits/min, 800/day
   mt5_poll_ms: 100
-  mt5_fx_symbols: { EURUSD: EURUSD, USDJPY: USDJPY, GBPUSD: GBPUSD, USDCAD: USDCAD, USDSEK: USDSEK, USDCHF: USDCHF }
+  mt5_symbols: {} # e.g. { US500: SPX500.cash } when a broker name is not found automatically
 
 risk:
   account_equity: null # Q3: required before lot sizing is shown
@@ -94,7 +99,7 @@ budget:
   # call reserves its worst case while it runs, so calls running together cannot overshoot).
   llm_daily_usd: 20.0
   # Routine calls (ordinary headlines, the hourly outlook narrative, reports) stop at
-  # (100 - this)% of the ceiling; the rest is kept for the signal decision (Opus desk) and
+  # (100 - this)% of the ceiling; the rest is kept for the signal decision (AI committee) and
   # high-impact news (a release or impact >= 4).
   priority_reserve_pct: 25
   paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
@@ -133,6 +138,9 @@ signal_engine:
   # time a 2R target needs at normal volatility.
   validity_bars: 6
   max_chase_atr: 2.0 # price this many ATR past the EMA20 of the signal's timeframe: wait for a pullback
+  # Past setups like this one lost money (expected value < 0 across its 95% band, with at
+  # least this many setups on record): wait. 0 = off.
+  ev_gate_min_setups: 30
   publish_state_seconds: 60
   evaluate_seconds: 5
   levels:
@@ -167,9 +175,9 @@ llm:
   provider: anthropic
   enabled: true # false = rules-only mode
   deep_min_impact: 3
-  # Every route on Claude Opus 5.5. Its thinking is always on (thinking: disabled is a 400),
-  # so `effort` is the control for depth, latency and cost; max_tokens leaves room for the
-  # thinking, which counts toward it.
+  # Every route on Claude Opus 5.5 except the desk's lead vote (Claude Fable 5.1). Thinking is
+  # always on in both (thinking: disabled is a 400), so `effort` is the control for depth,
+  # latency and cost; max_tokens leaves room for the thinking, which counts toward it.
   triage:
     model: claude-opus-5-5
     effort: low # every ordinary headline: keeps thinking short so triage stays fast
@@ -187,7 +195,7 @@ llm:
     max_tokens: 16000
   outlook:
     model: claude-opus-5-5
-    effort: medium
+    effort: low # the narrative only: it never edits the table, so the budget goes to accuracy
     timeout_seconds: 120
     max_tokens: 16000
   brief:
@@ -195,13 +203,24 @@ llm:
     effort: high
     timeout_seconds: 300
     max_tokens: 16000
+  # The final BUY / SELL / WAIT and timeframe of every signal: a committee answering in
+  # parallel. The lead is Claude Fable 5.1, Anthropic's most capable model (2.5x Opus's price,
+  # so it is used only here); its vote counts double, so a trade needs Fable to approve AND at
+  # least one Opus 5.5 to agree. Without Fable (no access, outage) both Opus votes must agree.
   desk:
-    model: claude-opus-5-5 # the final BUY / SELL / WAIT and timeframe of every signal
+    model: claude-fable-5-1
     effort: high # accuracy over speed: prices are re-read after the review anyway
+    timeout_seconds: 120
+    max_tokens: 16000
+  desk_second:
+    model: claude-opus-5-5 # the independent second opinions
+    effort: high
     timeout_seconds: 90
     max_tokens: 16000
-  desk_votes: 3 # independent Opus answers per review, run in parallel; the majority decides
-  desk_reviews_per_day: 48 # beyond this the engine decides alone (labelled "tanpa review AI")
+  desk_votes: 3 # 1 lead (desk) + 2 second opinions (desk_second), run in parallel
+  # A review costs about $0.45 (one Fable + two Opus answers), so 30 stays under $14 even on the
+  # busiest day; beyond it the engine decides alone (labelled "tanpa review AI").
+  desk_reviews_per_day: 30
   fallbacks: default # a refused request is retried server-side on the recommended model
   circuit_breaker:
     failures: 5
@@ -212,6 +231,7 @@ llm:
     claude-haiku-5-5: { input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01 }
     claude-sonnet-5-5: { input: 2.00, output: 10.00, cache_write: 2.50, cache_read: 0.20 }
     claude-opus-5-5: { input: 4.00, output: 20.00, cache_write: 5.00, cache_read: 0.20 }
+    claude-fable-5-1: { input: 10.00, output: 50.00, cache_write: 12.50, cache_read: 0.25 }
     # Possible server-side refusal fallbacks (billed at their own rates when they serve).
     claude-opus-5: { input: 5.00, output: 25.00, cache_write: 6.25, cache_read: 0.50 }
     claude-opus-4-8: { input: 5.00, output: 25.00, cache_write: 6.25, cache_read: 0.50 }

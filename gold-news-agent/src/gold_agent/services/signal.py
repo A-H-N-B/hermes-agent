@@ -2,9 +2,10 @@
 the hourly outlook (11.3), the Monday-open outlook (11.6) and the weekly hourly-profile rebuild.
 
 Every evaluation first picks the chart to trade on (signals/timeframe.py, fed by the measured
-accuracy in signals/accuracy.py). A candidate the engine produces then goes to Opus 5.5 for the
-final BUY / SELL / WAIT and timeframe (signals/desk.py); the review runs in the background and the
-next evaluation, on fresh prices, applies it. Without the AI the engine decides alone, labelled.
+accuracy in signals/accuracy.py). A candidate the engine produces then goes to the AI committee
+(Fable 5.1 leading, Opus 5.5 second opinions) for the final BUY / SELL / WAIT and timeframe
+(signals/desk.py); the review runs in the background and the next evaluation, on fresh prices,
+applies it. Without the AI the engine decides alone, labelled.
 
 State that must survive a restart lives in kv_state: `signal_engine` (last signal, daily count,
 last release), `trading_halt` (/stop) and `paper_daily` (realised R, written by the paper tracker).
@@ -21,7 +22,7 @@ from typing import Any
 import structlog
 
 from gold_agent.analysis.drivers import DriverKB
-from gold_agent.analysis.llm_client import LlmClient, LlmFailed, LlmUnavailable
+from gold_agent.analysis.llm_client import LlmClient, LlmFailed, LlmUnavailable, Route
 from gold_agent.analysis.prompts import load_prompt
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
@@ -38,10 +39,12 @@ from gold_agent.core.bus import (
     consume,
 )
 from gold_agent.econ_calendar.events import load_events
+from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
 from gold_agent.market.series import PriceSeries
 from gold_agent.models import (
     Analysis,
     CalendarEvent,
+    FundamentalSnapshot,
     LatencyStage,
     MarketContext,
     Outlook,
@@ -54,10 +57,12 @@ from gold_agent.signals.accuracy import AccuracyBook
 from gold_agent.signals.desk import (
     KEEP_REVIEWS,
     KV_DESK,
+    LEAD_WEIGHT,
     Desk,
     DeskDecision,
     Verdict,
     desk_brief,
+    desk_label,
     tally,
     verify,
 )
@@ -94,7 +99,7 @@ PROFILE_REFRESH = timedelta(days=7)
 TICK_SECONDS = 15.0
 SCORE_CHANGE = 0.05  # publish the state again when |S| moves this much
 WEEKEND_TRIGGER = "pembukaan Senin"
-PENDING_REVIEW = "menunggu keputusan AI (Opus 5.5) atas kandidat ini"
+PENDING_REVIEW = "menunggu keputusan AI ({label}) atas kandidat ini"
 CHOICE_SAVE = timedelta(seconds=60)  # the dashboard's copy of the timeframe table
 MOMENT_NAMES = {
     "tokyo_open": "Tokyo",
@@ -124,9 +129,11 @@ class SignalService:
         self.accuracy = AccuracyBook(ctx)
         self.desk = Desk(settings.llm.desk_reviews_per_day)
         self.desk_prompt = load_prompt("desk", DriverKB.from_file())
+        self.desk_label = desk_label(settings)
+        self.fundamentals: FundamentalSnapshot | None = None
         self.choice: TfChoice | None = None
         self._choice_saved: tuple[datetime, tuple[Any, ...]] | None = None
-        self.review_task: asyncio.Task[None] | None = None  # Opus deciding a candidate
+        self.review_task: asyncio.Task[None] | None = None  # the AI committee deciding
         self.state = EngineState()
         self.context: MarketContext | None = None
         self.analyses: dict[str, Analysis] = {}
@@ -190,6 +197,8 @@ class SignalService:
         await self._ctx.ops.kv_set(KV_ENGINE, self.state.to_json(), self._ctx.clock.now())
 
     async def _refresh_slow(self, now: datetime) -> None:
+        stored = await self._ctx.ops.kv_get(KV_FUNDAMENTALS)
+        self.fundamentals = FundamentalSnapshot.model_validate(stored) if stored else None
         self._learned = await self._ctx.ops.learned_reliability()
         moves = await self._ctx.ops.kv_get(KV_EVENT_MOVES) or {}
         self.event_moves = {str(k): float(v) for k, v in moves.items()}
@@ -341,15 +350,15 @@ class SignalService:
         context: MarketContext,
         events: list[CalendarEvent],
     ) -> Decision:
-        """Opus's final say on the engine's candidate (signals/desk.py)."""
+        """The AI committee's final say on the engine's candidate (signals/desk.py)."""
         verdict = self.desk.standing(candidate, now)
         if verdict is None:
             if self.desk.busy:
-                return self._hold(decision, now, PENDING_REVIEW)
+                return self._hold(decision, now, PENDING_REVIEW.format(label=self.desk_label))
             why = self._cannot_review(now)
             if why is None:
                 self._start_review(decision, candidate, choice, context, events, now)
-                return self._hold(decision, now, PENDING_REVIEW)
+                return self._hold(decision, now, PENDING_REVIEW.format(label=self.desk_label))
             verdict = Verdict(
                 side=candidate.action,
                 decision="UNAVAILABLE",
@@ -362,18 +371,20 @@ class SignalService:
             return self._reviewed(decision, candidate, verdict.review())
         if not verdict.approved:
             reason = verdict.reasons[0] if verdict.reasons else "tanpa alasan"
-            held = f"AI (Opus 5.5) menahan {candidate.action}{verdict.count}: {reason}"
+            held = f"AI ({self.desk_label}) menahan {candidate.action}{verdict.count}: {reason}"
             return self._hold(decision, now, held)
         self.desk.last = None  # an approval answers this one candidate
         tf = verdict.timeframe or choice.tf
         if tf != choice.tf:
-            picked = TfChoice(tf, "opus", f"{tf} dipilih Opus 5.5", choice.session, choice.options)
+            picked = TfChoice(
+                tf, "opus", f"{tf} dipilih AI ({self.desk_label})", choice.session, choice.options
+            )
             redo = run(picked)
             if redo.signal is not None and redo.signal.action == candidate.action:
                 return self._reviewed(redo, redo.signal, verdict.review())
             note = f"chart {tf} pilihan AI belum siap entry, dipakai {choice.tf}"
             return self._reviewed(decision, candidate, verdict.review(note=note))
-        reason = f"{choice.reason}; disetujui Opus 5.5"
+        reason = f"{choice.reason}; disetujui AI ({self.desk_label})"
         return self._reviewed(decision, candidate, verdict.review(), reason)
 
     def _cannot_review(self, now: datetime) -> str | None:
@@ -403,6 +414,7 @@ class SignalService:
             active=self.state.active(now),
             settings=self._ctx.settings,
             now=now,
+            fundamentals=self.fundamentals,
         )
         self.desk.busy = True
         self.review_task = asyncio.create_task(self._ask_desk(candidate, choice, brief))
@@ -424,15 +436,22 @@ class SignalService:
         await self.evaluate(force_publish=True)
 
     async def _consult(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict:
-        """`llm.desk_votes` independent answers in parallel, counted by `tally`."""
+        """The committee in parallel: the lead (route desk, its vote counting LEAD_WEIGHT) and
+        `desk_votes - 1` second opinions (route desk_second), counted by `tally`."""
         asked = self._ctx.settings.llm.desk_votes
+        routes: list[Route] = ["desk_second"] * asked
+        routes[0] = "desk"
         answers = await asyncio.gather(
-            *(self._vote(candidate, choice, brief) for _ in range(asked))
+            *(self._vote(candidate, choice, brief, route) for route in routes)
         )
-        votes = [answer for answer in answers if isinstance(answer, Verdict)]
+        counted = [
+            (answer, LEAD_WEIGHT if route == "desk" else 1.0)
+            for answer, route in zip(answers, routes, strict=True)
+            if isinstance(answer, Verdict)
+        ]
         failures = [answer for answer in answers if isinstance(answer, str)]
         now = self._ctx.clock.now()
-        if not votes:
+        if not counted:
             return Verdict(
                 side=candidate.action,
                 decision="UNAVAILABLE",
@@ -440,13 +459,22 @@ class SignalService:
                 composite=candidate.composite_score,
                 note=failures[0],
             )
-        return tally(votes, failures, candidate=candidate, choice=choice, at=now)
+        return tally(
+            [vote for vote, _ in counted],
+            failures,
+            candidate=candidate,
+            choice=choice,
+            at=now,
+            weights=[weight for _, weight in counted],
+        )
 
-    async def _vote(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict | str:
-        """One answer from Opus through the guardrails, or why there is none."""
+    async def _vote(
+        self, candidate: Signal, choice: TfChoice, brief: str, route: Route
+    ) -> Verdict | str:
+        """One committee member's answer through the guardrails, or why there is none."""
         try:
             result = await self.llm.structured(
-                "desk",
+                route,
                 system=self.desk_prompt.text,
                 user=brief,
                 schema=DeskDecision,

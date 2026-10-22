@@ -59,13 +59,31 @@
       <article class="card">
         <h2>Ringkasan indikator <span id="ind-overall" class="badge"></span></h2>
         <p id="ind-chips" class="chips"></p>
+        <div id="ind-detail" class="tf-grid"></div>
+        <details class="more"><summary>Arti tiap indikator</summary>
+          <ul class="notes glossary">
+            <li><b>Tren (EMA)</b>: harga dan EMA20 di atas EMA50 = naik, di bawah = turun.</li>
+            <li><b>RSI</b>: di atas 55 kuat, di atas 70 jenuh beli (rawan koreksi); di bawah 45
+              lemah, di bawah 30 jenuh jual.</li>
+            <li><b>MACD</b>: garis di atas sinyalnya = momentum naik, di bawah = turun.</li>
+            <li><b>Stochastic &amp; SAR</b>: arah momentum jangka pendek.</li>
+            <li><b>ADX</b>: kekuatan tren tanpa arah; di atas 25 tren kuat, di bawah 20 lemah.</li>
+            <li><b>Tren Kalman</b>: kemiringan harga yang disaring derau; |t| ≥ 2 artinya tren itu
+              jelas secara statistik (di pasar acak hanya 5% kemungkinannya).</li>
+            <li><b>Volatilitas</b>: gerak wajar per candle menurut model GARCH; persentil tinggi =
+              pasar lebih ramai dari biasanya, SL mudah tersentuh.</li>
+            <li><b>Kondisi pasar</b>: tren kuat / sideways / sangat volatil / normal, dari
+              efficiency ratio, eksponen Hurst, dan ADX (ambangnya diuji pada pasar acak).</li>
+          </ul>
+        </details>
         <details class="more"><summary>Lihat tabel lengkap</summary>
         <div class="table-wrap">
           <table id="ind-table" class="stack">
             <thead><tr><th>Timeframe</th><th>Kesimpulan</th><th class="num">Harga</th>
               <th class="num">EMA20</th><th class="num">EMA50</th><th class="num">EMA200</th>
               <th class="num">RSI14</th><th class="num">ATR14</th><th class="num">Stoch K/D</th>
-              <th class="num">SAR</th><th>Alasan</th></tr></thead>
+              <th class="num">SAR</th><th class="num">MACD</th><th class="num">ADX</th>
+              <th class="num">Kalman t</th><th>Kondisi</th><th>Alasan</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -73,6 +91,30 @@
         <p id="ind-extra" class="muted"></p>
         <p class="muted">Ringkasan indikator teknikal hanya membaca grafik. Angka BUY/SELL yang
           dipakai tetap dari sinyal alat berita (berita + makro + teknikal + konfirmasi harga).</p>
+      </article>
+      <article class="card">
+        <h2>Pasar penggerak emas <span id="macro-badge" class="badge"></span></h2>
+        <p class="muted">Langsung dari broker Anda (MT5). Tarikan ke emas: + mendukung naik,
+          − menekan. Bobot = seberapa kuat hubungannya dengan emas beberapa hari terakhir.</p>
+        <div class="table-wrap">
+          <table id="cross-table" class="stack">
+            <thead><tr><th>Pasar</th><th class="num">Harga</th><th class="num">15 mnt</th>
+              <th class="num">1 jam</th><th class="num">1 hari</th><th class="num">Korelasi</th>
+              <th class="num">Bobot</th><th>Tarikan ke emas</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="macro-parts" class="muted"></p>
+        <h2 class="sub">Fundamental harian <span id="fund-badge" class="badge"></span></h2>
+        <p id="fund-summary"></p>
+        <div class="table-wrap">
+          <table id="fund-table" class="stack">
+            <thead><tr><th>Faktor</th><th>Nilai</th><th>Perubahan</th><th>Dampak ke emas</th>
+              <th>Artinya</th><th>Data</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="fund-missing" class="muted"></p>
       </article>
       <article class="card">
         <h2>Berita terbaru</h2>
@@ -117,7 +159,7 @@
         <ul id="perf-notes" class="notes warn"></ul>
       </article>
       <article class="card">
-        <h2>Keputusan AI (Opus 5.5)</h2>
+        <h2>Keputusan komite AI (Fable 5.1 + Opus 5.5)</h2>
         <div id="perf-desk" class="tiles"></div>
         <p class="muted">Kandidat yang ditahan AI tidak dikirim; di sini dihitung seolah diambil (TP1 atau SL
           duluan di candle M1), dengan cara yang sama seperti yang disetujui. Bila yang ditahan sering

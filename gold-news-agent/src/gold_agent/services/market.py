@@ -1,4 +1,5 @@
-"""Market service: price feed -> candles -> context snapshots (+ USD proxy and FRED yields)."""
+"""Market service: price feed -> candles -> context snapshots (+ the dollar and related markets
+from MT5, or a USD proxy, and FRED yields)."""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ import asyncio
 import hashlib
 from collections import deque
 from datetime import datetime, timedelta
+from typing import Any
 
 import httpx
 import structlog
@@ -14,13 +16,17 @@ from gold_agent.collectors.base import sleep_or_stop
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_ALERTS, STREAM_CONTEXT, STREAM_TICKS
 from gold_agent.core.service import run_with_restart
+from gold_agent.fundamentals import snapshot as fundamentals
+from gold_agent.fundamentals.fetch import FundamentalsFetcher
+from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
 from gold_agent.market.adapters.base import PriceAdapter, TickSink
 from gold_agent.market.adapters.factory import binance_adapter, build_price_adapter
 from gold_agent.market.candles import CandleBuilder, aggregate
 from gold_agent.market.context import WeekendTracker, YieldSnapshot, build_market_context
+from gold_agent.market.cross_assets import CrossTracker, resolve_symbols
 from gold_agent.market.fred import fetch_series
-from gold_agent.market.usd import UsdTracker, synthetic_dxy
-from gold_agent.models import Alert, Candle, MarketContext, Tick
+from gold_agent.market.usd import DXY_WEIGHTS, UsdTracker
+from gold_agent.models import Alert, Candle, FundamentalSnapshot, MarketContext, Tick
 from gold_agent.models.common import Timeframe
 from gold_agent.timeutils.sessions import SessionClock
 
@@ -56,6 +62,9 @@ class MarketService:
         market = ctx.settings.market
         self.builder = CandleBuilder("none", self.sessions, buffer=market.candle_buffer)
         self.last_tick: Tick | None = None
+        self.cross = CrossTracker(days=market.usd_history_days)
+        self.fundamentals: FundamentalSnapshot | None = None
+        self.fetcher = FundamentalsFetcher(ctx.sources, ctx.env)
         self.spreads: deque[tuple[datetime, float]] = deque(maxlen=20_000)
         self.usd: UsdTracker | None = None
         self.yields: YieldSnapshot | None = None
@@ -73,6 +82,7 @@ class MarketService:
 
     async def on_tick(self, tick: Tick) -> None:
         self.last_tick = tick
+        self.cross.update_gold(tick.ts, tick.mid)
         market = self._ctx.settings.market
         self.spreads.append((tick.received_at, tick.spread))
         status = self.sessions.status(tick.ts)
@@ -161,7 +171,15 @@ class MarketService:
             weekend=self.weekend,
         )
         return snapshot.model_copy(
-            update={"contract_size": self.contract_size, "volume_step": self.volume_step}
+            update={
+                "contract_size": self.contract_size,
+                "volume_step": self.volume_step,
+                "cross": self.cross.snapshot(now),
+                "fundamental_bias": self.fundamentals.bias if self.fundamentals else None,
+                "fundamental_as_of": (
+                    self.fundamentals.built_at.isoformat() if self.fundamentals else None
+                ),
+            }
         )
 
     async def publish_context(self) -> MarketContext:
@@ -261,20 +279,102 @@ class MarketService:
             if await sleep_or_stop(stop, ctx.settings.market.fred_refresh_minutes * 60):
                 return
 
-    async def _mt5_dxy_loop(self, stop: asyncio.Event) -> None:
+    async def refresh_fundamentals(self, client: httpx.AsyncClient) -> FundamentalSnapshot:
+        """Official yields, positioning and ETF data (each at its own pace), our own release
+        surprises and geopolitical news, and the dollar's 5-day move: the day's bias."""
+        ctx = self._ctx
+        now = ctx.clock.now()
+        await self.fetcher.refresh(client, now)
+        inputs = self.fetcher.inputs
+        inputs.releases = await ctx.news.releases_before(now, 200)
+        inputs.analyses = await ctx.news.analyses_between(now - timedelta(days=15), now)
+        dollar = self.cross.series.get("DXY")
+        inputs.dollar_5d_pct = dollar.change_pct(now, 5 * 24 * 60) if dollar else None
+        inputs.dollar_source = self.cross.symbols.get("DXY")
+        snapshot = fundamentals.build_snapshot(inputs, now)
+        self.fundamentals = snapshot
+        await ctx.ops.kv_set(KV_FUNDAMENTALS, snapshot.model_dump(mode="json"), now)
+        treasury = self._treasury_yields()
+        if treasury is not None and (
+            self.yields is None or (treasury.as_of or "") >= (self.yields.as_of or "")
+        ):
+            self.yields = treasury
+        return snapshot
+
+    def _treasury_yields(self) -> YieldSnapshot | None:
+        """The context's 10-year yields from Treasury when FRED (key needed) is not set up."""
+        nominal = fundamentals.change(fundamentals.series(self.fetcher.inputs.nominal, "10Y"), 1)
+        if nominal is None:
+            return None
+        real = fundamentals.change(fundamentals.series(self.fetcher.inputs.real, "10Y"), 1)
+        return YieldSnapshot(
+            us10y=nominal[0],
+            us10y_change_1d=round(nominal[1], 4),
+            real10y=real[0] if real else None,
+            real10y_change_1d=round(real[1], 4) if real else None,
+            as_of=nominal[2].isoformat(),
+        )
+
+    async def _fundamentals_loop(self, client: httpx.AsyncClient, stop: asyncio.Event) -> None:
+        every = self._ctx.settings.market.fundamentals_refresh_minutes * 60
+        while not stop.is_set():
+            try:
+                await self.refresh_fundamentals(client)
+            except Exception:
+                log.exception("market.fundamentals_failed")
+            if await sleep_or_stop(stop, every):
+                return
+
+    def _mt5_feed(self) -> Any:
+        """The MT5 adapter among the price feeds, if this computer runs MT5."""
         feed = self._feed
         finder = getattr(feed, "find", None)
         mt5 = finder("mt5") if callable(finder) else feed
-        quotes_fn = getattr(mt5, "quotes", None)
-        if quotes_fn is None or self.usd is None:
+        return mt5 if callable(getattr(mt5, "symbol_list", None)) else None
+
+    def _resolve_cross(self, mt5: Any) -> dict[str, str]:
+        overrides = self._ctx.settings.market.mt5_symbols
+        symbols = resolve_symbols(mt5.symbol_list(), overrides)
+        self.cross.symbols = dict(symbols)
+        self.cross.basket = {pair for pair in DXY_WEIGHTS if pair in symbols}
+        if self.usd is not None:
+            self.usd.source = "DXY broker (MT5)" if "DXY" in symbols else "DXY sintetis (MT5)"
+        log.info("market.cross_symbols", symbols=symbols)
+        return symbols
+
+    async def _seed_cross(self, mt5: Any, symbols: dict[str, str]) -> None:
+        minutes = self._ctx.settings.market.usd_history_days * 24 * 60
+        history = {
+            key: await asyncio.to_thread(mt5.closes, name, minutes) for key, name in symbols.items()
+        }
+        self.cross.seed(history)
+        self.cross.gold.seed(await asyncio.to_thread(mt5.closes, mt5.gold_symbol, minutes))
+
+    async def _cross_loop(self, stop: asyncio.Event) -> None:
+        """The dollar and related markets from the broker's MT5 (market/cross_assets.py):
+        symbols found once, a few days of minute history, then a quote every 5 s. While MT5
+        is closed or logged out it waits and tries again every minute."""
+        mt5 = self._mt5_feed()
+        if mt5 is None:
             return
-        symbols = self._ctx.settings.market.mt5_fx_symbols
+        symbols: dict[str, str] | None = None
+        failing = False
         while not stop.is_set():
-            quotes = await asyncio.to_thread(quotes_fn, symbols)
-            value = synthetic_dxy(quotes)
-            if value is not None:
-                self.usd.update(self._ctx.clock.now(), value)
-            if await sleep_or_stop(stop, 5):
+            try:
+                if symbols is None:
+                    symbols = await asyncio.to_thread(self._resolve_cross, mt5)
+                    await self._seed_cross(mt5, symbols)
+                quotes = await asyncio.to_thread(mt5.quotes, symbols)
+                now = self._ctx.clock.now()
+                dxy = self.cross.update(now, quotes)
+                if dxy is not None and self.usd is not None:
+                    self.usd.update(now, dxy)
+                failing = False
+            except Exception as exc:
+                if not failing:
+                    log.warning("market.cross_unavailable", error=repr(exc)[:200])
+                failing, symbols = True, None
+            if await sleep_or_stop(stop, 60 if failing else 5):
                 return
 
     # ------------------------------------------------------------------ run
@@ -289,6 +389,8 @@ class MarketService:
             adapter = self._adapter or build_price_adapter(ctx, client)
             self._feed = adapter
             usd_mode = ctx.settings.market.usd_source
+            if usd_mode == "auto":  # the broker's own FX pairs when MT5 runs here
+                usd_mode = "mt5_synthetic" if self._mt5_feed() is not None else "binance_eurusdt"
             usd_adapter = self._usd_adapter
             if usd_mode == "binance_eurusdt" and usd_adapter is None:
                 usd_adapter = binance_adapter(
@@ -328,9 +430,10 @@ class MarketService:
                         run_with_restart(_FeedRunner("usd-feed", usd_adapter, self._usd_tick), stop)
                     )
                 )
-            if usd_mode == "mt5_synthetic":
-                tasks.append(asyncio.create_task(self._mt5_dxy_loop(stop)))
+            if self._mt5_feed() is not None:
+                tasks.append(asyncio.create_task(self._cross_loop(stop)))
             tasks.append(asyncio.create_task(self._fred_loop(client, stop)))
+            tasks.append(asyncio.create_task(self._fundamentals_loop(client, stop)))
             try:
                 await asyncio.gather(*tasks)
             finally:

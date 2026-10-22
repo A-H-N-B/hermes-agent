@@ -31,9 +31,13 @@ def ema(values: Sequence[float], period: int) -> Array:
     if len(data) < period:
         return out
     alpha = 2.0 / (period + 1)
-    out[period - 1] = data[:period].mean()
-    for i in range(period, len(data)):
-        out[i] = alpha * data[i] + (1 - alpha) * out[i - 1]
+    prev = float(data[:period].mean())
+    out[period - 1] = prev
+    smoothed: list[float] = []
+    for value in data[period:].tolist():  # plain floats: numpy element access is ~3x slower
+        prev = alpha * value + (1 - alpha) * prev
+        smoothed.append(prev)
+    out[period:] = smoothed
     return out
 
 
@@ -43,9 +47,13 @@ def rma(values: Sequence[float], period: int) -> Array:
     out = np.full(data.shape, np.nan)
     if len(data) < period:
         return out
-    out[period - 1] = data[:period].mean()
-    for i in range(period, len(data)):
-        out[i] = (out[i - 1] * (period - 1) + data[i]) / period
+    prev = float(data[:period].mean())
+    out[period - 1] = prev
+    smoothed: list[float] = []
+    for value in data[period:].tolist():
+        prev = (prev * (period - 1) + value) / period
+        smoothed.append(prev)
+    out[period:] = smoothed
     return out
 
 
@@ -79,6 +87,49 @@ def atr(
     high: Sequence[float], low: Sequence[float], close: Sequence[float], period: int = 14
 ) -> Array:
     return rma(true_range(high, low, close).tolist(), period)
+
+
+def macd(
+    closes: Sequence[float], fast: int = 12, slow: int = 26, signal: int = 9
+) -> tuple[Array, Array, Array]:
+    """(MACD line, signal line, histogram): EMA(fast) - EMA(slow), its EMA, their gap."""
+    line = ema(closes, fast) - ema(closes, slow)
+    valid = ~np.isnan(line)
+    sig = np.full(line.shape, np.nan)
+    if valid.sum() >= signal:
+        start = int(np.argmax(valid))
+        sig[start:] = ema(line[start:].tolist(), signal)
+    return line, sig, line - sig
+
+
+def adx(
+    high: Sequence[float], low: Sequence[float], close: Sequence[float], period: int = 14
+) -> tuple[Array, Array, Array]:
+    """Wilder's (ADX, +DI, -DI): trend strength regardless of direction, and which side leads."""
+    h, lo = _arr(high), _arr(low)
+    out = np.full(h.shape, np.nan)
+    if len(h) <= 2 * period:
+        return out, out.copy(), out.copy()
+    up = np.diff(h)
+    down = -np.diff(lo)
+    plus = np.where((up > down) & (up > 0), up, 0.0)
+    minus = np.where((down > up) & (down > 0), down, 0.0)
+    tr = true_range(high, low, close)[1:]
+    atr_n = rma(tr.tolist(), period)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        plus_di = 100 * rma(plus.tolist(), period) / atr_n
+        minus_di = 100 * rma(minus.tolist(), period) / atr_n
+        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+    dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
+    first = period - 1
+    adx_line = np.full(dx.shape, np.nan)
+    adx_line[first:] = rma(dx[first:].tolist(), period)
+    pad = np.array([np.nan])
+    return (
+        np.concatenate([pad, adx_line]),
+        np.concatenate([pad, plus_di]),
+        np.concatenate([pad, minus_di]),
+    )
 
 
 def bollinger(
@@ -146,28 +197,33 @@ def parabolic_sar(
     direction = np.zeros(n)
     if n < 2:
         return sar, direction
-    up = h[1] >= h[0]
+    hs, ls = h.tolist(), lo.tolist()  # plain floats: numpy element access is ~3x slower
+    up = hs[1] >= hs[0]
     af = start
-    extreme = h[0] if up else lo[0]
-    sar[1] = lo[0] if up else h[0]
+    extreme = hs[0] if up else ls[0]
+    value = ls[0] if up else hs[0]
+    sar[1] = value
     direction[1] = 1 if up else -1
+    values: list[float] = []
+    sides: list[float] = []
     for i in range(2, n):
-        prev = sar[i - 1]
-        value = prev + af * (extreme - prev)
+        value += af * (extreme - value)
         if up:
-            value = min(value, lo[i - 1], lo[i - 2])
-            if lo[i] < value:  # reversal to a downtrend
-                up, value, extreme, af = False, extreme, lo[i], start
-            elif h[i] > extreme:
-                extreme, af = h[i], min(af + step, maximum)
+            value = min(value, ls[i - 1], ls[i - 2])
+            if ls[i] < value:  # reversal to a downtrend
+                up, value, extreme, af = False, extreme, ls[i], start
+            elif hs[i] > extreme:
+                extreme, af = hs[i], min(af + step, maximum)
         else:
-            value = max(value, h[i - 1], h[i - 2])
-            if h[i] > value:  # reversal to an uptrend
-                up, value, extreme, af = True, extreme, h[i], start
-            elif lo[i] < extreme:
-                extreme, af = lo[i], min(af + step, maximum)
-        sar[i] = value
-        direction[i] = 1 if up else -1
+            value = max(value, hs[i - 1], hs[i - 2])
+            if hs[i] > value:  # reversal to an uptrend
+                up, value, extreme, af = True, extreme, hs[i], start
+            elif ls[i] < extreme:
+                extreme, af = ls[i], min(af + step, maximum)
+        values.append(value)
+        sides.append(1.0 if up else -1.0)
+    sar[2:] = values
+    direction[2:] = sides
     return sar, direction
 
 

@@ -126,16 +126,24 @@ async def test_news_with_confirming_price_publishes_and_persists_one_signal(
     await service.handle_analysis(msg("news.analyses", story))
     assert await drain(context, STREAM_SIGNALS) == []  # Opus decides first
     assert service.last_state is not None and service.last_state.action == "WAIT"
-    assert service.last_state.wait_reasons[0].startswith("menunggu keputusan AI (Opus 5.5)")
+    assert service.last_state.wait_reasons[0].startswith(
+        "menunggu keputusan AI (Fable 5.1 + Opus 5.5)"
+    )
     await decided(service)
 
     signals = await drain(context, STREAM_SIGNALS)
     assert [s["action"] for s in signals] == ["BUY"]
     review = signals[0]["review"]
-    assert review["model"] == "claude-opus-5-5" and review["confidence"] == 72
+    assert review["model"] == "claude-fable-5-1" and review["confidence"] == 72
+    assert review["models"] == ["claude-fable-5-1", "claude-opus-5-5"]
     assert review["reasons"] == ["berita dan chart M15 searah"]
     assert (review["agree"], review["votes"], review["dissent"]) == (3, 3, None)
-    assert len(fake.requests) == 3  # three independent answers to the same brief
+    # The committee: Fable 5.1 leads, two Opus 5.5 second opinions on the same brief.
+    assert [r["model"] for r in fake.requests] == [
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-opus-5-5",
+    ]
     for request in fake.requests:
         assert request["output_config"]["effort"] == "high"
         assert '<kandidat arah="BUY"' in request["messages"][0]["content"]
@@ -238,8 +246,8 @@ async def test_opus_can_hold_a_candidate_and_is_not_asked_again_until_something_
     state = service.last_state
     assert state is not None and state.action == "WAIT"
     assert state.wait_reasons == [
-        "AI (Opus 5.5) menahan BUY (3/3 suara): harga sudah naik jauh sebelum berita, "
-        "risiko mengejar"
+        "AI (Fable 5.1 + Opus 5.5) menahan BUY (3/3 suara): harga sudah naik jauh sebelum "
+        "berita, risiko mengejar"
     ]
     clock.advance(30)
     await service.handle_context(msg("market.context", bullish(clock.now(), 2650.3)))
@@ -259,7 +267,10 @@ async def test_opus_picks_the_chart_and_the_trade_is_sized_on_it(
     await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
     await decided(service)
     (signal,) = await drain(context, STREAM_SIGNALS)
-    assert (signal["timeframe"], signal["timeframe_reason"]) == ("M5", "M5 dipilih Opus 5.5")
+    assert (signal["timeframe"], signal["timeframe_reason"]) == (
+        "M5",
+        "M5 dipilih AI (Fable 5.1 + Opus 5.5)",
+    )
     assert signal["sl_distance"] == 2.4  # 1.2 ATR of M5 (2.0), not of M15
     created = datetime.fromisoformat(signal["created_at_utc"])
     assert datetime.fromisoformat(signal["valid_until_utc"]) - created == timedelta(minutes=30)
@@ -307,6 +318,42 @@ async def test_a_split_vote_goes_with_the_majority_and_shows_the_dissent(
     review = signal["review"]
     assert (review["agree"], review["votes"], review["confidence"]) == (2, 3, 75)
     assert review["dissent"] == "CPI AS 40 menit lagi"
+
+
+async def test_the_lead_model_must_approve_and_without_it_both_others_must(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    # Fable 5.1 (first answer, counting double) holds; both Opus approve: a 2-2 tie holds.
+    service, context, _ = await service_factory(
+        desk_says("WAIT", reason="CPI 20 menit lagi"), desk_says("BUY"), desk_says("BUY")
+    )
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    await decided(service)
+    assert await drain(context, STREAM_SIGNALS) == []
+    assert service.last_state is not None
+    assert service.last_state.wait_reasons[0] == (
+        "AI (Fable 5.1 + Opus 5.5) menahan BUY (1/3 suara, suara Fable 5.1 dihitung 2×): "
+        "CPI 20 menit lagi"
+    )
+    # Fable unreachable: the two Opus answers decide, and both approve.
+    service2, context2, _ = await service_factory(
+        timeout_error(), desk_says("BUY"), desk_says("BUY"), at=T0 + timedelta(days=1)
+    )
+    await feed_rally2(service2, clock, T0 + timedelta(days=1))
+    await service2.handle_analysis(
+        msg("news.analyses", analysis(first_seen=T0 + timedelta(days=1)))
+    )
+    await decided(service2)
+    (signal,) = await drain(context2, STREAM_SIGNALS)
+    assert (signal["review"]["agree"], signal["review"]["votes"]) == (2, 2)
+    assert signal["review"]["note"].startswith("1 dari 3 suara AI tidak jalan")
+
+
+async def feed_rally2(service: SignalService, clock: ManualClock, start: datetime) -> None:
+    for minute in range(6):
+        clock.set(start + timedelta(minutes=minute))
+        await service.handle_context(msg("market.context", bullish(clock.now(), 2645.0 + minute)))
 
 
 async def test_past_the_daily_ceiling_the_engine_decides_alone_and_says_why(

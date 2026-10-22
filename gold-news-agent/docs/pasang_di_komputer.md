@@ -156,6 +156,15 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      (`XAUUSD`, `XAUUSDm`, `XAUUSD.r`, `GOLD`, ...; yang ada di Market Watch didahulukan).
      Bila MT5 ditutup, program pindah ke PAXG dan kembali ke MT5 paling lambat 15 menit setelah
      MT5 dibuka lagi; riwayat candle dimuat ulang dari feed baru supaya dua harga tidak tercampur.
+     Di MT5, tombol **Algo Trading** harus hijau dan terminal tetap terbuka serta login; tanpa itu
+     harga di dashboard "tidak tersedia". Dari terminal yang sama program juga membaca **pasar
+     penggerak emas**: indeks dolar dari pasangan FX broker (EURUSD wajib; USDJPY, GBPUSD,
+     USDCAD, USDSEK, USDCHF bila ada), perak (XAGUSD), minyak (XTIUSD/USOIL), dan bila broker
+     menyediakannya: yield/obligasi AS 10 tahun, S&P 500, dan VIX. Nama simbol dicari sendiri
+     (akhiran seperti `m`, `.r`, `.cash` dikenali). Bila satu tidak ketemu, sebutkan namanya,
+     mis. `uv run gold-agent config set market.mt5_symbols "{US500: SPX500.cash}"`
+     (kunci: `DXY`, `US10Y`, `USDJPY`, `XAGUSD`, `WTI`, `US500`, `VIX`, atau pasangan FX seperti
+     `EURUSD`).
    - **Tanpa MT5:** `auto` memakai Binance PAXG, token emas 24/7 yang harganya berselisih
      beberapa dolar dari XAUUSD spot dan diberi label *proxy* di setiap sinyal.
 4. **[Windows]** Agar log tersimpan saat berjalan otomatis (langkah 10), isi `logging.file`
@@ -167,16 +176,30 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
    - setelah ada data, timeframe yang terbukti paling akurat di sesi itu (akurasi prediksi
      30 hari, batas bawah 95%-nya di atas 50%) menggantikan bawaan;
    - timeframe yang spread-nya terlalu besar dibanding SL (`max_cost_ratio`) dilewati;
-   - **Opus 5.5 memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
-     chart-nya dari timeframe yang layak. Opus menjawab 3 kali secara terpisah dan bersamaan
-     (`llm.desk_votes`), lalu suara terbanyak yang dipakai (seri = TUNGGU); jumlah suara dan
-     alasan suara yang menahan tampil di sinyal. Angka harga, SL, dan TP tetap dihitung sistem.
+   - **Komite AI memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
+     chart-nya dari timeframe yang layak. Tiga jawaban terpisah dan bersamaan
+     (`llm.desk_votes`): **Claude Fable 5.1** (model Anthropic paling mampu, suaranya dihitung
+     2×) dan dua **Claude Opus 5.5**. Trade hanya lolos bila Fable setuju *dan* minimal satu Opus
+     ikut setuju; bila Fable tidak tersedia, kedua Opus harus sepakat. Jumlah suara dan alasan
+     suara yang menahan tampil di sinyal. Angka harga, SL, dan TP tetap dihitung sistem.
    Timeframe tetap juga bisa: `uv run gold-agent config set trading.timeframe.select M5`.
 6. Biaya AI (`budget`). `llm_daily_usd` (bawaan **$20/hari**) adalah batas keras: tidak ada
    panggilan Claude yang dimulai bila bisa melewatinya. Berita biasa, outlook, dan laporan
    berhenti di 75 % (`priority_reserve_pct: 25`, jadi $15); sisa $5 khusus untuk keputusan sinyal
-   dan berita berdampak tinggi. Contoh menurunkan batas ke $10:
+   dan berita berdampak tinggi. Satu review komite sekitar $0,45 dan dibatasi
+   `llm.desk_reviews_per_day` (30) review per hari. Contoh menurunkan batas ke $10:
    `uv run gold-agent config set budget.llm_daily_usd 10`.
+7. Fundamental harian (`market.fundamentals_refresh_minutes`, bawaan 60). Bias harian emas
+   dibangun dari: yield riil AS 10 tahun dan yield 2 tahun (Treasury AS), inflasi ekspektasi
+   (breakeven), tren dolar, posisi spekulan besar di futures emas COMEX (CFTC COT), arus ETF
+   emas GLD, indeks kejutan data AS (dari rilis yang dicatat program sendiri), dan panasnya
+   berita geopolitik. Treasury dan CFTC adalah data publik pemerintah AS; installer dan updater
+   mengujinya dari komputermu dan mengaktifkan yang lolos. GLD (situs SPDR) **tidak** diaktifkan
+   otomatis karena syarat situsnya membatasi penyalinan. Bila sudah membaca
+   `https://www.spdrgoldshares.com/usa/terms` dan boleh, aktifkan:
+   `uv run gold-agent verify-sources --only spdr_gld_holdings` lalu
+   `uv run gold-agent config verified spdr_gld_holdings`. Faktor yang datanya belum ada
+   dihitung netral dan disebut di dashboard.
 
 Jam tenang (00:00–05:00 WIB), ambang sinyal, dan batas rugi harian juga ada di
 `config\settings.yaml` dan bisa ditimpa dengan cara yang sama.
@@ -211,7 +234,8 @@ Idealnya putaran 2 jam mencakup rilis data AS (19:30 atau 20:30 WIB). Hasilnya a
 `docs\source_report.md`. Untuk tiap sumber berstatus ✅ OK:
 
 1. Buka `tos_url` sumber itu di `config\sources.yaml` dan baca syarat penggunaannya.
-2. Bila boleh dipakai, ubah `status: candidate` menjadi `status: verified`.
+2. Bila boleh dipakai: `uv run gold-agent config verified <id_sumber>` (bisa beberapa id
+   sekaligus). Tandanya disimpan di `config\sources.local.yaml`, jadi aman saat update.
 
 Sumber harga Binance (`binance_paxg_ws`, `binance_paxg_rest`) juga harus verified bila dipakai.
 MT5 tidak perlu, karena terminalnya ada di komputermu sendiri.

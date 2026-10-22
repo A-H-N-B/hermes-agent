@@ -12,7 +12,8 @@ Every candidate timeframe (M1 ... H1) is weighed on what can be measured:
 The proven timeframe with the highest lower bound wins. Without one, the session default
 (`session_prior`) applies, or the nearest usable timeframe (higher first) when the default
 cannot be used. The current timeframe stays unless the winner is clearly better (HYSTERESIS), so
-the chart does not flap. Opus 5.5 makes the final pick when it reviews a signal (desk.py).
+the chart does not flap. The AI committee makes the final pick when it reviews a signal
+(desk.py).
 """
 
 from __future__ import annotations

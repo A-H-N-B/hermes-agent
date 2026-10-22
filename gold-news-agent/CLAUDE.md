@@ -16,7 +16,7 @@ LLM triage → signal engine → Telegram + dashboard, with paper-trading evalua
 ```bash
 uv sync                                              # create/refresh .venv (Python 3.12)
 uv run pytest -q                                     # tests
-uv run pytest -q -m slow                             # + whole-day replay E2E (~2 min)
+uv run pytest -q -m slow                             # + whole-day replay E2E (~4 min)
 uv run ruff check . && uv run ruff format --check .  # lint/format
 uv run pyright                                       # strict type check
 uv run gold-agent verify-sources                     # one verification pass -> docs/source_report.md
@@ -209,5 +209,28 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   A feed switch (PAXG <-> MT5) resets the candle builder and reloads history from the feed now
   producing ticks (`FailoverAdapter.history` asks the active feed first), so two instruments'
   bars are never mixed.
+  Accuracy layer (ADR-018..021). Related markets from the broker's MT5
+  (`market/cross_assets.py`): symbols matched by name (suffix-tolerant, Market Watch first,
+  `market.mt5_symbols` overrides), DXY from the broker's FX pairs (partial basket fixed once
+  resolved, EURUSD required), bond futures inverted, per-market 15m/1h z-scores and the 5-min
+  return correlation with gold shrunk to a prior (150 pairs) that sets each market's weight in M;
+  `usd_source: auto`. Daily fundamentals (`fundamentals/`, kv `fundamentals`, 15% of M):
+  Treasury nominal/real curves (`${YEAR}` URL), CFTC disaggregated managed money, GLD holdings
+  (never auto-verified: SPDR's terms), our US data-surprise index, geopolitics heat -> bias in
+  [-1, 1]; a factor without data counts as neutral (0) and is named. Quant (`market/quant.py`): GARCH(1,1) MLE
+  (EWMA fallback), Hurst, efficiency ratio, ADX, MACD, a Kalman drift filter whose t is
+  calibrated on random walks (|t| >= 2 about 5%), regime thresholds calibrated the same way
+  (tests guard both). `signals/odds.py`: TP1-before-SL by antithetic Monte Carlo over the
+  validity window, drift only from a proven edge (Wilson lower bound > 0.5), blended
+  (Dirichlet, 20 pseudo-setups) with the replayed record of past setups (`signals/setups.py`,
+  one trade at a time, stop first on a two-sided bar); EV in R; the EV gate waits when the whole
+  95% EV band is negative with >= `ev_gate_min_setups` setups. `Signal.odds` shows in Telegram,
+  on Live and in the brief. Committee: route `desk` = Fable 5.1 (weight 2) + `desk_second` =
+  2x Opus 5.5; a trade needs Fable plus one Opus, or both Opus when Fable fails;
+  `desk_reviews_per_day` 30 (about $0.45 a review). Dashboard: per-timeframe detail cards with a
+  glossary and the "Pasar penggerak emas" card (related markets, macro parts, fundamentals).
+  Windows: the updater tests the official fundamentals sources and marks the passing ones
+  verified (step 6/7); the "Perbarui" shortcut runs the newest updater (fetched first), so a
+  change to the update steps applies on the same update.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

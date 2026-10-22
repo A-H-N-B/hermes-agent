@@ -63,6 +63,8 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
         "📰 Pemicu: Serangan rudal memicu permintaan aset aman. — wire (diterima 300 dtk)"
     )
     assert lines[9].startswith("📊 Berita +0.66 · Makro +0.57 · Teknikal +0.62")
+    assert lines[10].startswith("🎲 Peluang TP1 sebelum SL ")  # odds of the plan, model-based
+    assert lines[10].endswith("(model volatilitas)")
     assert any(line.startswith("⚠️ Batal jika: harga menembus SL 2643.60") for line in lines)
     assert "📅 Event berikutnya: USD Retail Sales m/m pukul 21:35 WIB (2 jam lagi)" in lines
     assert any("isi risk.account_equity" in line for line in lines)  # no guessed lot size
@@ -79,11 +81,13 @@ def test_an_opus_decision_shows_its_vote_count_and_the_dissent(settings: Setting
         votes=3,
         agree=2,
         dissent="harga sudah jauh dari EMA20",
+        models=["claude-fable-5-1", "claude-opus-5-5"],
     )
     signal = make_signal(settings).model_copy(update={"review": review})
     lines = render_signal(signal, now=NOW, next_event=None).split("\n")
     assert lines[3] == (
-        "🤖 Diputuskan Opus 5.5 · 2/3 suara · confidence AI 74/100 · berita &amp; chart M15 searah"
+        "🤖 Diputuskan AI (Fable 5.1 + Opus 5.5) · 2/3 suara · confidence AI 74/100 · "
+        "berita &amp; chart M15 searah"
     )
     assert lines[4] == "⚠️ Catatan AI: CPI &lt;besok&gt;"
     assert lines[5] == "🗳️ Suara yang menahan: harga sudah jauh dari EMA20"

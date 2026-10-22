@@ -16,8 +16,9 @@ from gold_agent.dashboard.indicators_view import (
 )
 from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
+from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
 from gold_agent.market.reads import momentum
-from gold_agent.models import Analysis, CalendarEvent, Candle, MarketContext
+from gold_agent.models import Analysis, CalendarEvent, Candle, FundamentalSnapshot, MarketContext
 from gold_agent.ops.metrics import summarize as latency_summary
 from gold_agent.signals.accuracy import WARMUP_BARS as FORECAST_BARS
 from gold_agent.signals.accuracy import AccuracyBook
@@ -172,9 +173,11 @@ class DashboardData:
             name: momentum(await ctx.market.latest_candles(name, 120, source=source))
             for name in SUMMARY_TFS
         }
+        stored = await ctx.ops.kv_get(KV_FUNDAMENTALS)
+        fundamentals = FundamentalSnapshot.model_validate(stored) if stored else None
         return {
             "series": indicator_series(bars, limit),
-            "summary": indicator_summary(await ctx.market.latest_context(), extras),
+            "summary": indicator_summary(await ctx.market.latest_context(), extras, fundamentals),
         }
 
     async def timing(self) -> JSON:
@@ -252,7 +255,7 @@ class DashboardData:
         return dataclasses.asdict(perf) | {"desk": await self._desk(now)}
 
     async def _desk(self, now: datetime) -> JSON:
-        """How the candidates Opus approved did against the ones it held back (signals/desk.py)."""
+        """How the candidates the AI approved did against those it held back (signals/desk.py)."""
         stored = await self._ctx.ops.kv_get(KV_DESK) or {}
         reviews: list[JSON] = list(stored.get("reviews") or [])
         bars: list[Candle] = []

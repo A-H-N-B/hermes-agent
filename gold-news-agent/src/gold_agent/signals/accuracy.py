@@ -18,6 +18,7 @@ from gold_agent.core.app import AppContext
 from gold_agent.models import CalendarEvent
 from gold_agent.signals.forecast import SPAN
 from gold_agent.signals.forecast_score import Held, forecast_accuracy
+from gold_agent.signals.setups import setup_outcomes
 from gold_agent.timeutils.sessions import SessionClock
 
 JSON = dict[str, Any]
@@ -84,6 +85,7 @@ class AccuracyBook:
                 tf, start - SPAN[tf] * WARMUP_BARS, now, source=source
             )
             settings = self._ctx.settings
+            engine = settings.signal_engine
             result = await asyncio.to_thread(
                 forecast_accuracy,
                 tf=tf,
@@ -91,8 +93,21 @@ class AccuracyBook:
                 scores=shared.scores,
                 held=shared.held,
                 events=shared.events,
-                threshold=settings.signal_engine.entry_threshold,
+                threshold=engine.entry_threshold,
                 confirm=timedelta(seconds=settings.trading.post_release_confirm_seconds),
+                now=now,
+                start=start,
+                session_of=self._sessions.session,
+            )
+            result["setups"] = await asyncio.to_thread(
+                setup_outcomes,
+                bars=bars,
+                scores=shared.scores,
+                held=shared.held,
+                threshold=engine.entry_threshold,
+                sl_atr=engine.levels.sl_atr_multiple,
+                tp1_r=engine.levels.tp_r_multiples[0],
+                validity_bars=engine.validity_bars,
                 now=now,
                 start=start,
                 session_of=self._sessions.session,
@@ -104,9 +119,14 @@ class AccuracyBook:
     async def table(
         self, *, source: str | None, timeframes: Sequence[str] = TRADE_TIMEFRAMES
     ) -> dict[str, dict[str, JSON]]:
-        """timeframe -> session -> tally, what the timeframe choice reads."""
+        """timeframe -> session -> tally, what the timeframe choice reads. Each session's tally
+        also carries how the timeframe's past setups ended (all sessions: signals/odds.py)."""
         table: dict[str, dict[str, JSON]] = {}
         for tf in timeframes:
-            result = await self.accuracy(tf, source=source)
-            table[tf] = (result or {}).get("by_session") or {}
+            result = await self.accuracy(tf, source=source) or {}
+            setups = result.get("setups")
+            table[tf] = {
+                session: {**tally, "setups": setups} if setups else tally
+                for session, tally in (result.get("by_session") or {}).items()
+            }
         return table

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from gold_agent.config import Settings
-from gold_agent.models import Level, MarketContext
+from gold_agent.models import CrossAsset, Level, MarketContext
 from gold_agent.signals.levels import compute_levels, position_size
 from gold_agent.signals.scoring import (
     confidence,
@@ -76,6 +76,35 @@ def test_strong_dollar_and_rising_real_yields_are_bearish_for_gold() -> None:
     nominal_only, _ = macro_component(market(us10y_change_1d=0.05))
     assert nominal_only == pytest.approx(-math.tanh(1.0))  # nominal stands in for real
     assert macro_component(market()) == (0.0, False)
+
+
+def test_macro_reads_live_markets_by_their_link_and_the_days_fundamentals(
+    settings: Settings,
+) -> None:
+    def asset(key: str, weight: float, effect: float) -> CrossAsset:
+        return CrossAsset(
+            key=key,
+            label=key,
+            symbol=key,
+            corr=-0.4,
+            relevance=1.0,
+            effect=effect,
+            weight=weight,
+            why="-",
+        )
+
+    context = market(
+        cross={"DXY": asset("DXY", 0.4, -0.6), "XAGUSD": asset("XAGUSD", 0.1, 0.5)},
+        fundamental_bias=0.3,
+        real_yield_change_1d=0.2,  # covered by the daily bias: not counted twice
+    )
+    value, available = macro_component(context)
+    assert available and value == pytest.approx((0.4 * -0.6 + 0.1 * 0.5 + 0.15 * 0.3) / 0.65)
+    weights = settings.signal_engine.weights
+    breakdown = score([], context, weights=weights, now=T0, price_at=flat_prices(2650))
+    assert [label for label, _ in breakdown.macro_parts] == ["DXY", "XAGUSD", "fundamental harian"]
+    broken = market(cross={"DXY": asset("DXY", 0.4, 0.0)})  # the link broke: no pull, no flip
+    assert macro_component(broken) == (0.0, True)
 
 
 def test_price_check_measures_the_move_since_the_news_in_atr_units() -> None:

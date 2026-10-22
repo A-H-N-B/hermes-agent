@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from gold_agent.core.app import build_context
 from gold_agent.core.logging import configure_logging
 from gold_agent.core.service import install_signal_handlers, run_with_restart
+from gold_agent.market.usd import DXY_WEIGHTS
 
 
 class SubParsers(Protocol):
@@ -39,7 +40,12 @@ async def mt5_bridge(_args: argparse.Namespace) -> int:
         print("yang menjalankan terminal MT5 (uv sync --extra mt5).")
         await ctx.close()
         return 2
-    fx = settings.market.mt5_fx_symbols if settings.market.usd_source == "mt5_synthetic" else {}
+    names = settings.market.mt5_symbols
+    fx = (
+        {pair: names.get(pair, pair) for pair in DXY_WEIGHTS}
+        if settings.market.usd_source in ("auto", "mt5_synthetic")
+        else {}
+    )
     publisher = BridgePublisher(
         adapter, ctx.bus, history=settings.market.history_bars, fx_symbols=fx
     )

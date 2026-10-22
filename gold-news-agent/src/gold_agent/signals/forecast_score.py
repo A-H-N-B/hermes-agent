@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from gold_agent.market import indicators as ind
+from gold_agent.market import quant
 from gold_agent.market.context import trend_of
 from gold_agent.market.reads import SAR, STOCH, timeframe_read
 from gold_agent.models import CalendarEvent, Candle
@@ -54,9 +55,12 @@ def chart_scores(tf: str, bars: Sequence[Candle]) -> list[float]:
     rsi, atr = ind.rsi(closes, 14), ind.atr(highs, lows, closes, 14)
     stoch_k, stoch_d = ind.stochastic(highs, lows, closes, *STOCH)
     sar, sar_dir = ind.parabolic_sar(highs, lows, *SAR)
+    _, _, macd_hist = ind.macd(closes)
+    _, kalman_slope, kalman_se = quant.kalman_series(closes)
     scores: list[float] = []
     for i, close in enumerate(closes):
         fast, slow = _value(ema20, i), _value(ema50, i)
+        slope, se = _value(kalman_slope, i), _value(kalman_se, i)
         state = TimeframeState.model_construct(
             tf=tf,
             close=close,
@@ -66,6 +70,8 @@ def chart_scores(tf: str, bars: Sequence[Candle]) -> list[float]:
             rsi14=_value(rsi, i),
             atr14=_value(atr, i),
             trend=trend_of(close, fast, slow),
+            macd_hist=_value(macd_hist, i),
+            kalman_t=slope / se if slope is not None and se else None,
         )
         has_sar = _value(sar, i) is not None
         extra = {
@@ -97,7 +103,7 @@ class Tally:
         }
 
 
-def _news(
+def engine_view(
     at: datetime,
     scores: Sequence[tuple[datetime, float]],
     held: Sequence[Held],
@@ -146,7 +152,7 @@ def forecast_accuracy(
         at = bar.close_time
         if at < start or after.open_time != at or after.close_time > now:
             continue  # warm-up, a gap (closed market, missing data), or the next bar still open
-        news = _news(at, scores, held, threshold, cursor)
+        news = engine_view(at, scores, held, threshold, cursor)
         if news is None:
             skipped += 1
             continue

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import time
+from datetime import UTC, datetime, time
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
@@ -28,6 +28,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = PROJECT_ROOT / "config"
 
 _PLACEHOLDER = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
+# Filled by the program, not from .env: ${YEAR} is the current UTC year (yearly data files).
+BUILTIN_PLACEHOLDERS = frozenset({"YEAR"})
 
 
 class StrictModel(BaseModel):
@@ -118,7 +120,7 @@ class Source(StrictModel):
         scheme = "wss://" if self.type is SourceType.WEBSOCKET else "https://"
         if not self.url.startswith(scheme):
             raise ValueError(f"{self.id}: url must start with {scheme}")
-        undeclared = self.placeholders() - set(self.requires_env)
+        undeclared = self.placeholders() - set(self.requires_env) - BUILTIN_PLACEHOLDERS
         if undeclared:
             raise ValueError(f"{self.id}: url uses undeclared env vars {sorted(undeclared)}")
         return self
@@ -151,11 +153,14 @@ class SourceRegistry(StrictModel):
         raise KeyError(source_id)
 
 
-def expand_url(template: str, env: dict[str, str]) -> str:
-    """Fill ${VAR} placeholders; raises KeyError naming the first missing variable."""
+def expand_url(template: str, env: dict[str, str], *, year: int | None = None) -> str:
+    """Fill ${VAR} placeholders (${YEAR}: `year`, else the current UTC year); raises KeyError
+    naming the first missing variable."""
 
     def _sub(match: re.Match[str]) -> str:
         name = match.group(1)
+        if name == "YEAR":
+            return str(year or datetime.now(UTC).year)
         value = env.get(name)
         if not value:
             raise KeyError(name)
@@ -297,6 +302,9 @@ class SignalEngineSettings(StrictModel):
     conflict_threshold: float = Field(gt=0, le=1)
     validity_bars: int = Field(ge=1, le=96)  # candles of the signal's timeframe
     max_chase_atr: float = Field(gt=0)  # no entry further than this many ATR from the EMA20
+    # With at least this many past setups on the chart, a plan whose expected value is
+    # negative across its whole 95% band waits (signals/odds.py); 0 switches the check off.
+    ev_gate_min_setups: int = Field(ge=0)
     publish_state_seconds: float = Field(gt=0)
     evaluate_seconds: float = Field(gt=0)
     levels: LevelSettings
@@ -348,7 +356,7 @@ class ModelPrice(StrictModel):
     cache_read: float = Field(ge=0)
 
 
-ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk")
+ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk", "desk_second")
 
 # Models on which `thinking: {type: "disabled"}` is a 400 at every effort level: thinking is
 # always on and `effort` is the only control.
@@ -366,8 +374,9 @@ class LlmSettings(StrictModel):
     deep: LlmRoute
     outlook: LlmRoute
     brief: LlmRoute
-    desk: LlmRoute  # Opus's final BUY/SELL/WAIT + timeframe of a signal
-    desk_votes: int = Field(ge=1, le=5)  # independent answers per review; the majority decides
+    desk: LlmRoute  # the lead vote on a signal's final BUY/SELL/WAIT + timeframe
+    desk_second: LlmRoute  # the other votes (independent second opinions)
+    desk_votes: int = Field(ge=1, le=5)  # 1 lead + (n - 1) second opinions, in parallel
     desk_reviews_per_day: int = Field(ge=0)
     # Server-side refusal fallback: if a safety classifier declines a request (false positives
     # happen on benign news), the API re-runs it on the model Anthropic recommends for that
@@ -459,13 +468,16 @@ class MarketSettings(StrictModel):
     spread_window_minutes: int = Field(gt=0)
     round_levels: tuple[float, ...]
     swing_half_width: int = Field(ge=1)
-    usd_source: Literal["binance_eurusdt", "mt5_synthetic", "none"]
+    usd_source: Literal["auto", "binance_eurusdt", "mt5_synthetic", "none"]
     usd_history_days: int = Field(gt=0)
     fred_refresh_minutes: int = Field(gt=0)
+    fundamentals_refresh_minutes: int = Field(gt=0)
     twelvedata_symbol: str
     twelvedata_poll_seconds: float = Field(gt=0)
     mt5_poll_ms: int = Field(gt=0)
-    mt5_fx_symbols: dict[str, str]
+    # Broker names for related markets / DXY pairs when automatic matching misses them
+    # (logical name -> broker symbol, e.g. {US500: "SPX500.cash"}). Empty = found by name.
+    mt5_symbols: dict[str, str]
 
 
 class PaperSettings(StrictModel):

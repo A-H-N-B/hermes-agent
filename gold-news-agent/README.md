@@ -40,6 +40,15 @@ tambahan hasil review Fase 0).
   ditebak.
 - Outlook 24 jam dibuat tiap jam (dan saat berita penting); jam > 4 jam ke depan ditulis bersyarat.
   Minggu 16:00 WIB ada "outlook pembukaan Senin" dengan estimasi gap dari PAXG.
+- Makro M membaca pasar penggerak emas langsung dari MT5 (dolar dari pasangan FX broker, yield AS,
+  USDJPY, perak, minyak, S&P 500, VIX), masing-masing dibobot menurut korelasinya dengan emas yang
+  terukur, ditambah bias fundamental harian (yield riil & 2 th Treasury AS, breakeven, posisi
+  spekulan CFTC, arus ETF GLD, kejutan data AS, geopolitik).
+- Tiap rencana trade membawa peluang TP1 sebelum SL dan nilai harapan (EV) dalam R: volatilitas
+  GARCH + Monte Carlo, drift hanya dari keunggulan yang sudah terbukti, digabung dengan hasil
+  setup serupa di masa lalu. Setup yang terbukti rugi (seluruh pita 95 % EV negatif) menunggu.
+- Keputusan akhir: komite AI tiga suara (Claude Fable 5.1, dihitung 2×, dan dua Claude Opus 5.5).
+  Trade lolos hanya bila Fable dan minimal satu Opus setuju. Biaya AI dibatasi keras $20/hari.
 
 Semua angka di atas ada di `config/settings.yaml` dan bisa diubah tanpa mengubah kode: tulis
 nilai sendiri di `config/local.yaml` (tidak ikut git) atau `uv run gold-agent config set KEY NILAI`.
@@ -177,7 +186,7 @@ tidak ada informasi dari masa depan yang ikut terpakai.
 
 ```bash
 uv run pytest -q
-uv run pytest -q -m slow          # replay satu hari penuh end-to-end (±2 menit)
+uv run pytest -q -m slow          # replay satu hari penuh end-to-end (±4 menit)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```
@@ -199,9 +208,12 @@ src/gold_agent/
   processing/      normalisasi, dedup/cluster, prefilter kata kunci
   analysis/        triage LLM, aturan fallback, verifikasi silang, lonjakan harga
   econ_calendar/   kalender (FF + FOMC), parser rilis (fast path), playbook, kalibrasi surprise
-  market/          adapter harga (Binance PAXG, Twelve Data, MT5), candle, indikator, level
+  fundamentals/    bias harian: yield Treasury, CFTC COT, GLD, kejutan data AS, geopolitik
+  market/          adapter harga (Binance PAXG, Twelve Data, MT5), candle, indikator, level,
+                   pasar penggerak dari MT5, statistik (GARCH, Hurst, Kalman, rezim)
   timeutils/       sesi pasar & DST, jam rawan
-  signals/         skor gabungan, SL/TP & lot, mesin sinyal, outlook 24 jam, profil per jam
+  signals/         skor gabungan, SL/TP & lot, mesin sinyal, peluang & EV, komite AI,
+                   outlook 24 jam, profil per jam
   notify/          template Telegram, kebijakan prioritas, dispatcher, perintah bot
   dashboard/       FastAPI + WebSocket, halaman statis (JS polos, CSP ketat), grafik vendored
   services/        collector, market, calendar, analyzer, signal, paper, evaluator, notifier,

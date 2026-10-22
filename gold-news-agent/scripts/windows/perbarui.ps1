@@ -7,8 +7,10 @@
 # Stops the agent, moves any edit made to config\settings.yaml or config\sources.yaml into this
 # computer's own config\local.yaml / config\sources.local.yaml (the full diff is kept in
 # data\backups), pulls the new version, installs its dependencies, checks that the config still
-# loads, then starts the agent again. .env, data\ and the local config files are never touched.
-# On any failure before the new version is in place, the old version is started again.
+# loads, tests the official data sources the new version reads and switches on the ones that
+# answer from this computer, then starts the agent again. .env, data\ and the local config files
+# are never touched. On any failure before the new version is in place, the old version is
+# started again.
 # Kept ASCII-only: Windows PowerShell 5.1 reads `irm | iex` text without an encoding hint.
 
 function Update-GoldNewsAgent {
@@ -18,8 +20,12 @@ function Update-GoldNewsAgent {
     $Root = Join-Path $Base 'gold-news-agent'
     $Win = Join-Path $Root 'scripts\windows'
     $Python = Join-Path $Root '.venv\Scripts\python.exe'
+    $Exe = Join-Path $Root '.venv\Scripts\gold-agent.exe'
+    # US government data behind the daily fundamentals (public domain, no key). A source that
+    # does not answer from this computer stays off and is tried again on the next update.
+    $Official = @('treasury_yield_curve', 'treasury_real_yield_curve', 'cftc_cot_gold')
 
-    function Step($n, $text) { Write-Host ""; Write-Host "=== LANGKAH $n/6: $text ===" -ForegroundColor Cyan }
+    function Step($n, $text) { Write-Host ""; Write-Host "=== LANGKAH $n/7: $text ===" -ForegroundColor Cyan }
     function Ok($text) { Write-Host "  OK  $text" -ForegroundColor Green }
     function Warn($text) { Write-Host "  !!  $text" -ForegroundColor Yellow }
     function Fail($text) { Write-Host "  XX  $text" -ForegroundColor Red }
@@ -69,7 +75,7 @@ function Update-GoldNewsAgent {
 
     Step 5 'Memeriksa pengaturan'
     # Settings this version no longer has are dropped from config\local.yaml (and listed).
-    & (Join-Path $Root '.venv\Scripts\gold-agent.exe') config repair
+    & $Exe config repair
     if ($LASTEXITCODE -ne 0) {
         Fail 'Pengaturan tidak valid untuk versi baru (lihat tulisan merah: nama field-nya disebut).'
         Fail 'Perbaiki atau hapus baris itu di config\local.yaml, lalu klik "Jalankan Gold News Agent".'
@@ -77,7 +83,24 @@ function Update-GoldNewsAgent {
     }
     Ok 'Pengaturan valid'
 
-    Step 6 'Menyalakan program'
+    Step 6 'Menguji sumber data resmi (Treasury AS, CFTC)'
+    # The report goes to data\ so git sees no changed file on the next update.
+    $Report = Join-Path $Root 'data\source_report_update.json'
+    Remove-Item $Report -ErrorAction SilentlyContinue
+    & $Exe verify-sources --only ($Official -join ',') --note 'update' --out-md (Join-Path $Root 'data\source_report_update.md') --out-json $Report
+    $passed = @()
+    if (Test-Path $Report) {
+        $passed = @((Get-Content $Report -Raw | ConvertFrom-Json).results | Where-Object { $_.status -in 'ok', 'warn' } | ForEach-Object { $_.source_id })
+    }
+    if ($passed.Count) {
+        & $Exe config verified @passed
+        if ($LASTEXITCODE -eq 0) { Ok "Aktif: $($passed -join ', ')" }
+        else { Warn 'Sumber tidak bisa diaktifkan (lihat tulisan merah di atas).' }
+    }
+    $failed = @($Official | Where-Object { $passed -notcontains $_ })
+    if ($failed.Count) { Warn "Belum terjangkau dari jaringan ini (dicoba lagi saat update berikutnya): $($failed -join ', ')" }
+
+    Step 7 'Menyalakan program'
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Perbarui Gold News Agent.lnk'))
     $link.TargetPath = Join-Path $Win 'perbarui.cmd'

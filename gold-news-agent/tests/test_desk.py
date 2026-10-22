@@ -178,6 +178,12 @@ def test_the_brief_carries_the_systems_numbers_and_neutralised_news(settings: Se
     # Opus also reads the careful (deep) reading of a high-impact story, neutralised too.
     assert "analisis mendalam: bullish (yakin 65%) · Data ‹b›lemah‹/b› menekan USD" in brief
     assert "risiko: Powell hawkish malam ini" in brief
+    # The committee also reads the plan's odds, the chart statistics, related markets and the
+    # day's fundamentals, and is told plainly when a source has no data.
+    assert "<peluang>Peluang TP1 sebelum SL" in brief and "EV" in brief
+    assert "rezim " in brief and "tren Kalman t" in brief
+    assert "- data pasar terkait (MT5) tidak tersedia" in brief
+    assert "<fundamental>data fundamental harian tidak tersedia</fundamental>" in brief
 
 
 def m1(start: Any, lows_highs: list[tuple[float, float]]) -> list[Candle]:
@@ -225,3 +231,30 @@ def test_approved_and_held_candidates_are_scored_the_same_way() -> None:
     result = compare_reviews(reviews, bars, NOW + timedelta(minutes=5))
     assert (result["approved"]["tp1"], result["approved"]["tp1_rate"]) == (1, 1.0)
     assert (result["held"]["sl"], result["held"]["open"], result["held"]["n"]) == (1, 1, 2)
+
+
+def test_the_lead_counts_double_so_a_trade_needs_it_and_one_more(settings: Settings) -> None:
+    buy = candidate(settings)
+    choice = choose_timeframe(context=CONTEXT, session="overlap", settings=settings, accuracy={})
+
+    def decide(*answers: str) -> Verdict:
+        votes = [
+            verify(answer(a), candidate=buy, choice=choice, model="m", at=NOW) for a in answers
+        ]
+        return tally(votes, [], candidate=buy, choice=choice, at=NOW, weights=[2, 1, 1])
+
+    assert decide("BUY", "BUY", "WAIT").approved  # lead + one: 3 of 4
+    assert not decide("BUY", "WAIT", "WAIT").approved  # lead alone: a 2-2 tie holds
+    held = decide("WAIT", "BUY", "BUY")  # both others without the lead: a tie holds too
+    assert not held.approved and held.count == " (1/3 suara, suara m dihitung 2×)"
+    even = tally(
+        [
+            verify(answer(a), candidate=buy, choice=choice, model="m", at=NOW)
+            for a in ("BUY", "WAIT")
+        ],
+        [],
+        candidate=buy,
+        choice=choice,
+        at=NOW,
+    )
+    assert not even.approved and even.count == " (1/2 suara)"  # equal weights: no doubling

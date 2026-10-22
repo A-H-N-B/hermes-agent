@@ -1,7 +1,10 @@
 """Composite score (section 10.1–10.2). Every component lives in [-1, 1]; positive = bullish gold.
 
 N  news:   tanh( Σ dir × impact/5 × confidence × reliability × weight × decay )
-M  macro:  USD momentum (−z) and real-yield change (−Δ), whichever are available
+M  macro:  the markets that move gold, read live from the broker (dollar, US yields, USDJPY,
+           silver, oil, S&P 500, VIX: each its 15m/1h move as a z-score, counting as much as
+           its measured link with gold supports, market/cross_assets.py), the daily yields,
+           and the day's fundamental bias (fundamentals/); weighted mean of what is available
 T  trend:  H1/H4 EMA trend, RSI regime, price vs session VWAP
 P  price:  move since the dominant news (or recent momentum), in ATR(M15) units
 S = (wN·N + wM·M + wT·T + wP·P) × session liquidity factor
@@ -37,6 +40,9 @@ class ScoreBreakdown:
     composite_confirmed_only: float
     contributions: list[NewsContribution] = field(default_factory=lambda: list[NewsContribution]())
     macro_available: bool = False
+    macro_parts: list[tuple[str, float]] = field(
+        default_factory=lambda: list[tuple[str, float]]()
+    )  # (label, signed contribution to M), strongest first
     dominant: NewsContribution | None = None
     dominant_confirmed: NewsContribution | None = None  # strongest story not needing confirmation
     n_confirmed: float = 0.0
@@ -84,20 +90,39 @@ def news_contributions(
     return result
 
 
-def macro_component(context: MarketContext) -> tuple[float, bool]:
-    parts: list[tuple[float, float]] = []
-    if context.dxy_z_1h is not None or context.dxy_z_15m is not None:
+USD_WEIGHT = 0.40  # the dollar when only a USD proxy is available (no broker markets)
+DAILY_YIELD_WEIGHT = 0.15  # yesterday's 10-year yield change, when no daily bias exists
+FUNDAMENTAL_WEIGHT = 0.15  # the day's fundamental bias next to the live markets (sum 1.0)
+
+
+def macro_parts(context: MarketContext) -> list[tuple[str, float, float]]:
+    """(label, weight, pull on gold -1..1) of every macro input this context has."""
+    parts: list[tuple[str, float, float]] = []
+    for asset in context.cross.values():
+        if asset.effect is not None:
+            parts.append((asset.label, asset.weight, asset.effect))
+    if "DXY" not in context.cross and (
+        context.dxy_z_1h is not None or context.dxy_z_15m is not None
+    ):
         z = 0.6 * (context.dxy_z_1h or 0.0) + 0.4 * (context.dxy_z_15m or 0.0)
-        parts.append((0.7, -math.tanh(z / 2)))
-    change = context.real_yield_change_1d
-    if change is None:
-        change = context.us10y_change_1d
-    if change is not None:
-        parts.append((0.3, -math.tanh(change / 0.05)))  # 5 bp/day is a notable move
+        parts.append((f"USD ({context.dxy_source or 'proxy'})", USD_WEIGHT, -math.tanh(z / 2)))
+    if context.fundamental_bias is not None:
+        parts.append(("fundamental harian", FUNDAMENTAL_WEIGHT, context.fundamental_bias))
+    else:
+        change = context.real_yield_change_1d
+        if change is None:
+            change = context.us10y_change_1d
+        if change is not None:  # 5 bp/day is a notable move
+            parts.append(("yield AS 10 th (harian)", DAILY_YIELD_WEIGHT, -math.tanh(change / 0.05)))
+    return parts
+
+
+def macro_component(context: MarketContext) -> tuple[float, bool]:
+    parts = macro_parts(context)
     if not parts:
         return 0.0, False
-    total = sum(w for w, _ in parts)
-    return sum(w * v for w, v in parts) / total, True
+    total = sum(weight for _, weight, _ in parts)
+    return _clip(sum(weight * pull for _, weight, pull in parts) / total), True
 
 
 def technical_component(context: MarketContext) -> float:
@@ -164,6 +189,13 @@ def score(
     notes: list[str] = []
     if not macro_ok:
         notes.append("komponen makro tidak tersedia (USD/yield) → M = 0")
+    parts = macro_parts(context)
+    total = sum(weight for _, weight, _ in parts) or 1.0
+    macro_pulls = sorted(
+        ((label, round(weight * pull / total, 4)) for label, weight, pull in parts),
+        key=lambda item: abs(item[1]),
+        reverse=True,
+    )
     return ScoreBreakdown(
         components=SignalComponents(
             N=round(n, 4), M=round(m, 4), T=round(t, 4), P=round(p, 4), session_factor=factor
@@ -172,6 +204,7 @@ def score(
         composite_confirmed_only=round(composite_confirmed, 4),
         contributions=contributions,
         macro_available=macro_ok,
+        macro_parts=macro_pulls,
         dominant=dominant,
         dominant_confirmed=dominant_confirmed,
         n_confirmed=round(n_confirmed, 4),

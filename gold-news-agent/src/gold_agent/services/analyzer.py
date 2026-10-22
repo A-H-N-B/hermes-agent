@@ -68,7 +68,7 @@ LLM_ALERTS: dict[str, tuple[AlertKind, AlertSeverity, str, str]] = {
         "warning",
         "Budget AI rutin hari ini terpakai",
         "Biaya AI hari ini lewat ${routine:.2f}: sampai 00:00 WIB berita biasa memakai aturan. "
-        "Keputusan sinyal (Opus) dan berita dampak tinggi tetap memakai sisa budget sampai "
+        "Keputusan sinyal (komite AI) dan berita dampak tinggi tetap memakai sisa budget sampai "
         "batas ${ceiling:.2f}.",
     ),
     "exhausted": (

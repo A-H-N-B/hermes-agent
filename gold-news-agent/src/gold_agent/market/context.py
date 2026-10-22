@@ -11,6 +11,7 @@ from typing import Literal
 
 from gold_agent.config import Settings
 from gold_agent.market import indicators as ind
+from gold_agent.market import quant
 from gold_agent.market.candles import CandleBuilder
 from gold_agent.market.levels import asia_range, compute_levels, previous_complete
 from gold_agent.market.reads import SAR, STOCH
@@ -95,6 +96,15 @@ def timeframe_state(
     ema20 = ind.last(ind.ema(closes, 20))
     ema50 = ind.last(ind.ema(closes, 50))
     mid, upper, lower = ind.bollinger(closes)
+    macd, macd_signal, macd_hist = ind.macd(closes)
+    adx, plus_di, minus_di = ind.adx(highs, lows, closes)
+    _, kalman_slope, kalman_se = quant.kalman_series(closes)
+    done = [c for c in candles if c.complete]
+    last_open = done[-1].open_time.timestamp() if done else 0.0
+    slow = quant.slow_reads(tf, last_open, [c.close for c in done])
+    efficiency = quant.efficiency_ratio(closes)
+    adx_now = ind.last(adx)
+    slope, se = ind.last(kalman_slope), ind.last(kalman_se)
     return TimeframeState(
         tf=tf,
         close=closes[-1],
@@ -113,6 +123,23 @@ def timeframe_state(
         stoch_d=ind.last(stoch_d),
         sar=sar_now,
         sar_up=bool(sar_dir[-1] > 0) if sar_now is not None else None,
+        macd=ind.last(macd),
+        macd_signal=ind.last(macd_signal),
+        macd_hist=ind.last(macd_hist),
+        adx=adx_now,
+        plus_di=ind.last(plus_di),
+        minus_di=ind.last(minus_di),
+        efficiency=efficiency,
+        hurst=slow.hurst,
+        kalman_slope=slope,
+        kalman_t=slope / se if slope is not None and se else None,
+        sigma=slow.sigma,
+        sigma_model=slow.model,
+        vol_persistence=slow.persistence,
+        vol_pct=slow.vol_pct,
+        regime=quant.classify(efficiency, slow.hurst, adx_now, slow.vol_pct)
+        if len(candles) >= 50
+        else None,
         bars=len(candles),
     )
 

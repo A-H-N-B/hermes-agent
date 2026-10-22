@@ -13,12 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from gold_agent.config import CONFIG_DIR, Settings
-from gold_agent.models import Analysis, CalendarEvent, MarketContext, Signal, SignalState
+from gold_agent.models import Analysis, CalendarEvent, MarketContext, Signal, SignalState, TradeOdds
 from gold_agent.models.common import Action
 from gold_agent.models.signals import SetupType
 from gold_agent.signals.levels import TradeLevels, compute_levels, position_size
+from gold_agent.signals.odds import trade_odds
 from gold_agent.signals.scoring import PriceAt, ScoreBreakdown, confidence, score
-from gold_agent.signals.timeframe import TfChoice, choose_timeframe
+from gold_agent.signals.timeframe import MIN_CALLS, TfChoice, choose_timeframe
 from gold_agent.timeutils.risky import risky_flags
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wib, to_wib
 
@@ -279,7 +280,13 @@ class SignalEngine:
         levels = compute_levels(side, context, engine.levels, tf)
         if levels is None:
             return wait([f"level SL/TP belum bisa dihitung (ATR {tf} belum tersedia)"])
-        signal = self._build_signal(side, now, context, breakdown, conf, levels, events, choice)
+        odds = self._odds(side, context, levels, choice)
+        losing = self._losing_setup(odds, tf)
+        if losing:
+            return wait([losing])
+        signal = self._build_signal(
+            side, now, context, breakdown, conf, levels, events, choice, odds
+        )
         return Decision(
             state=SignalState(
                 ts=now,
@@ -296,6 +303,38 @@ class SignalEngine:
             breakdown=breakdown,
             signal=signal,
             replaced=replaced,
+        )
+
+    def _odds(
+        self, side: str, context: MarketContext, levels: TradeLevels, choice: TfChoice
+    ) -> TradeOdds | None:
+        option = next((o for o in choice.options if o.tf == choice.tf), None)
+        return trade_odds(
+            side=side,
+            entry=(levels.entry_low + levels.entry_high) / 2,
+            stop_loss=levels.stop_loss,
+            tp1=levels.tp1,
+            tp2=levels.tp2,
+            spread=context.spread or 0.0,
+            state=context.timeframes.get(choice.tf),
+            tf=choice.tf,
+            validity_bars=self._settings.signal_engine.validity_bars,
+            accuracy=option.accuracy if option else None,
+            min_calls=MIN_CALLS,
+            tp1_fraction=self._settings.paper.tp1_fraction,
+        )
+
+    def _losing_setup(self, odds: TradeOdds | None, tf: str) -> str | None:
+        """Why the plan waits: setups like it lost money on record, beyond doubt."""
+        gate = self._settings.signal_engine.ev_gate_min_setups
+        if not gate or odds is None or odds.setups < gate or odds.ev_r_ci95 is None:
+            return None
+        low, high = odds.ev_r_ci95
+        if high >= 0:
+            return None
+        return (
+            f"setup serupa di {tf} historis rugi: EV {odds.ev_r:+.2f}R "
+            f"(95%: {low:+.2f}…{high:+.2f}R dari {odds.setups} setup)"
         )
 
     # ------------------------------------------------------------------ signal assembly
@@ -316,12 +355,16 @@ class SignalEngine:
                 )
             )
         if abs(c.M) > 0.05:
-            usd = "melemah" if c.M > 0 else "menguat"
-            z = context.dxy_z_1h
+            drivers = [
+                f"{label} {'mendukung' if pull > 0 else 'menekan'}"
+                for label, pull in breakdown.macro_parts[:3]
+                if abs(pull) >= 0.02
+            ]
+            side = "mendukung" if c.M > 0 else "menekan"
             items.append(
                 (
                     abs(weights.macro * c.M),
-                    f"Makro: USD {usd}" + (f" (z 1 jam {z:+.1f})" if z is not None else ""),
+                    f"Makro {side} emas" + (f": {', '.join(drivers)}" if drivers else ""),
                 )
             )
         if abs(c.T) > 0.05:
@@ -375,6 +418,7 @@ class SignalEngine:
         levels: TradeLevels,
         events: Sequence[CalendarEvent],
         choice: TfChoice,
+        odds: TradeOdds | None = None,
     ) -> Signal:
         cfg = self._settings
         tf = choice.tf
@@ -470,4 +514,5 @@ class SignalEngine:
             trigger_category=trigger.analysis.triage.category if trigger else None,
             timeframe=tf,
             timeframe_reason=choice.reason,
+            odds=odds,
         )
