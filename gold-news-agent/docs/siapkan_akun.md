@@ -127,11 +127,12 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    (Visa/Mastercard; kartu debit dengan fitur transaksi internasional biasanya bisa). Mulai
    kecil, mis. **US$5–10**, cukup untuk beberapa minggu pemakaian normal.
 3. **Pasang batas biaya** supaya tagihan tidak pernah kebablasan: **Settings → Limits** → atur
-   *spend limit* bulanan, mis. US$20. Selain itu program punya batasnya sendiri:
-   `budget.llm_daily_usd` (bawaan **US$3/hari**; ubah dengan
-   `uv run gold-agent config set budget.llm_daily_usd 20`). Bila batas harian tercapai, hanya
-   berita berdampak tinggi dan keputusan akhir sinyal (maks. 48 per hari) yang dikirim ke Claude
-   sampai 00:00 WIB.
+   *spend limit* bulanan, mis. US$600 (= 30 hari × US$20). Selain itu program punya batas
+   kerasnya sendiri: `budget.llm_daily_usd` (bawaan **US$20/hari**; ubah dengan mis.
+   `uv run gold-agent config set budget.llm_daily_usd 10`). Berita biasa, outlook, dan laporan
+   berhenti di 75 % batas itu; sisanya khusus untuk keputusan akhir sinyal dan berita berdampak
+   tinggi. Setelah batas penuh tercapai, semua analisis memakai aturan dan sinyal keluar dengan
+   tanda "Tanpa review AI" sampai 00:00 WIB.
 4. **Buat key:** menu **API Keys** → **Create Key** → beri nama, mis. `gold-news-agent` →
    **Create**.
 5. Key langsung tampil, diawali `sk-ant-`. **Salin sekarang**: key hanya ditampilkan sekali.
@@ -150,13 +151,13 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    soal billing/credit artinya saldo belum diisi.
 
 Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): semua tugas AI
-(triage tiap berita, analisis mendalam, outlook per jam, ringkasan harian/mingguan) memakai
-**Claude Opus 5.5**, dengan tingkat `effort` berbeda per tugas. Opus lebih mahal daripada model
-kecil (±$0,02 per berita yang di-triage), jadi `budget.llm_daily_usd` (bawaan $3/hari) menjadi
-rem: setelah batas itu tercapai, hanya berita high-impact yang tetap dianalisis Opus sampai pukul
-00:00 WIB. Naikkan angkanya bila ingin semua berita dianalisis Opus sepanjang hari (±$20/hari).
-Biaya nyata tercatat di tabel `llm_usage` dan terlihat di header dashboard, laporan harian, dan
-`/stats`.
+(triage tiap berita, analisis mendalam, outlook per jam, ringkasan harian/mingguan, dan keputusan
+akhir setiap sinyal) memakai **Claude Opus 5.5**, dengan tingkat `effort` berbeda per tugas. Opus
+lebih mahal daripada model kecil (±$0,02 per berita biasa, ±$0,25 per keputusan sinyal dengan 3
+suara). Di hari yang sangat ramai biaya tanpa rem bisa ±$23, jadi `budget.llm_daily_usd`
+(bawaan $20/hari) menahannya: setelah $15 berita biasa memakai aturan sampai pukul 00:00 WIB,
+sedangkan keputusan sinyal dan berita berdampak tinggi tetap memakai Opus sampai $20. Biaya nyata
+tercatat di tabel `llm_usage` dan terlihat di header dashboard, laporan harian, dan `/stats`.
 
 **Memantau pemakaian:** Console → **Usage** menampilkan biaya per hari.
 **Bila key bocor:** Console → API Keys → klik key itu → **Delete** (atau *Disable*), buat yang

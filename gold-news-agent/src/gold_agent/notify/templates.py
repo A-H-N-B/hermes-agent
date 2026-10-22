@@ -71,12 +71,15 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         lines.append(f"📊 Chart {esc(signal.timeframe)}{why}")
     review = signal.review
     if review is not None and review.model:
+        count = f" · {review.agree}/{review.votes} suara" if (review.votes or 0) > 1 else ""
         lines.append(
-            f"🤖 Diputuskan Opus 5.5 · confidence AI {review.confidence or '-'}/100"
+            f"🤖 Diputuskan Opus 5.5{count} · confidence AI {review.confidence or '-'}/100"
             + (f" · {esc(review.reasons[0])}" if review.reasons else "")
         )
         if review.caution:
             lines.append(f"⚠️ Catatan AI: {esc(review.caution)}")
+        if review.dissent:
+            lines.append(f"🗳️ Suara yang menahan: {esc(review.dissent)}")
     elif review is not None:
         lines.append(f"⚙️ Tanpa review AI: {esc(review.note or 'AI tidak tersedia')}")
     lines += [

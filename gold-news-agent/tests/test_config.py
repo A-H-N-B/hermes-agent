@@ -105,6 +105,20 @@ def test_reversal_threshold_cannot_undercut_entry_threshold() -> None:
         Settings.model_validate(raw)
 
 
+def test_the_ai_budget_reserve_and_desk_votes_stay_in_range() -> None:
+    raw = _settings_dict()
+    raw["budget"]["priority_reserve_pct"] = 100  # routine calls would never run
+    with pytest.raises(ValidationError, match="priority_reserve_pct"):
+        Settings.model_validate(raw)
+    raw = _settings_dict()
+    raw["llm"]["desk_votes"] = 0
+    with pytest.raises(ValidationError, match="desk_votes"):
+        Settings.model_validate(raw)
+    raw = _settings_dict()
+    raw["budget"] |= {"llm_daily_usd": 12, "priority_reserve_pct": 50}
+    assert Settings.model_validate(raw).budget.routine_daily_usd == 6
+
+
 def test_execution_cannot_be_enabled_from_config() -> None:
     raw = _settings_dict()
     raw["execution_enabled"] = True

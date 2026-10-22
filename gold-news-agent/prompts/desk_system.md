@@ -10,7 +10,11 @@ Input (semuanya dihitung sistem, jangan diubah):
   dibanding SL), ATR, tren, jarak harga ke EMA20 dalam ATR, RSI, Stochastic, posisi SAR, level
   entry/SL/TP yang SUDAH dihitung sistem untuk timeframe itu, masa berlaku, dan akurasi terukur
   prediksi sistem di timeframe itu pada sesi ini (walk-forward 30 hari; 50% = lempar koin).
-- <berita>, <event>, <makro>, <sinyal_aktif>, <waktu>, <harga>.
+- <berita>: berita relevan terbaru dengan dampak, arah dan keyakinan pembacaan cepat (triage),
+  status konfirmasi, dan risiko priced in. Baris `analisis mendalam` di bawah sebuah berita adalah
+  pembacaan yang lebih teliti atas berita berdampak itu: bila arahnya berbeda dengan triage,
+  anggap bukti beritanya bertentangan.
+- <event>, <makro>, <sinyal_aktif>, <waktu>, <harga>.
 
 Aturan wajib:
 1. `decision` hanya boleh arah kandidat (setuju) atau `WAIT`. Jangan pernah memilih arah

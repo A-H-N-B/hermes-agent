@@ -111,11 +111,13 @@ function renderSignalCard(payload) {
     if (active.lot_note) card.append(el("p", { class: "muted", text: `Lot: ${active.lot_note}` }));
     const review = active.review;
     if (review && review.model) {
-      card.append(el("p", { class: "ai-review" }, el("b", { text: `🤖 Diputuskan Opus 5.5 · chart ${active.timeframe} · confidence AI ${review.confidence ?? "–"}/100` })));
+      const count = review.votes > 1 ? ` · ${review.agree}/${review.votes} suara` : "";
+      card.append(el("p", { class: "ai-review" }, el("b", { text: `🤖 Diputuskan Opus 5.5${count} · chart ${active.timeframe} · confidence AI ${review.confidence ?? "–"}/100` })));
       const why = el("ul", { class: "notes" });
       for (const reason of review.reasons) why.append(el("li", { text: reason }));
       card.append(why);
       if (review.caution) card.append(el("p", { class: "agree WARN", text: `⚠️ ${review.caution}` }));
+      if (review.dissent) card.append(el("p", { class: "muted", text: `🗳️ Suara yang menahan: ${review.dissent}` }));
       if (review.note) card.append(el("p", { class: "muted", text: review.note }));
     } else if (review) {
       card.append(el("p", { class: "muted", text: `⚙️ Tanpa review AI: ${review.note || "AI tidak tersedia"}` }));
@@ -646,7 +648,7 @@ function renderCredit(c) {
   clear(info);
   const rows = [
     ["Sisa saldo (perkiraan)", b ? `$${num(b.remaining_usd)}` : "–", b ? `dari $${num(b.balance_usd)} yang diisi ${b.as_of_wib} WIB, terpakai $${num(b.spent_since_usd, 4)}` : "belum diisi"],
-    ["Pemakaian hari ini", `$${num(c.spent_today_usd, 4)}`, `batas harian di config $${num(c.daily_budget_usd)} (di atasnya hanya berita besar yang dianalisis Claude)`],
+    ["Pemakaian hari ini", `$${num(c.spent_today_usd, 4)}`, `batas keras $${num(c.daily_budget_usd)}/hari; berita biasa berhenti di $${num(c.routine_budget_usd)}, sisanya untuk keputusan sinyal dan berita besar`],
     ["Rata-rata per hari", b && b.per_day_usd !== null ? `$${num(b.per_day_usd, 4)}` : "–", "dari pemakaian 7 hari terakhir"],
     ["Perkiraan habis", b && b.empty_at_wib ? `${b.empty_at_wib} WIB` : "–", b && b.days_left !== null ? `±${num(b.days_left, 1)} hari lagi${b.status !== "aman" ? " · segera top-up" : ""}` : ""],
   ];

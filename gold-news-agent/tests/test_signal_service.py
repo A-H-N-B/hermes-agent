@@ -61,20 +61,28 @@ async def service_factory(
 
 
 def desk_says(
-    decision: str, timeframe: str = "M15", reason: str = "berita dan chart M15 searah"
+    decision: str,
+    timeframe: str = "M15",
+    reason: str = "berita dan chart M15 searah",
+    confidence: int = 72,
 ) -> Any:
-    """Opus's scripted final decision on a candidate."""
+    """One scripted Opus answer (one vote) on a candidate."""
     return parsed(
         DeskDecision.model_validate(
             {
                 "decision": decision,
                 "timeframe": timeframe,
-                "confidence": 72,
+                "confidence": confidence,
                 "reasons_id": [reason],
                 "caution_id": "rilis data AS bisa membalikkan arah",
             }
         )
     )
+
+
+def unanimous(decision: str, **answer: Any) -> list[Any]:
+    """A whole review: every one of llm.desk_votes (3) answers the same."""
+    return [desk_says(decision, **answer) for _ in range(3)]
 
 
 async def decided(service: SignalService) -> None:
@@ -111,7 +119,7 @@ async def feed_rally(service: SignalService, clock: ManualClock) -> None:
 async def test_news_with_confirming_price_publishes_and_persists_one_signal(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context, fake = await service_factory(desk_says("BUY"))
+    service, context, fake = await service_factory(*unanimous("BUY"))
     await feed_rally(service, clock)
     story = analysis(first_seen=T0)
     await context.news.save_analysis(story)  # what the analyzer does before publishing
@@ -126,9 +134,11 @@ async def test_news_with_confirming_price_publishes_and_persists_one_signal(
     review = signals[0]["review"]
     assert review["model"] == "claude-opus-5-5" and review["confidence"] == 72
     assert review["reasons"] == ["berita dan chart M15 searah"]
-    (request,) = fake.requests
-    assert request["output_config"]["effort"] == "high"
-    assert '<kandidat arah="BUY"' in request["messages"][0]["content"]
+    assert (review["agree"], review["votes"], review["dissent"]) == (3, 3, None)
+    assert len(fake.requests) == 3  # three independent answers to the same brief
+    for request in fake.requests:
+        assert request["output_config"]["effort"] == "high"
+        assert '<kandidat arah="BUY"' in request["messages"][0]["content"]
     logged = await context.ops.kv_get(KV_DESK)
     assert logged is not None and [r["decision"] for r in logged["reviews"]] == ["BUY"]
     stored = await context.signals.latest_signals()
@@ -190,7 +200,7 @@ async def test_silent_market_feed_turns_the_state_stale(
 async def test_a_parsed_release_holds_entries_for_the_confirmation_window(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context, _ = await service_factory(desk_says("BUY"))
+    service, context, _ = await service_factory(*unanimous("BUY"))
     await feed_rally(service, clock)
     release = ReleaseReading(
         event_key="us_cpi_mom",
@@ -219,8 +229,8 @@ async def test_a_parsed_release_holds_entries_for_the_confirmation_window(
 async def test_opus_can_hold_a_candidate_and_is_not_asked_again_until_something_changes(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    held = desk_says("WAIT", reason="harga sudah naik jauh sebelum berita, risiko mengejar")
-    service, context, fake = await service_factory(held, desk_says("BUY"))
+    held = unanimous("WAIT", reason="harga sudah naik jauh sebelum berita, risiko mengejar")
+    service, context, fake = await service_factory(*held, *unanimous("BUY"))
     await feed_rally(service, clock)
     await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
     await decided(service)
@@ -228,22 +238,23 @@ async def test_opus_can_hold_a_candidate_and_is_not_asked_again_until_something_
     state = service.last_state
     assert state is not None and state.action == "WAIT"
     assert state.wait_reasons == [
-        "AI (Opus 5.5) menahan BUY: harga sudah naik jauh sebelum berita, risiko mengejar"
+        "AI (Opus 5.5) menahan BUY (3/3 suara): harga sudah naik jauh sebelum berita, "
+        "risiko mengejar"
     ]
     clock.advance(30)
     await service.handle_context(msg("market.context", bullish(clock.now(), 2650.3)))
-    assert len(fake.requests) == 1  # the same evidence is not sent to Opus again
+    assert len(fake.requests) == 3  # the same evidence is not sent to Opus again
     clock.advance(600)  # the hold lapses: the candidate is reviewed again
     await service.handle_context(msg("market.context", bullish(clock.now(), 2650.4)))
     await decided(service)
-    assert len(fake.requests) == 2
+    assert len(fake.requests) == 6
     assert [s["action"] for s in await drain(context, STREAM_SIGNALS)] == ["BUY"]
 
 
 async def test_opus_picks_the_chart_and_the_trade_is_sized_on_it(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context, _ = await service_factory(desk_says("BUY", timeframe="M5"))
+    service, context, _ = await service_factory(*unanimous("BUY", timeframe="M5"))
     await feed_rally(service, clock)
     await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
     await decided(service)
@@ -272,13 +283,45 @@ async def test_without_the_ai_the_engine_decides_alone_and_says_so(
 async def test_a_failed_ai_call_falls_back_to_the_engine_with_a_note(
     service_factory: Factory, clock: ManualClock
 ) -> None:
-    service, context, _ = await service_factory(timeout_error())
+    service, context, _ = await service_factory(*[timeout_error() for _ in range(3)])
     await feed_rally(service, clock)
     await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
     await decided(service)
     (signal,) = await drain(context, STREAM_SIGNALS)
     assert signal["review"]["model"] is None
     assert signal["review"]["note"].startswith("AI gagal memutuskan")
+
+
+async def test_a_split_vote_goes_with_the_majority_and_shows_the_dissent(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    service, context, _ = await service_factory(
+        desk_says("BUY", confidence=80),
+        desk_says("WAIT", reason="CPI AS 40 menit lagi", confidence=60),
+        desk_says("BUY", confidence=70),
+    )
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    await decided(service)
+    (signal,) = await drain(context, STREAM_SIGNALS)
+    review = signal["review"]
+    assert (review["agree"], review["votes"], review["confidence"]) == (2, 3, 75)
+    assert review["dissent"] == "CPI AS 40 menit lagi"
+
+
+async def test_past_the_daily_ceiling_the_engine_decides_alone_and_says_why(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    service, context, fake = await service_factory()
+    await context.ops.add_llm_usage(
+        ts=T0, route="triage", model="claude-opus-5-5", cost_usd=20.0, ok=True
+    )
+    await feed_rally(service, clock)
+    await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
+    await decided(service)
+    (signal,) = await drain(context, STREAM_SIGNALS)
+    assert signal["review"]["model"] is None and fake.requests == []
+    assert signal["review"]["note"].startswith("AI tidak dipakai: batas biaya AI harian $20.00")
 
 
 # ------------------------------------------------------------------ outlook scheduling

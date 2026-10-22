@@ -58,6 +58,7 @@ from gold_agent.signals.desk import (
     DeskDecision,
     Verdict,
     desk_brief,
+    tally,
     verify,
 )
 from gold_agent.signals.engine import (
@@ -361,7 +362,8 @@ class SignalService:
             return self._reviewed(decision, candidate, verdict.review())
         if not verdict.approved:
             reason = verdict.reasons[0] if verdict.reasons else "tanpa alasan"
-            return self._hold(decision, now, f"AI (Opus 5.5) menahan {candidate.action}: {reason}")
+            held = f"AI (Opus 5.5) menahan {candidate.action}{verdict.count}: {reason}"
+            return self._hold(decision, now, held)
         self.desk.last = None  # an approval answers this one candidate
         tf = verdict.timeframe or choice.tf
         if tf != choice.tf:
@@ -422,6 +424,26 @@ class SignalService:
         await self.evaluate(force_publish=True)
 
     async def _consult(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict:
+        """`llm.desk_votes` independent answers in parallel, counted by `tally`."""
+        asked = self._ctx.settings.llm.desk_votes
+        answers = await asyncio.gather(
+            *(self._vote(candidate, choice, brief) for _ in range(asked))
+        )
+        votes = [answer for answer in answers if isinstance(answer, Verdict)]
+        failures = [answer for answer in answers if isinstance(answer, str)]
+        now = self._ctx.clock.now()
+        if not votes:
+            return Verdict(
+                side=candidate.action,
+                decision="UNAVAILABLE",
+                at=now,
+                composite=candidate.composite_score,
+                note=failures[0],
+            )
+        return tally(votes, failures, candidate=candidate, choice=choice, at=now)
+
+    async def _vote(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict | str:
+        """One answer from Opus through the guardrails, or why there is none."""
         try:
             result = await self.llm.structured(
                 "desk",
@@ -429,16 +451,12 @@ class SignalService:
                 user=brief,
                 schema=DeskDecision,
                 ref_id=candidate.signal_id,
-                high_impact=True,  # the decision itself: never skipped for the daily budget
+                priority=True,  # the decision itself: may use the budget kept for it
             )
-        except (LlmUnavailable, LlmFailed) as exc:
-            return Verdict(
-                side=candidate.action,
-                decision="UNAVAILABLE",
-                at=self._ctx.clock.now(),
-                composite=candidate.composite_score,
-                note=f"AI gagal memutuskan ({exc})",
-            )
+        except LlmUnavailable as exc:
+            return f"AI tidak dipakai: {exc}"
+        except LlmFailed as exc:
+            return f"AI gagal memutuskan ({exc})"
         return verify(
             result.value,
             candidate=candidate,

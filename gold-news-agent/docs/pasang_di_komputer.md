@@ -168,8 +168,15 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      30 hari, batas bawah 95%-nya di atas 50%) menggantikan bawaan;
    - timeframe yang spread-nya terlalu besar dibanding SL (`max_cost_ratio`) dilewati;
    - **Opus 5.5 memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
-     chart-nya dari timeframe yang layak. Angka harga, SL, dan TP tetap dihitung sistem.
+     chart-nya dari timeframe yang layak. Opus menjawab 3 kali secara terpisah dan bersamaan
+     (`llm.desk_votes`), lalu suara terbanyak yang dipakai (seri = TUNGGU); jumlah suara dan
+     alasan suara yang menahan tampil di sinyal. Angka harga, SL, dan TP tetap dihitung sistem.
    Timeframe tetap juga bisa: `uv run gold-agent config set trading.timeframe.select M5`.
+6. Biaya AI (`budget`). `llm_daily_usd` (bawaan **$20/hari**) adalah batas keras: tidak ada
+   panggilan Claude yang dimulai bila bisa melewatinya. Berita biasa, outlook, dan laporan
+   berhenti di 75 % (`priority_reserve_pct: 25`, jadi $15); sisa $5 khusus untuk keputusan sinyal
+   dan berita berdampak tinggi. Contoh menurunkan batas ke $10:
+   `uv run gold-agent config set budget.llm_daily_usd 10`.
 
 Jam tenang (00:00–05:00 WIB), ambang sinyal, dan batas rugi harian juga ada di
 `config\settings.yaml` dan bisa ditimpa dengan cara yang sama.

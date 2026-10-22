@@ -9,7 +9,7 @@ import pytest
 from gold_agent.config import Settings
 from gold_agent.econ_calendar.events import load_events
 from gold_agent.econ_calendar.playbook import build_playbook
-from gold_agent.models import Level, ReleaseReading, Signal
+from gold_agent.models import Level, ReleaseReading, Signal, SignalReview
 from gold_agent.notify.format import TELEGRAM_LIMIT, split_message, strip_tags
 from gold_agent.notify.templates import (
     render_flash,
@@ -67,6 +67,26 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
     assert "📅 Event berikutnya: USD Retail Sales m/m pukul 21:35 WIB (2 jam lagi)" in lines
     assert any("isi risk.account_equity" in line for line in lines)  # no guessed lot size
     assert lines[-1] == "<i>Bukan saran keuangan. Keputusan &amp; risiko di tanganmu.</i>"
+
+
+def test_an_opus_decision_shows_its_vote_count_and_the_dissent(settings: Settings) -> None:
+    review = SignalReview(
+        model="claude-opus-5-5",
+        confidence=74,
+        timeframe="M15",
+        reasons=["berita & chart M15 searah"],
+        caution="CPI <besok>",
+        votes=3,
+        agree=2,
+        dissent="harga sudah jauh dari EMA20",
+    )
+    signal = make_signal(settings).model_copy(update={"review": review})
+    lines = render_signal(signal, now=NOW, next_event=None).split("\n")
+    assert lines[3] == (
+        "🤖 Diputuskan Opus 5.5 · 2/3 suara · confidence AI 74/100 · berita &amp; chart M15 searah"
+    )
+    assert lines[4] == "⚠️ Catatan AI: CPI &lt;besok&gt;"
+    assert lines[5] == "🗳️ Suara yang menahan: harga sudah jauh dari EMA20"
 
 
 def test_untrusted_news_text_is_escaped(settings: Settings) -> None:

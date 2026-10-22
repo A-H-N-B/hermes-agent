@@ -235,8 +235,14 @@ class RiskSettings(StrictModel):
 
 
 class BudgetSettings(StrictModel):
-    llm_daily_usd: float = Field(ge=0)
+    llm_daily_usd: float = Field(ge=0)  # hard ceiling per WIB day
+    priority_reserve_pct: float = Field(ge=0, lt=100)  # kept for priority calls
     paid_data_monthly_usd: float = Field(ge=0)
+
+    @property
+    def routine_daily_usd(self) -> float:
+        """Where routine calls stop; priority calls go on to the ceiling."""
+        return self.llm_daily_usd * (1 - self.priority_reserve_pct / 100)
 
 
 class QuietHours(StrictModel):
@@ -342,6 +348,8 @@ class ModelPrice(StrictModel):
     cache_read: float = Field(ge=0)
 
 
+ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk")
+
 # Models on which `thinking: {type: "disabled"}` is a 400 at every effort level: thinking is
 # always on and `effort` is the only control.
 ALWAYS_THINKING_MODELS = frozenset(
@@ -354,10 +362,12 @@ class LlmSettings(StrictModel):
     enabled: bool
     deep_min_impact: int = Field(ge=0, le=5)
     triage: LlmRoute
+    triage_high: LlmRoute  # a scheduled release or rules impact >= 4
     deep: LlmRoute
     outlook: LlmRoute
     brief: LlmRoute
     desk: LlmRoute  # Opus's final BUY/SELL/WAIT + timeframe of a signal
+    desk_votes: int = Field(ge=1, le=5)  # independent answers per review; the majority decides
     desk_reviews_per_day: int = Field(ge=0)
     # Server-side refusal fallback: if a safety classifier declines a request (false positives
     # happen on benign news), the API re-runs it on the model Anthropic recommends for that
@@ -368,7 +378,7 @@ class LlmSettings(StrictModel):
 
     @model_validator(mode="after")
     def _routes_are_callable_and_priced(self) -> LlmSettings:
-        for name in ("triage", "deep", "outlook", "brief", "desk"):
+        for name in ROUTES:
             route: LlmRoute = getattr(self, name)
             if route.thinking == "disabled" and route.model in ALWAYS_THINKING_MODELS:
                 raise ValueError(

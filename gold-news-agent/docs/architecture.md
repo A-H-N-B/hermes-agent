@@ -56,15 +56,16 @@ Timescale, jadi beralih nanti tetap mudah.
 
 ### ADR-005 Output terstruktur LLM — Diterapkan di config, implementasi Fase 3
 
-- Model: semua rute memakai `claude-opus-5-5` (triage, deep, outlook, brief harian/mingguan).
-  Kedalaman diatur per rute lewat `effort`: triage `low` (tiap berita, harus cepat), outlook
-  `medium`, deep dan brief `high`.
+- Model: semua rute memakai `claude-opus-5-5` (triage, triage_high, deep, outlook, brief
+  harian/mingguan, desk). Kedalaman diatur per rute lewat `effort`: triage `low` (tiap berita,
+  harus cepat), triage_high `medium` (rilis data dan berita dampak ≥ 4), outlook `medium`, deep,
+  brief, dan desk `high`.
 - Pakai structured outputs (`output_config.format` / `client.beta.messages.parse()` + pydantic).
   Jangan memaksa tool lewat `tool_choice` `any`/`tool`, karena Opus 5.5 menolaknya (HTTP 400). Jika
   memakai tool `record_gold_analysis`, gunakan `tool_choice: auto` + `strict: true`.
 - Thinking Opus 5.5 selalu aktif: `thinking: disabled` dan `budget_tokens` ditolak (HTTP 400), dan
   config sudah menolak kombinasi itu saat program start. Thinking ikut dihitung dalam `max_tokens`,
-  jadi `max_tokens` diberi ruang (triage 4096, rute lain 16000).
+  jadi `max_tokens` diberi ruang (triage 4096, triage_high 8192, rute lain 16000).
 - Refusal: `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) membuat permintaan yang
   ditolak classifier dijalankan ulang di server Anthropic pada model rekomendasinya (Opus 5 / Opus
   4.8). Biaya tiap hop dihitung dari `usage.iterations` dengan harga model hop itu, dan hasilnya
@@ -256,21 +257,40 @@ yang selalu aktif di Opus 5.5 dan makin panjang pada effort lebih tinggi:
 
 | Tugas | Volume/hari | Token per panggilan (cache / baru / output+thinking) | Biaya/hari |
 |---|---|---|---|
-| Triage (effort low) | 600 cluster | 4k / 0,7k / 0,65k | ±$10 |
-| Deep (effort high) | 40 | 6k / 3k / 6k | ±$5,30 |
-| Outlook per jam (effort medium) | 24 | 6k / 5k / 5k | ±$2,90 |
+| Triage berita biasa (`triage`, effort low) | 550 cluster | 1,2k / 0,7k / 0,65k | ±$8,80 |
+| Triage rilis data & berita dampak ≥ 4 (`triage_high`, effort medium) | 50 | 1,2k / 0,7k / 2k | ±$2,20 |
+| Deep (effort high) | 40 | 0,9k / 3k / 6k | ±$5,30 |
+| Outlook per jam (effort medium) | 24 | – / 5k / 5k | ±$2,90 |
 | Brief harian (effort high) | 1 | – / 30k / 8k | ±$0,30 |
-| Keputusan akhir sinyal (desk, effort high) | ≤ 48 (biasanya < 10) | 4k / 5k / 3k | ≤ ±$4 (biasanya < $1) |
-| Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 4–6k | ±$2,50 |
-| **Total tanpa rem** | | | **±$21/hari** |
+| Keputusan akhir sinyal (desk, effort high, 3 suara paralel) | ≤ 48 review = ≤ 144 panggilan (biasanya < 10 review) | 1,4k / 6k / 3k | ±$0,25 per review: ≤ ±$12 (biasanya ±$2,50) |
+| Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 1–1,5k | ±$0,60 |
+| **Total tanpa rem, hari ramai (desk ±10 review)** | | | **±$23/hari** |
 
-`budget.llm_daily_usd` (bawaan $3) adalah rem: setelah biaya hari itu (hari WIB) mencapai angka
-itu, hanya berita high-impact (rilis data, impact ≥ 4) yang masih dianalisis Opus; sisanya memakai
-aturan sampai pukul 00:00 WIB. Keputusan akhir Opus atas sinyal tidak terkena rem ini (keputusan
-itu yang paling penting) tetapi dibatasi `llm.desk_reviews_per_day` (48). Dengan rem $3 biaya
-harian ±$3–6 (berita high-impact dan keputusan sinyal tetap jalan).
-Supaya **semua** berita dianalisis Opus sepanjang hari, naikkan ke ±$20–25. Biaya nyata per hari
-terlihat di header dashboard (saldo kredit), `/stats`, dan laporan harian.
+Kolom cache memakai ukuran system prompt + KB yang diukur (triage ±4.400 karakter, deep ±3.300,
+desk ±5.100). Prompt outlook dan brief di bawah minimum cache 512 token, jadi tidak di-cache.
+
+`budget.llm_daily_usd` (bawaan **$20**) adalah plafon keras per hari WIB. Setiap panggilan lebih
+dulu mencatat biaya terburuknya (seluruh prompt dihitung sebagai tulis cache + `max_tokens`
+output, dengan harga model termahal yang mungkin melayani) di `llm_usage`, baru memeriksa total
+hari itu. Catatan sementara itu diganti biaya nyata saat panggilan selesai. Karena tercatat di
+tabel bersama, panggilan yang berjalan bersamaan, dari proses mana pun, tidak bisa bersama-sama
+melewati plafon. Panggilan rutin (berita biasa, narasi outlook, laporan, deep untuk dampak 3)
+berhenti di `100 − budget.priority_reserve_pct` % (bawaan 75 % = $15). Sisanya hanya untuk
+keputusan sinyal (desk Opus) dan berita berdampak tinggi (rilis data, dampak ≥ 4). Setelah itu
+berita biasa memakai aturan sampai 00:00 WIB, dan setelah plafon tercapai sinyal keluar tanpa
+review AI (ditandai di setiap sinyal). Kedua peristiwa itu dikirim sebagai alert sekali per hari.
+Panggilan yang timeout dicatat tanpa biaya, karena klien tidak tahu apa yang ditagih server untuk
+panggilan yang ditinggalkannya. Karena itu pasang juga *spend limit* bulanan di Claude Console
+(mis. $600) sebagai pengaman kedua.
+
+Uang ekstra dipakai untuk akurasi di tiga tempat: (1) desk meminta `llm.desk_votes` (3) jawaban
+Opus yang independen secara paralel dan mengikuti mayoritas (seri = WAIT), jadi satu sampel yang
+kebetulan meleset tidak bisa mengirim atau menahan trade sendirian; (2) rilis data dan berita
+yang oleh aturan sudah dinilai dampak ≥ 4 di-triage dengan effort medium (`triage_high`), karena
+skor berita paling bergantung pada pembacaan itu; (3) brief desk kini memuat hasil analisis
+mendalam (arah, keyakinan, narasi, risiko) di samping arah dan keyakinan triage, jadi keputusan
+akhir melihat pembacaan paling teliti atas berita penting. Biaya nyata per hari terlihat di header
+dashboard (saldo kredit), `/stats`, dan laporan harian.
 
 Biaya lain: VPS Linux 2–4 GB sekitar $6–24/bulan. VPS Windows untuk MT5 lebih mahal. Harga Twelve
 Data berbayar dan X API harus dicek di situs masing-masing karena tidak diasumsikan di sini.

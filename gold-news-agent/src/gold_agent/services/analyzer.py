@@ -53,6 +53,40 @@ class _PendingSpike:
     deadline: datetime
 
 
+AlertKind = Literal["health", "budget", "recovery"]
+AlertSeverity = Literal["info", "warning", "critical"]
+# What the analyzer says when the LLM's state changes (circuit breaker, then the day's budget).
+LLM_ALERTS: dict[str, tuple[AlertKind, AlertSeverity, str, str]] = {
+    "circuit_open": (
+        "health",
+        "critical",
+        "Claude API bermasalah — mode rules-only",
+        "Kegagalan beruntun membuka circuit breaker; analisis memakai aturan sampai pulih.",
+    ),
+    "reserve": (
+        "budget",
+        "warning",
+        "Budget AI rutin hari ini terpakai",
+        "Biaya AI hari ini lewat ${routine:.2f}: sampai 00:00 WIB berita biasa memakai aturan. "
+        "Keputusan sinyal (Opus) dan berita dampak tinggi tetap memakai sisa budget sampai "
+        "batas ${ceiling:.2f}.",
+    ),
+    "exhausted": (
+        "budget",
+        "warning",
+        "Batas biaya AI harian tercapai",
+        "Batas ${ceiling:.2f} hari ini tercapai: sampai 00:00 WIB semua analisis memakai aturan "
+        "dan sinyal keluar tanpa review AI (ditandai di setiap sinyal).",
+    ),
+    "ok": (
+        "recovery",
+        "info",
+        "Analisis LLM normal kembali",
+        "Claude API merespons normal dan budget hari ini masih ada.",
+    ),
+}
+
+
 def _alert_id(*parts: object) -> str:
     return hashlib.sha1("|".join(str(p) for p in parts).encode()).hexdigest()[:16]  # noqa: S324
 
@@ -255,57 +289,27 @@ class AnalyzerService:
 
     async def _llm_health_alerts(self) -> None:
         now = self._ctx.clock.now()
-        state = (
-            "circuit_open"
-            if self.llm.breaker.is_open
-            else "over_budget"
-            if self.llm.budget_exceeded
-            else "ok"
-        )
+        state = "circuit_open" if self.llm.breaker.is_open else self.llm.budget_state
         if state == self._llm_state:
             return
         previous, self._llm_state = self._llm_state, state
-        if state == "circuit_open":
-            await self._alert(
-                Alert(
-                    id=_alert_id("llm", state, now),
-                    kind="health",
-                    severity="critical",
-                    title="Claude API bermasalah — mode rules-only",
-                    detail=(
-                        "Kegagalan beruntun membuka circuit breaker; "
-                        "analisis memakai aturan sampai pulih."
-                    ),
-                    created_at=now,
-                    dedupe_key="llm_circuit",
-                )
+        if state == "ok" and previous is None:
+            return
+        budget = self._ctx.settings.budget
+        kind, severity, title, detail = LLM_ALERTS[state]
+        await self._alert(
+            Alert(
+                id=_alert_id("llm", state, now),
+                kind=kind,
+                severity=severity,
+                title=title,
+                detail=detail.format(
+                    routine=budget.routine_daily_usd, ceiling=budget.llm_daily_usd
+                ),
+                created_at=now,
+                dedupe_key=f"llm_{state}",
             )
-        elif state == "over_budget":
-            await self._alert(
-                Alert(
-                    id=_alert_id("llm", state, now),
-                    kind="budget",
-                    severity="warning",
-                    title="Budget LLM harian habis",
-                    detail=(
-                        "Hanya berita dampak tinggi yang dianalisis LLM; sisanya memakai aturan."
-                    ),
-                    created_at=now,
-                    dedupe_key="llm_budget",
-                )
-            )
-        elif previous is not None:
-            await self._alert(
-                Alert(
-                    id=_alert_id("llm", state, now),
-                    kind="recovery",
-                    severity="info",
-                    title="Analisis LLM normal kembali",
-                    detail="Claude API merespons normal.",
-                    created_at=now,
-                    dedupe_key="llm_recovery",
-                )
-            )
+        )
 
     # ------------------------------------------------------------------ price-led detection
 

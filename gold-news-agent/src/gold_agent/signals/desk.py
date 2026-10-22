@@ -1,8 +1,9 @@
 """Opus 5.5's final say on every signal: BUY / SELL / WAIT, and the chart to trade it on.
 
 The engine proposes a candidate: a direction from news + macro + technical + price, every hard
-filter passed, levels computed. Opus reviews the whole picture in one structured call and decides.
-Guardrails keep that safe:
+filter passed, levels computed. Opus reviews the whole picture and decides: `llm.desk_votes`
+independent answers run in parallel and the majority wins (a tie holds), so one unlucky sample
+cannot send or block a trade alone. Guardrails keep that safe:
 
 * it may approve the engine's direction or WAIT, never flip it: an opposite call is held as WAIT,
   since no evidence the system computed produced that trade;
@@ -72,21 +73,33 @@ class Verdict:
     confidence: int | None = None
     reasons: tuple[str, ...] = ()
     caution: str | None = None
-    note: str | None = None  # why the AI did not decide
+    note: str | None = None  # why the AI did not decide (or not with every vote)
     model: str | None = None
+    votes: int = 1  # answers counted
+    agree: int = 1  # answers backing `decision`
+    dissent: str | None = None  # an approval's strongest opposing reason
 
     @property
     def approved(self) -> bool:
         return self.decision == self.side
 
+    @property
+    def count(self) -> str:
+        """The tally for a message, e.g. " (2/3 suara)"; empty for a single answer."""
+        return f" ({self.agree}/{self.votes} suara)" if self.votes > 1 else ""
+
     def review(self, note: str | None = None) -> SignalReview:
+        decided = self.decision != "UNAVAILABLE"
         return SignalReview(
-            model=self.model if self.decision != "UNAVAILABLE" else None,
+            model=self.model if decided else None,
             confidence=self.confidence,
             timeframe=self.timeframe,
             reasons=list(self.reasons),
             caution=self.caution,
             note=note or self.note,
+            votes=self.votes if decided else None,
+            agree=self.agree if decided else None,
+            dissent=self.dissent,
         )
 
     def to_json(self) -> JSON:
@@ -101,6 +114,9 @@ class Verdict:
             "caution": self.caution,
             "note": self.note,
             "model": self.model,
+            "votes": self.votes,
+            "agree": self.agree,
+            "dissent": self.dissent,
         }
 
 
@@ -130,6 +146,61 @@ def verify(
         reasons=reasons or ("tanpa alasan",),
         caution=value.caution_id,
         model=model,
+    )
+
+
+def tally(
+    votes: Sequence[Verdict],
+    failures: Sequence[str],
+    *,
+    candidate: Signal,
+    choice: TfChoice,
+    at: datetime,
+) -> Verdict:
+    """Opus's independent answers to one candidate (each already through `verify`) as one
+    verdict. The trade goes ahead only when more than half of the answers counted approve it (a
+    tie holds). The chart is the one most approving answers chose (a tie: the selector's pick if
+    tied, else the most confident answer's). Reasons come from the most confident answer on the
+    winning side, confidence is that side's mean, and an approval carries the strongest dissent.
+    `failures` are answers that never came (timeout, budget): they count for nothing."""
+    approving = [vote for vote in votes if vote.approved]
+    holding = [vote for vote in votes if not vote.approved]
+    approved = 2 * len(approving) > len(votes)
+    side, other = (approving, holding) if approved else (holding, approving)
+    lead = max(side, key=lambda vote: vote.confidence or 0)
+    chosen = Counter(vote.timeframe for vote in side if vote.timeframe)
+    timeframe = lead.timeframe
+    if chosen:
+        top = max(chosen.values())
+        tied = [tf for tf, n in chosen.items() if n == top]
+        if choice.tf in tied:
+            timeframe = choice.tf
+        elif timeframe not in tied:
+            timeframe = tied[0]
+    dissent = None
+    if approved and other:
+        strongest = max(other, key=lambda vote: vote.confidence or 0)
+        dissent = strongest.reasons[0] if strongest.reasons else None
+    sure = [vote.confidence for vote in side if vote.confidence is not None]
+    asked = len(votes) + len(failures)
+    return Verdict(
+        side=candidate.action,
+        decision=candidate.action if approved else "WAIT",
+        at=at,
+        composite=candidate.composite_score,
+        timeframe=timeframe,
+        confidence=round(sum(sure) / len(sure)) if sure else None,
+        reasons=lead.reasons,
+        caution=lead.caution,
+        note=(
+            f"{len(failures)} dari {asked} suara AI tidak jalan: {failures[0]}"
+            if failures
+            else None
+        ),
+        model=lead.model,
+        votes=len(votes),
+        agree=len(side),
+        dissent=dissent,
     )
 
 
@@ -325,8 +396,16 @@ def desk_brief(
         text = untrusted(triage.summary_id or analysis.title, 300)
         lines.append(
             f"- [{fmt_wib(analysis.first_seen_at)} WIB, dampak {triage.impact_score}/5, "
-            f"{triage.direction_gold}, {status}, priced-in {triage.priced_in_risk}] {text}"
+            f"{triage.direction_gold} (yakin {triage.confidence:.0%}), {status}, "
+            f"priced-in {triage.priced_in_risk}] {text}"
         )
+        deep = analysis.deep
+        if deep is not None:  # the careful (effort high) reading of a high-impact story
+            risks = "; ".join(untrusted(risk, 120) for risk in deep.risks[:2]) or "-"
+            lines.append(
+                f"  analisis mendalam: {deep.direction_gold} (yakin {deep.confidence:.0%}) · "
+                f"{untrusted(deep.narrative_id, 400)} · risiko: {risks}"
+            )
     if not recent:
         lines.append("- (tidak ada berita relevan yang masih berpengaruh)")
     lines.append("</berita>")

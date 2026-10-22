@@ -176,6 +176,35 @@ async def test_llm_outage_degrades_to_rules_and_raises_one_health_alert(
     assert "rules-only" in alerts[0]["title"]
 
 
+async def test_the_daily_ai_budget_drops_ordinary_news_first_and_says_so_once(
+    service_factory: Callable[..., Any], clock: ManualClock
+) -> None:
+    service, context, fake = await service_factory(parsed(triage_value(impact_score=2)))
+    await context.ops.add_llm_usage(
+        ts=T0, route="triage", model="claude-opus-5-5", cost_usd=15.0, ok=True
+    )
+    for n in range(2):
+        result = await service.handle_cluster(
+            cluster(f"Gold rallies as dollar slides, part {n}", cid=f"c{n}")
+        )
+        assert result is not None and result.origin == "rules"
+        assert any("budget AI rutin" in note for note in result.notes)
+    assert fake.requests == []
+    alerts = [m.data for m in await drain(context, STREAM_ALERTS)]
+    assert [(a["kind"], a["title"]) for a in alerts] == [
+        ("budget", "Budget AI rutin hari ini terpakai")
+    ]
+    assert "$15.00" in alerts[0]["detail"] and "$20.00" in alerts[0]["detail"]
+    tomorrow = T0 + timedelta(days=1)
+    clock.set(tomorrow + timedelta(seconds=2))
+    result = await service.handle_cluster(
+        cluster("Gold rallies as dollar slides", cid="c9", first_seen_at=tomorrow)
+    )
+    assert result is not None and result.origin == "llm"
+    (recovered,) = [m.data for m in await drain(context, STREAM_ALERTS)]
+    assert recovered["title"] == "Analisis LLM normal kembali"
+
+
 def ctx_at(ts: datetime, mid: float) -> MarketContext:
     return MarketContext(
         ts=ts,

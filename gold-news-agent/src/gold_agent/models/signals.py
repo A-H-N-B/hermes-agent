@@ -31,6 +31,9 @@ class SignalReview(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     caution: str | None = None
     note: str | None = None
+    votes: int | None = None  # independent Opus answers counted
+    agree: int | None = None  # how many of them back this decision
+    dissent: str | None = None  # the strongest opposing answer's main reason
 
 
 class Signal(BaseModel):

@@ -1,5 +1,5 @@
 """Claude API access for analysis: structured outputs, prompt caching, timeouts, circuit breaker,
-daily budget and per-call usage/cost logging (section 13.1).
+a hard daily budget and per-call usage/cost logging (section 13.1).
 
 Requests go through the beta Messages endpoint so a safety-classifier refusal (a false positive on
 benign news) can be retried server-side on the recommended fallback model (`fallbacks="default"`).
@@ -8,6 +8,7 @@ the dashboard's credit estimate stay right when a fallback model answers."""
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,14 +20,18 @@ import anthropic
 import pydantic
 import structlog
 
-from gold_agent.config import LlmRoute, ModelPrice, Settings
+from gold_agent.config import LlmRoute, LlmSettings, ModelPrice, Settings
 from gold_agent.core.clock import Clock
 from gold_agent.storage.ops_repo import OpsRepo
 from gold_agent.timeutils.sessions import WIB
 
 log = structlog.get_logger(__name__)
 
-Route = Literal["triage", "deep", "outlook", "brief", "desk"]
+Route = Literal["triage", "triage_high", "deep", "outlook", "brief", "desk"]
+BudgetState = Literal["ok", "reserve", "exhausted"]  # reserve: only priority calls still run
+BUDGET_RANK: dict[BudgetState, int] = {"ok": 0, "reserve": 1, "exhausted": 2}
+IN_FLIGHT = "in flight (no result recorded)"
+CHARS_PER_TOKEN = 2  # text runs ~3-4 characters per token: this keeps the estimate high
 T = TypeVar("T", bound=pydantic.BaseModel)
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # pairs with fallbacks="default"
 PRICED_ITERATIONS = ("message", "fallback_message")  # compaction etc. are not model turns
@@ -34,6 +39,22 @@ PRICED_ITERATIONS = ("message", "fallback_message")  # compaction etc. are not m
 
 class LlmUnavailable(Exception):
     """Not attempted: disabled, no key, circuit open or over budget."""
+
+
+def worst_case_usd(llm: LlmSettings, route: LlmRoute, prompt_chars: int) -> float:
+    """The most one call can cost, held against the budget while it runs: the prompt as if all of
+    it were written to the cache, plus max_tokens of output (thinking included), at the dearest
+    model that may serve it. With server-side fallbacks on, a refused hop's input is billed again
+    on the fallback model, so the input counts twice. Deliberately high: it is released for the
+    real cost when the call ends."""
+    prices = [llm.pricing_per_mtok[route.model]]
+    hops = 1
+    if llm.fallbacks == "default":
+        prices, hops = list(llm.pricing_per_mtok.values()), 2
+    rate_in = max(max(price.input, price.cache_write) for price in prices)
+    rate_out = max(price.output for price in prices)
+    tokens_in = prompt_chars / CHARS_PER_TOKEN
+    return (hops * tokens_in * rate_in + route.max_tokens * rate_out) / 1e6
 
 
 class LlmFailed(Exception):
@@ -136,7 +157,9 @@ class LlmClient:
             self._client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=0)
         breaker = settings.llm.circuit_breaker
         self.breaker = CircuitBreaker(breaker.failures, breaker.cooldown_seconds, clock)
-        self.budget_exceeded = False
+        self.budget_state: BudgetState = "ok"  # the furthest the WIB day got (for alerts)
+        self._budget_day: datetime | None = None
+        self._admission = asyncio.Lock()
 
     @property
     def available(self) -> bool:
@@ -148,18 +171,66 @@ class LlmClient:
     async def spent_today(self) -> float:
         return await self._ops.llm_spend_since(wib_day_start(self._clock.now()))
 
-    async def _check_budget(self, high_impact: bool) -> None:
-        """High-impact calls always go through; the rest stop once the WIB day's budget is spent."""
-        spent = await self.spent_today()
-        over = spent >= self._settings.budget.llm_daily_usd
-        if over and not self.budget_exceeded:
-            log.warning("llm.budget_exceeded", spent=round(spent, 4))
-        self.budget_exceeded = over
-        if over and not high_impact:
-            raise LlmUnavailable(f"budget LLM harian habis (${spent:.2f})")
+    def _note_budget(self, total: float) -> None:
+        """Track how far today's spend got: it only moves up within a WIB day, so a total that
+        dips as reservations resolve does not flap the alerts."""
+        budget = self._settings.budget
+        state: BudgetState = (
+            "exhausted"
+            if total > budget.llm_daily_usd
+            else "reserve"
+            if total > budget.routine_daily_usd
+            else "ok"
+        )
+        day = wib_day_start(self._clock.now())
+        if day != self._budget_day:
+            self._budget_day, self.budget_state = day, "ok"
+        if BUDGET_RANK[state] > BUDGET_RANK[self.budget_state]:
+            log.warning("llm.budget", state=state, total=round(total, 4))
+            self.budget_state = state
+
+    async def _admit(
+        self, route: Route, *, priority: bool, prompt_chars: int, ref_id: str | None
+    ) -> int:
+        """Hold this call's worst case in llm_usage, then check the WIB day's total (finished
+        calls and every hold, this one included): routine calls stop at the routine share of the
+        budget, priority calls (the signal decision, high-impact news) at the ceiling. The hold
+        comes first and lives in the shared table, so calls running at the same time, in any
+        process, cannot pass the ceiling together: at worst two that start together near it both
+        wait. This client's own admissions take turns, so its parallel calls (the desk's votes)
+        are admitted exactly. Returns the held row."""
+        config = self.route(route)
+        budget = self._settings.budget
+        worst = worst_case_usd(self._settings.llm, config, prompt_chars)
+        async with self._admission:
+            hold = await self._ops.add_llm_usage(
+                ts=self._clock.now(),
+                route=route,
+                model=config.model,
+                cost_usd=worst,
+                ok=False,
+                error=IN_FLIGHT,
+                ref_id=ref_id,
+            )
+            total = await self.spent_today()
+            self._note_budget(total)
+            if total <= (budget.llm_daily_usd if priority else budget.routine_daily_usd):
+                return hold
+            await self._ops.delete_llm_usage(hold)
+        spent = total - worst
+        if priority:
+            raise LlmUnavailable(
+                f"batas biaya AI harian ${budget.llm_daily_usd:.2f} tercapai "
+                f"(terpakai ${spent:.2f})"
+            )
+        raise LlmUnavailable(
+            f"budget AI rutin hari ini terpakai (${spent:.2f} dari "
+            f"${budget.routine_daily_usd:.2f}); sisanya untuk keputusan sinyal dan berita penting"
+        )
 
     async def _record(
         self,
+        hold: int,
         route: Route,
         model: str,
         *,
@@ -167,14 +238,13 @@ class LlmClient:
         latency_ms: float,
         ok: bool,
         error: str | None,
-        ref_id: str | None,
     ) -> float:
+        """Replace the held worst case with what the call really cost."""
         cost, priced = usage_cost(self._settings.llm.pricing_per_mtok, usage, model)
         if usage is not None and not priced:
             log.warning("llm.unpriced_model", model=model, route=route)
-        await self._ops.add_llm_usage(
-            ts=self._clock.now(),
-            route=route,
+        await self._ops.update_llm_usage(
+            hold,
             model=model,
             input_tokens=getattr(usage, "input_tokens", 0) or 0,
             output_tokens=getattr(usage, "output_tokens", 0) or 0,
@@ -184,7 +254,6 @@ class LlmClient:
             latency_ms=latency_ms,
             ok=ok,
             error=error[:200] if error else None,
-            ref_id=ref_id,
         )
         return cost
 
@@ -196,15 +265,18 @@ class LlmClient:
         user: str,
         schema: type[T],
         ref_id: str | None = None,
-        high_impact: bool = False,
+        priority: bool = False,
     ) -> LlmResult[T]:
+        """`priority`: the signal decision or high-impact news, which may use the reserve."""
         if not self._settings.llm.enabled:
             raise LlmUnavailable("LLM dimatikan (mode rules-only)")
         if self._client is None:
             raise LlmUnavailable("ANTHROPIC_API_KEY belum diisi")
         if self.breaker.is_open:
             raise LlmUnavailable("circuit breaker terbuka setelah kegagalan beruntun")
-        await self._check_budget(high_impact)
+        hold = await self._admit(
+            route, priority=priority, prompt_chars=len(system) + len(user), ref_id=ref_id
+        )
 
         config = self.route(route)
         request: dict[str, Any] = {
@@ -236,46 +308,46 @@ class LlmClient:
         except (pydantic.ValidationError, ValueError) as exc:
             latency = (time.perf_counter() - started) * 1000
             await self._record(
+                hold,
                 route,
                 config.model,
                 usage=usage,
                 latency_ms=latency,
                 ok=False,
                 error=f"invalid output: {exc}",
-                ref_id=ref_id,
             )
             self.breaker.failure()
             raise LlmFailed(f"output tidak valid: {exc}", invalid_output=True) from exc
         except LlmFailed as exc:
             latency = (time.perf_counter() - started) * 1000
             await self._record(
+                hold,
                 route,
                 config.model,
                 usage=usage,
                 latency_ms=latency,
                 ok=False,
                 error=str(exc),
-                ref_id=ref_id,
             )
             self.breaker.failure()
             raise
         except anthropic.APIError as exc:
             latency = (time.perf_counter() - started) * 1000
             await self._record(
+                hold,
                 route,
                 config.model,
                 usage=usage,
                 latency_ms=latency,
                 ok=False,
                 error=f"{type(exc).__name__}: {exc}",
-                ref_id=ref_id,
             )
             if self.breaker.failure():
                 log.error("llm.circuit_open", route=route, error=type(exc).__name__)
             raise LlmFailed(f"{type(exc).__name__}") from exc
         latency = (time.perf_counter() - started) * 1000
         cost = await self._record(
-            route, served, usage=usage, latency_ms=latency, ok=True, error=None, ref_id=ref_id
+            hold, route, served, usage=usage, latency_ms=latency, ok=True, error=None
         )
         if served != config.model:
             log.info("llm.fallback_served", route=route, requested=config.model, served=served)

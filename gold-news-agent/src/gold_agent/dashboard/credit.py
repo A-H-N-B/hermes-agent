@@ -63,6 +63,7 @@ async def credit_view(ctx: AppContext) -> JSON:
     base: JSON = {
         "spent_today_usd": round(await spend(wib_day_start(now)), 4),
         "daily_budget_usd": ctx.settings.budget.llm_daily_usd,
+        "routine_budget_usd": round(ctx.settings.budget.routine_daily_usd, 2),
         "has_key": bool(ctx.env.get("ANTHROPIC_API_KEY")),
     }
     stored = await ctx.ops.kv_get(KV_CREDIT)

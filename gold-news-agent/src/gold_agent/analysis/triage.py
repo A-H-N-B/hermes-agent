@@ -161,16 +161,18 @@ class TriageEngine:
             message = build_user_message(
                 inputs, max_body_chars=self._settings.analysis.max_body_chars
             )
+            # A release or a story the rules already rate high: the reading the news score leans
+            # on most gets more thought, and may use the budget kept for priority calls.
             high_impact = inputs.release is not None or baseline.impact_score >= 4
             for attempt in (1, 2):
                 try:
                     result = await self._llm.structured(
-                        "triage",
+                        "triage_high" if high_impact else "triage",
                         system=self.prompt.text,
                         user=message,
                         schema=TriageResult,
                         ref_id=inputs.cluster.id,
-                        high_impact=high_impact,
+                        priority=high_impact,
                     )
                 except LlmUnavailable as exc:
                     notes.append(f"LLM tidak dipakai: {exc}")
@@ -258,7 +260,7 @@ class TriageEngine:
                 user=message,
                 schema=DeepAnalysis,
                 ref_id=analysis.cluster_id,
-                high_impact=analysis.triage.impact_score >= 4,
+                priority=analysis.triage.impact_score >= 4,
             )
         except (LlmUnavailable, LlmFailed) as exc:
             log.info("deep.skipped", cluster=analysis.cluster_id, reason=str(exc))

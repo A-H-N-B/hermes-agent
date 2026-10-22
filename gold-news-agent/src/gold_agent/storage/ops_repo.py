@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, delete, desc, func, select, update
 
 from gold_agent.config import SourceRegistry
 from gold_agent.models import Alert, LatencyStage, SourceHealth
@@ -115,9 +115,22 @@ class OpsRepo:
 
     # ------------------------------------------------------------------ LLM usage
 
-    async def add_llm_usage(self, **values: Any) -> None:
+    async def add_llm_usage(self, **values: Any) -> int:
         async with self._db.session() as session:
-            session.add(LlmUsageRow(**values))
+            row = LlmUsageRow(**values)
+            session.add(row)
+            await session.flush()
+            return row.id
+
+    async def update_llm_usage(self, row_id: int, **values: Any) -> None:
+        async with self._db.session() as session:
+            await session.execute(
+                update(LlmUsageRow).where(LlmUsageRow.id == row_id).values(**values)
+            )
+
+    async def delete_llm_usage(self, row_id: int) -> None:
+        async with self._db.session() as session:
+            await session.execute(delete(LlmUsageRow).where(LlmUsageRow.id == row_id))
 
     async def llm_spend_since(self, since: datetime) -> float:
         async with self._db.session() as session:

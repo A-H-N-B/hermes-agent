@@ -90,9 +90,13 @@ risk:
   volume_step: 0.01
 
 budget:
-  # Q4: above this, only high-impact news (release or impact >= 4) and Opus's final review of a
-  # signal (capped by llm.desk_reviews_per_day) still use the LLM.
-  llm_daily_usd: 3.0
+  # Hard ceiling on Claude API spend per WIB day: no call starts once it would pass it (each
+  # call reserves its worst case while it runs, so calls running together cannot overshoot).
+  llm_daily_usd: 20.0
+  # Routine calls (ordinary headlines, the hourly outlook narrative, reports) stop at
+  # (100 - this)% of the ceiling; the rest is kept for the signal decision (Opus desk) and
+  # high-impact news (a release or impact >= 4).
+  priority_reserve_pct: 25
   paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
 
 notifications:
@@ -168,9 +172,14 @@ llm:
   # thinking, which counts toward it.
   triage:
     model: claude-opus-5-5
-    effort: low # every headline: keeps thinking short so triage stays fast
+    effort: low # every ordinary headline: keeps thinking short so triage stays fast
     timeout_seconds: 20
     max_tokens: 4096
+  triage_high:
+    model: claude-opus-5-5
+    effort: medium # a release or rules impact >= 4: the reading the news score leans on most
+    timeout_seconds: 40
+    max_tokens: 8192
   deep:
     model: claude-opus-5-5
     effort: high # impact >= deep_min_impact: worth the extra thought
@@ -191,6 +200,7 @@ llm:
     effort: high # accuracy over speed: prices are re-read after the review anyway
     timeout_seconds: 90
     max_tokens: 16000
+  desk_votes: 3 # independent Opus answers per review, run in parallel; the majority decides
   desk_reviews_per_day: 48 # beyond this the engine decides alone (labelled "tanpa review AI")
   fallbacks: default # a refused request is retried server-side on the recommended model
   circuit_breaker:

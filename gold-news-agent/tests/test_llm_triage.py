@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,10 +16,12 @@ from gold_agent.analysis.llm_client import (
     LlmUnavailable,
     cost_usd,
     usage_cost,
+    worst_case_usd,
 )
 from gold_agent.analysis.triage import TriageEngine, TriageInputs, build_user_message, cluster_items
 from gold_agent.config import Settings
 from gold_agent.core.app import AppContext
+from gold_agent.core.clock import ManualClock
 from gold_agent.econ_calendar.events import load_events
 from gold_agent.econ_calendar.release_parser import ReleaseParser
 from gold_agent.models import DeepAnalysis, NewsCluster, TriageResult
@@ -164,18 +167,72 @@ async def test_circuit_breaker_opens_after_repeated_failures(ctx: AppContext) ->
     assert len(fake.requests) == failures
 
 
-async def test_daily_budget_keeps_only_high_impact_calls(ctx: AppContext) -> None:
+async def spend(ctx: AppContext, usd: float) -> None:
     await ctx.ops.add_llm_usage(
-        ts=T0, route="triage", model="claude-haiku-5-5", cost_usd=99.0, ok=True
+        ts=T0, route="triage", model="claude-opus-5-5", cost_usd=usd, ok=True
     )
-    fake = FakeAnthropic(parsed(triage_value()))
+
+
+async def test_the_daily_budget_is_a_hard_ceiling_with_a_reserve_for_priority_calls(
+    ctx: AppContext, clock: ManualClock
+) -> None:
+    budget = ctx.settings.budget
+    assert (budget.llm_daily_usd, budget.routine_daily_usd) == (20.0, 15.0)
+    fake = FakeAnthropic(parsed(triage_value()), parsed(triage_value()))
     client = LlmClient(ctx.settings, api_key=None, ops=ctx.ops, clock=ctx.clock, client=fake)
-    with pytest.raises(LlmUnavailable, match="budget"):
+    await spend(ctx, 14.95)  # one more routine call could pass the routine share
+    with pytest.raises(LlmUnavailable, match="budget AI rutin"):
         await client.structured("triage", system="s", user="u", schema=TriageResult)
-    result = await client.structured(
-        "triage", system="s", user="u", schema=TriageResult, high_impact=True
-    )
-    assert result.value.impact_score == 3 and client.budget_exceeded
+    assert client.budget_state == "reserve"
+    await client.structured("triage", system="s", user="u", schema=TriageResult, priority=True)
+    await spend(ctx, 4.95)  # ~$19.90: one more call could pass the ceiling itself
+    with pytest.raises(LlmUnavailable, match=r"batas biaya AI harian \$20.00"):
+        await client.structured("desk", system="s", user="u", schema=TriageResult, priority=True)
+    assert client.budget_state == "exhausted" and len(fake.requests) == 1
+    assert await client.spent_today() < budget.llm_daily_usd
+    clock.advance(timedelta(days=1).total_seconds())  # a new WIB day starts from zero
+    await client.structured("triage", system="s", user="u", schema=TriageResult)
+    assert client.budget_state == "ok"
+
+
+class Gate:
+    """parse() that waits for the test, so several calls are in flight at once."""
+
+    def __init__(self, response: Any) -> None:
+        self.response = response
+        self.started = 0
+        self.open = asyncio.Event()
+
+    async def parse(self, **_request: Any) -> Any:
+        self.started += 1
+        await self.open.wait()
+        return self.response
+
+
+async def test_calls_running_together_cannot_pass_the_ceiling(ctx: AppContext) -> None:
+    gate = Gate(parsed(triage_value()))
+    fake = FakeAnthropic()
+    fake.beta = SimpleNamespace(messages=gate)
+    client = LlmClient(ctx.settings, api_key=None, ops=ctx.ops, clock=ctx.clock, client=fake)
+    worst = worst_case_usd(ctx.settings.llm, ctx.settings.llm.triage, len("su"))
+    await spend(ctx, 20.0 - 2.5 * worst)  # room for two calls' worst case, not three
+    calls = [
+        asyncio.create_task(
+            client.structured("triage", system="s", user="u", schema=TriageResult, priority=True)
+        )
+        for _ in range(3)
+    ]
+    for _ in range(500):
+        if gate.started + sum(call.done() for call in calls) == 3:
+            break
+        await asyncio.sleep(0.01)
+    assert gate.started == 2  # the third was refused while the first two were running
+    assert await client.spent_today() == pytest.approx(20.0 - 0.5 * worst)  # held worst cases
+    gate.open.set()
+    results = await asyncio.gather(*calls, return_exceptions=True)
+    assert sum(isinstance(r, LlmUnavailable) for r in results) == 1
+    real = sum(r.cost_usd for r in results if not isinstance(r, BaseException))
+    assert await client.spent_today() == pytest.approx(20.0 - 2.5 * worst + real)  # released
 
 
 async def test_rules_only_mode_and_missing_key(ctx: AppContext) -> None:
@@ -211,12 +268,15 @@ async def test_release_numbers_stay_authoritative_over_the_llm(ctx: AppContext) 
         evidence=[title],
         surprise={"actual": 0.5, "forecast": 0.3, "previous": None, "unit": "%"},
     )
-    engine = make(ctx, FakeAnthropic(parsed(llm_says)))
-    analysis = await engine.analyze(
+    fake = FakeAnthropic(parsed(llm_says))
+    analysis = await make(ctx, fake).analyze(
         TriageInputs(
             cluster=cluster(title), items=cluster_items(cluster(title), []), release=reading
         )
     )
+    # A release is read with more thought (route triage_high) than an ordinary headline.
+    assert fake.requests[0]["output_config"] == {"effort": "medium"}
+    assert fake.options[0] == {"timeout": 40.0, "max_retries": 0}
     assert analysis.origin == "fast_path" and not analysis.ai_pending
     assert analysis.triage.direction_gold == "bearish"
     assert analysis.triage.impact_score == 5

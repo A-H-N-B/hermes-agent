@@ -185,6 +185,17 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   `llm.desk_reviews_per_day`; no AI (disabled, outage, cap) = engine alone with
   `SignalReview(model=None, note=...)`. Reviews logged in kv `desk_reviews`; Performa compares
   approved vs held-back candidates by first touch (TP1 vs SL) on M1 bars.
+  Each review is `llm.desk_votes` (3) independent answers in parallel, counted by `desk.tally`
+  (a strict majority approves, a tie holds; chart = the approving answers' most common pick,
+  ties to the selector's; `SignalReview.votes/agree/dissent`). The brief carries triage
+  confidence and each story's deep analysis (direction, confidence, narrative, risks).
+  AI budget: `budget.llm_daily_usd` (20) is a hard ceiling per WIB day. `LlmClient._admit`
+  holds each call's worst case (`worst_case_usd`) as an `llm_usage` row before reading the
+  day's total (holds included, so concurrent calls in any process cannot pass it; one client's
+  admissions take turns), and `_record` swaps the hold for the real cost. Routine calls stop at
+  `routine_daily_usd` (100 − `priority_reserve_pct` %); `priority=True` calls (desk votes,
+  `triage_high` = a release or rules impact >= 4 at effort medium, deep of impact >= 4) go on
+  to the ceiling. The analyzer alerts on `budget_state` (ok/reserve/exhausted, sticky per day).
   This computer's settings live in git-ignored `config/local.yaml` (deep-merged over
   settings.yaml) and `config/sources.local.yaml` (per-id fields); `gold_agent/local_config.py`
   is stdlib+PyYAML only so the Windows updater (`scripts/windows/perbarui.ps1`, desktop shortcut
