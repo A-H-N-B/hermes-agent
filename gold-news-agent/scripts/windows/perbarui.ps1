@@ -24,6 +24,10 @@ function Update-GoldNewsAgent {
     # US government data behind the daily fundamentals (public domain, no key). A source that
     # does not answer from this computer stays off and is tried again on the next update.
     $Official = @('treasury_yield_curve', 'treasury_real_yield_curve', 'cftc_cot_gold')
+    # The price without MT5 (price_feed.primary binance_paxg, and the fallback with MT5): gold
+    # as PAXG and the dollar as EURUSDT from Binance's public market-data hosts.
+    $Market = @('binance_paxg_ws', 'binance_paxg_rest', 'binance_eurusdt_ws')
+    $Tested = $Official + $Market
 
     function Step($n, $text) { Write-Host ""; Write-Host "=== LANGKAH $n/7: $text ===" -ForegroundColor Cyan }
     function Ok($text) { Write-Host "  OK  $text" -ForegroundColor Green }
@@ -83,11 +87,11 @@ function Update-GoldNewsAgent {
     }
     Ok 'Pengaturan valid'
 
-    Step 6 'Menguji sumber data resmi (Treasury AS, CFTC)'
+    Step 6 'Menguji sumber data (Treasury AS, CFTC, harga Binance)'
     # The report goes to data\ so git sees no changed file on the next update.
     $Report = Join-Path $Root 'data\source_report_update.json'
     Remove-Item $Report -ErrorAction SilentlyContinue
-    & $Exe verify-sources --only ($Official -join ',') --note 'update' --out-md (Join-Path $Root 'data\source_report_update.md') --out-json $Report
+    & $Exe verify-sources --only ($Tested -join ',') --note 'update' --out-md (Join-Path $Root 'data\source_report_update.md') --out-json $Report
     $passed = @()
     if (Test-Path $Report) {
         $passed = @((Get-Content $Report -Raw | ConvertFrom-Json).results | Where-Object { $_.status -in 'ok', 'warn' } | ForEach-Object { $_.source_id })
@@ -97,7 +101,7 @@ function Update-GoldNewsAgent {
         if ($LASTEXITCODE -eq 0) { Ok "Aktif: $($passed -join ', ')" }
         else { Warn 'Sumber tidak bisa diaktifkan (lihat tulisan merah di atas).' }
     }
-    $failed = @($Official | Where-Object { $passed -notcontains $_ })
+    $failed = @($Tested | Where-Object { $passed -notcontains $_ })
     if ($failed.Count) { Warn "Belum terjangkau dari jaringan ini (dicoba lagi saat update berikutnya): $($failed -join ', ')" }
 
     Step 7 'Menyalakan program'

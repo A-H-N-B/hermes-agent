@@ -134,6 +134,12 @@ hanya dibuka di komputer ini. `.env` tidak pernah masuk git.
 Untuk MT5 tidak ada isian: login di terminal MT5 seperti biasa. Agent hanya membaca akun yang
 sedang terbuka dan tidak pernah login sendiri, jadi akunmu tidak pernah diganti atau dikeluarkan.
 
+Tanpa MT5 sama sekali (harga emas dari Binance PAXG, dolar dari EURUSDT): jalankan sekali
+`.venv\Scripts\gold-agent.exe config set price_feed.primary binance_paxg`, lalu klik
+"Perbarui" (langkah 6 menguji sumber harga Binance dari komputer ini). PAXG adalah token emas,
+bukan XAUUSD spot: harganya selisih beberapa dolar dari chart broker, dan pasar terkait (perak,
+minyak, yield dari broker) tidak tersedia. Kembali ke MT5: `config set price_feed.primary auto`.
+
 ## Langkah 5 — Sesuaikan config
 
 `config\settings.yaml` berisi nilai bawaan dan ikut diperbarui. **Jangan ubah file itu**:
