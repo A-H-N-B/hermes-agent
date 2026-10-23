@@ -1,0 +1,18 @@
+# FOMC roster. Deliberately empty: names are filled from the official pages below, never from
+# memory, and re-checked monthly (the scheduler raises an alert when last_verified is > 35 days old).
+# voter: whether the official votes at FOMC meetings this calendar year (rotation changes yearly).
+
+sources:
+  board: https://www.federalreserve.gov/aboutthefed/bios/board/default.htm
+  fomc: https://www.federalreserve.gov/monetarypolicy/fomc.htm
+  calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+
+last_verified: null
+
+officials: []
+# Example entry shape (not data):
+#   - name: "<full name>"
+#     role: chair | vice_chair | governor | president
+#     institution: "Board of Governors" | "Federal Reserve Bank of <city>"
+#     voter: true
+#     aliases: ["<surname>"]

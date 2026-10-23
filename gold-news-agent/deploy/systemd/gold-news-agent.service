@@ -1,0 +1,31 @@
+# Native alternative to Docker Compose: every service in one process on the memory bus
+# (settings.infra.bus: memory). Docker users do not need this unit: `restart: unless-stopped`
+# brings the stack back after a reboot.
+# Install: useradd --system --home /opt/gold-news-agent gold; chown -R gold: /opt/gold-news-agent
+#   sudo -u gold uv sync   (in /opt/gold-news-agent: the venv belongs to the service user)
+#   cp deploy/systemd/gold-news-agent.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now gold-news-agent
+[Unit]
+Description=Gold News Agent (XAUUSD news monitor, signal only)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=gold
+Group=gold
+WorkingDirectory=/opt/gold-news-agent
+# ReadWritePaths below must exist before the sandbox is set up ("+": runs as root, unsandboxed).
+ExecStartPre=+/usr/bin/install -d -o gold -g gold /opt/gold-news-agent/data
+ExecStart=/opt/gold-news-agent/.venv/bin/gold-agent run all
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+# The watchdog asks chronyc directly when no offset file is configured or fresh.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/gold-news-agent/data /opt/gold-news-agent/docs
+
+[Install]
+WantedBy=multi-user.target

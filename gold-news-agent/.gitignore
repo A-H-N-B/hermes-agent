@@ -1,0 +1,35 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+secrets/
+
+# This computer's own settings (gold-agent config ...): never committed, survive updates
+config/local.yaml
+config/sources.local.yaml
+
+# Runtime data
+data/
+logs/
+*.sqlite
+*.sqlite3
+*.db
+backups/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+dist/
+build/
+*.egg-info/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

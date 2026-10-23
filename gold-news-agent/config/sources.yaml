@@ -1,0 +1,470 @@
+# Source registry. Collectors only ever load entries with enabled: true AND status: verified.
+# status flow: candidate -> (scripts/verify_sources.py + human review) -> verified | rejected.
+# ${VAR} placeholders are filled from .env at runtime and redacted from every log/report.
+#
+# Fields
+#   kind: news | calendar | market | macro | infra
+#   type: rss | json | csv | ics | html | websocket | telegram
+#   parse: how to find items + their timestamp (json/csv/websocket)
+#     items: dot path to the list ("" = root is the list)
+#     time_field / time_format: unix | unix_ms | iso | date | any strptime pattern
+#   requires_env: secrets the URL needs; the source is skipped when any is missing.
+
+sources:
+  # ------------------------------------------------------------------ Tier 1 (triggers)
+  - id: financialjuice_rss
+    name: FinancialJuice headlines (RSS)
+    kind: news
+    type: rss
+    url: https://www.financialjuice.com/feed.ashx?xy=rss
+    tier: 1
+    poll_seconds: 10
+    reliability: 0.8
+    enabled: true
+    status: candidate
+    tos_url: https://www.financialjuice.com/terms
+    tos_note: Free RSS; check whether automated polling every 10s is acceptable. Pro/Elite tiers are faster.
+
+  - id: investinglive_rss
+    name: investingLive (ex-ForexLive) news feed
+    kind: news
+    type: rss
+    url: https://investinglive.com/feed/
+    tier: 1
+    poll_seconds: 15
+    reliability: 0.8
+    enabled: true
+    status: candidate
+    tos_url: https://investinglive.com/terms-and-conditions
+    tos_note: Feed URL after the July 2025 rebrand is unconfirmed; verify, then read the terms.
+
+  - id: forexlive_legacy_rss
+    name: ForexLive legacy feed (expect redirect to investingLive)
+    kind: news
+    type: rss
+    url: https://www.forexlive.com/feed/news
+    tier: 1
+    poll_seconds: 15
+    reliability: 0.8
+    enabled: false
+    status: candidate
+    tos_note: Only checked to discover the new canonical feed URL via redirect.
+
+  - id: telegram_squawk
+    name: Telegram squawk channels (user-selected)
+    kind: news
+    type: telegram
+    channels: [] # Q5: usernames or numeric ids, chosen by the user
+    tier: 1
+    reliability: 0.75
+    enabled: true
+    status: candidate
+    requires_env: [TELEGRAM_API_ID, TELEGRAM_API_HASH]
+    tos_url: https://core.telegram.org/api/terms
+    tos_note: Read-only user session via Telethon; join channels manually; never send, scrape members, or automate joins.
+
+  # ------------------------------------------------------------------ Tier 2 (official + major media)
+  - id: fed_press_all
+    name: Federal Reserve press releases (all)
+    kind: news
+    type: rss
+    url: https://www.federalreserve.gov/feeds/press_all.xml
+    tier: 2
+    poll_seconds: 30
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://www.federalreserve.gov/disclaimer.htm
+    tos_note: US government public information.
+
+  - id: fed_press_monetary
+    name: Federal Reserve monetary policy releases (FOMC statements, minutes)
+    kind: news
+    type: rss
+    url: https://www.federalreserve.gov/feeds/press_monetary.xml
+    tier: 2
+    poll_seconds: 15
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: Poll faster around 14:00 New York on FOMC days.
+
+  - id: fed_speeches
+    name: Federal Reserve speeches
+    kind: news
+    type: rss
+    url: https://www.federalreserve.gov/feeds/speeches.xml
+    tier: 2
+    poll_seconds: 60
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: Board speeches only; regional Fed presidents publish on their own sites.
+
+  - id: bls_latest
+    name: BLS latest releases
+    kind: news
+    type: rss
+    url: https://www.bls.gov/feed/bls_latest.rss
+    tier: 2
+    poll_seconds: 30
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://www.bls.gov/bls/linksite.htm
+    tos_note: BLS blocks generic user agents; needs http.contact_email in the User-Agent.
+
+  - id: bea_releases
+    name: BEA news releases
+    kind: news
+    type: rss
+    url: https://apps.bea.gov/rss/rss.xml
+    tier: 2
+    poll_seconds: 60
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: US government public information.
+
+  - id: ecb_press
+    name: ECB press releases
+    kind: news
+    type: rss
+    url: https://www.ecb.europa.eu/rss/press.html
+    tier: 2
+    poll_seconds: 60
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://www.ecb.europa.eu/services/disclaimer/html/index.en.html
+    tos_note: Reuse allowed with attribution.
+
+  - id: boj_whatsnew
+    name: Bank of Japan what's new
+    kind: news
+    type: rss
+    url: https://www.boj.or.jp/en/rss/whatsnew.xml
+    tier: 2
+    poll_seconds: 120
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: Official; verify feed path.
+
+  - id: google_news_gold
+    name: Google News search — gold
+    kind: news
+    type: rss
+    url: https://news.google.com/rss/search?q=%22gold+price%22+OR+XAUUSD+OR+bullion+when:1h&hl=en-US&gl=US&ceid=US:en
+    tier: 2
+    poll_seconds: 120
+    reliability: 0.6
+    enabled: true
+    status: candidate
+    tos_url: https://policies.google.com/terms
+    tos_note: Personal, low-rate use only; links are Google redirect URLs, canonicalise before dedup.
+
+  - id: google_news_fed
+    name: Google News search — Federal Reserve
+    kind: news
+    type: rss
+    url: https://news.google.com/rss/search?q=%22Federal+Reserve%22+OR+FOMC+when:1h&hl=en-US&gl=US&ceid=US:en
+    tier: 2
+    poll_seconds: 180
+    reliability: 0.6
+    enabled: true
+    status: candidate
+    tos_note: Same terms as google_news_gold.
+
+  - id: fxstreet_news
+    name: FXStreet news
+    kind: news
+    type: rss
+    url: https://www.fxstreet.com/rss/news
+    tier: 2
+    poll_seconds: 60
+    reliability: 0.65
+    enabled: true
+    status: candidate
+    tos_url: https://www.fxstreet.com/terms-and-conditions
+    tos_note: Verify feed path and terms.
+
+  - id: cnbc_economy
+    name: CNBC economy
+    kind: news
+    type: rss
+    url: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258
+    tier: 2
+    poll_seconds: 120
+    reliability: 0.7
+    enabled: true
+    status: candidate
+    tos_note: Headlines + summaries only; no full-text extraction.
+
+  - id: kitco_news
+    name: Kitco news
+    kind: news
+    type: rss
+    url: https://www.kitco.com/rss/news
+    tier: 2
+    poll_seconds: 300
+    reliability: 0.6
+    enabled: true
+    status: candidate
+    tos_note: Feed path unconfirmed; drop if no official feed exists (no HTML scraping).
+
+  # ------------------------------------------------------------------ Tier 3 (context only)
+  - id: gdelt_gold
+    name: GDELT DOC 2.0 — gold articles, last hour
+    kind: news
+    type: json
+    url: https://api.gdeltproject.org/api/v2/doc/doc?query=%22gold%20price%22&mode=artlist&format=json&timespan=1h&maxrecords=75&sort=datedesc
+    parse: { items: articles, time_field: seendate, time_format: "%Y%m%dT%H%M%SZ", title_field: title, id_field: url, link_field: url }
+    tier: 3
+    poll_seconds: 900
+    reliability: 0.5
+    enabled: true
+    status: candidate
+    tos_url: https://www.gdeltproject.org/about.html#termsofuse
+    tos_note: Open data; ~15 min update cadence. Context only, never a trigger.
+
+  - id: finnhub_forex_news
+    name: Finnhub market news (forex)
+    kind: news
+    type: json
+    url: https://finnhub.io/api/v1/news?category=forex&token=${FINNHUB_API_KEY}
+    parse: { items: "", time_field: datetime, time_format: unix, title_field: headline, id_field: id, link_field: url, body_field: summary }
+    tier: 3
+    poll_seconds: 60
+    reliability: 0.6
+    enabled: true
+    status: candidate
+    requires_env: [FINNHUB_API_KEY]
+    tos_url: https://finnhub.io/terms-of-service
+    tos_note: Free tier 60 calls/min; personal use.
+
+  - id: cftc_cot_gold
+    name: CFTC Commitments of Traders — COMEX gold (disaggregated, futures only)
+    kind: macro
+    type: json
+    # Three years of weekly managed-money positions; the parser also reads the legacy report.
+    url: https://publicreporting.cftc.gov/resource/72hh-3qpy.json?cftc_contract_market_code=088691&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=160
+    parse: { items: "", time_field: report_date_as_yyyy_mm_dd, time_format: iso }
+    tier: 3
+    poll_seconds: 21600
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm
+    tos_note: US government public data (Socrata open data); weekly, Tuesday positions released Friday 15:30 New York.
+
+  - id: treasury_yield_curve
+    name: US Treasury daily par yield curve (2Y, 10Y)
+    kind: macro
+    type: csv
+    url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${YEAR}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${YEAR}&page&_format=csv
+    tier: 3
+    poll_seconds: 21600
+    timeout_seconds: 90 # the CSV is built on request and often takes 15-60 s
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates
+    tos_note: US government public data, end of day (~15:30 New York); no key. ${YEAR} is filled by the program.
+
+  - id: treasury_real_yield_curve
+    name: US Treasury daily par real yield curve (10Y TIPS)
+    kind: macro
+    type: csv
+    url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${YEAR}/all?type=daily_treasury_real_yield_curve&field_tdr_date_value=${YEAR}&page&_format=csv
+    tier: 3
+    poll_seconds: 21600
+    timeout_seconds: 90 # the CSV is built on request and often takes 15-60 s
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates
+    tos_note: Same terms as treasury_yield_curve. Breakeven inflation = nominal 10Y minus real 10Y.
+
+  - id: spdr_gld_holdings
+    name: SPDR Gold Shares (GLD) daily holdings
+    kind: macro
+    type: csv
+    url: https://www.spdrgoldshares.com/assets/dynamic/GLD/GLD_US_archive_EN.csv
+    tier: 3
+    poll_seconds: 21600
+    reliability: 0.9
+    enabled: true
+    status: candidate
+    tos_url: https://www.spdrgoldshares.com/usa/terms-of-use/
+    tos_note: ETF flow proxy; check terms before automated download.
+
+  # ------------------------------------------------------------------ Calendar
+  - id: ff_calendar_week
+    name: Forex Factory weekly calendar (JSON)
+    kind: calendar
+    type: json
+    url: https://nfs.faireconomy.media/ff_calendar_thisweek.json
+    parse: { items: "", time_field: date, time_format: iso, title_field: title }
+    tier: 2
+    poll_seconds: 1800
+    reliability: 0.85
+    enabled: true
+    status: candidate
+    tos_note: Forecast/previous only, no actuals. Cloudflare 429 on frequent pulls; cache locally.
+
+  - id: bls_schedule_ics
+    name: BLS release schedule (iCalendar)
+    kind: calendar
+    type: ics
+    url: https://www.bls.gov/schedule/news_release/bls.ics
+    tier: 2
+    poll_seconds: 86400
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: Needs http.contact_email in the User-Agent, like bls_latest.
+
+  - id: treasury_auctions_upcoming
+    name: TreasuryDirect upcoming auctions
+    kind: calendar
+    type: json
+    url: https://www.treasurydirect.gov/TA_WS/securities/upcoming?format=json
+    parse: { items: "", time_field: auctionDate, time_format: iso, title_field: securityTerm, id_field: cusip }
+    tier: 2
+    poll_seconds: 21600
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: Official API.
+
+  - id: fomc_calendar_page
+    name: FOMC meeting calendar (HTML page)
+    kind: calendar
+    type: html
+    url: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+    tier: 2
+    poll_seconds: 604800
+    reliability: 1.0
+    enabled: true
+    official: true
+    status: candidate
+    tos_note: Parsed weekly for meeting dates, SEP flags and the blackout window.
+
+  # ------------------------------------------------------------------ Market data
+  - id: binance_paxg_ws
+    name: Binance PAXGUSDT trades (market-data-only WebSocket)
+    kind: market
+    type: websocket
+    url: wss://data-stream.binance.vision/stream?streams=paxgusdt@bookTicker/paxgusdt@aggTrade
+    parse: { items: data, time_field: E, time_format: unix_ms }
+    tier: 1
+    reliability: 0.7
+    enabled: true
+    status: candidate
+    tos_url: https://www.binance.com/en/terms
+    tos_note: PAXG is a gold-backed token, a proxy not XAUUSD spot; trades 24/7 (weekend gap estimator). api.binance.com refuses US IPs.
+
+  - id: binance_paxg_rest
+    name: Binance PAXGUSDT book ticker (market-data-only REST)
+    kind: market
+    type: json
+    url: https://data-api.binance.vision/api/v3/ticker/bookTicker?symbol=PAXGUSDT
+    tier: 1
+    poll_seconds: 5
+    reliability: 0.7
+    enabled: true
+    status: candidate
+    tos_note: Fallback for the WebSocket and basis checks.
+
+  - id: binance_eurusdt_ws
+    name: Binance EURUSDT book ticker (USD-strength proxy when no DXY feed)
+    kind: market
+    type: websocket
+    url: wss://data-stream.binance.vision/stream?streams=eurusdt@bookTicker/eurusdt@aggTrade
+    parse: { items: data, time_field: E, time_format: unix_ms }
+    tier: 2
+    reliability: 0.6
+    enabled: true
+    status: candidate
+    tos_url: https://www.binance.com/en/terms
+    tos_note: EUR stablecoin rate as an EURUSD stand-in (~57.6% of DXY); labelled proxy.
+
+  - id: twelvedata_xau_quote
+    name: Twelve Data XAU/USD quote
+    kind: market
+    type: json
+    url: https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVEDATA_API_KEY}
+    parse: { items: "", time_field: timestamp, time_format: unix }
+    tier: 1
+    poll_seconds: 60
+    reliability: 0.9
+    enabled: true
+    status: candidate
+    requires_env: [TWELVEDATA_API_KEY]
+    tos_url: https://twelvedata.com/terms
+    tos_note: Free plan ~8 credits/min; WebSocket needs a paid plan.
+
+  - id: fred_dfii10
+    name: FRED 10Y real yield (DFII10)
+    kind: macro
+    type: json
+    url: https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key=${FRED_API_KEY}&file_type=json&sort_order=desc&limit=5
+    parse: { items: observations, time_field: date, time_format: date }
+    tier: 3
+    poll_seconds: 3600
+    reliability: 1.0
+    enabled: true
+    status: candidate
+    requires_env: [FRED_API_KEY]
+    tos_url: https://fred.stlouisfed.org/docs/api/terms_of_use.html
+    tos_note: Daily series with ~1 day lag; context, not intraday.
+
+  - id: fred_dgs10
+    name: FRED 10Y nominal yield (DGS10)
+    kind: macro
+    type: json
+    url: https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key=${FRED_API_KEY}&file_type=json&sort_order=desc&limit=5
+    parse: { items: observations, time_field: date, time_format: date }
+    tier: 3
+    poll_seconds: 3600
+    reliability: 1.0
+    enabled: true
+    status: candidate
+    requires_env: [FRED_API_KEY]
+    tos_note: Same terms as fred_dfii10. Intraday yields need another feed (section C).
+
+  # ------------------------------------------------------------------ Infrastructure reachability
+  - id: telegram_bot_api
+    name: Telegram Bot API
+    kind: infra
+    type: html
+    url: https://api.telegram.org/
+    tier: 1
+    reliability: 1.0
+    enabled: true
+    status: candidate
+    tos_note: Reachability only; notifications go through here.
+
+  - id: anthropic_api
+    name: Anthropic API
+    kind: infra
+    type: html
+    url: https://api.anthropic.com/
+    tier: 1
+    reliability: 1.0
+    enabled: true
+    status: candidate
+    tos_note: Reachability only.
