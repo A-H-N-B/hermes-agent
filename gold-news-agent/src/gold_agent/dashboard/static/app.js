@@ -445,13 +445,18 @@ function applyIndicatorToggles(state) {
   drawIndicatorLines(state);
 }
 
-async function loadIndicators(state) {
+// `series`: the overlay lines too (chart load, timeframe change, a new bar); otherwise only the
+// read of every timeframe, which is all that changes between bars.
+async function loadIndicators(state, series = true) {
   if (!state || !state.ind) return;
-  const payload = await api(`/api/indicators?tf=${state.tf}`);
-  state.ind.rows = payload.series;
-  for (const group of Object.values(state.ind.groups)) fillGroup(group, payload.series);
+  const payload = await api(`/api/indicators?tf=${state.tf}${series ? "" : "&series=0"}`);
+  if (payload.series) {
+    state.ind.rows = payload.series;
+    for (const group of Object.values(state.ind.groups)) fillGroup(group, payload.series);
+  }
   state.ind.summary = payload.summary;
-  applyIndicatorToggles(state);
+  if (payload.series) applyIndicatorToggles(state);
+  else drawIndicatorLines(state);
   renderIndicatorSummary(payload.summary);
 }
 
@@ -1172,7 +1177,7 @@ function onTick(tick) {
     }
     state.last = bar;
     if (newBar) drawProjection(state);
-    if (newBar && state.ind && currentPage === "live") refreshLiveExtras();
+    if (newBar && state.ind && currentPage === "live") refreshLiveExtras(true);
   }
 }
 
@@ -1366,9 +1371,7 @@ const loaders = {
     markTf(chart.tf);
     await loadChart(chart);
     drawSignal(chart, state.active);
-    await loadIndicators(chart);
-    renderTiming(await api("/api/timing"));
-    await refreshForecast();
+    await liveExtras(true);
   },
   outlook: async () => {
     const [outlook, state] = await Promise.all([api("/api/outlook"), api("/api/state")]);
@@ -1453,22 +1456,33 @@ async function show(page) {
   }
 }
 
+// The indicator read, the timing windows and the forecast, fetched side by side: one that fails
+// (or is slow) never holds the others back, and the next refresh tries it again.
+async function liveExtras(series) {
+  const settle = (promise) => promise.catch((error) => console.error(error));
+  await Promise.all([
+    settle(loadIndicators(charts.live, series)),
+    settle(api("/api/timing").then(renderTiming)),
+    settle(refreshForecast()),
+  ]);
+}
+
 // The prediction follows the market in real time: every new context (about every 5 s) refreshes
-// the indicator read, the timing windows and the forecast, at most once per EXTRAS_EVERY ms.
+// the extras, at most once per EXTRAS_EVERY ms; the overlay lines only when a bar closes.
 const EXTRAS_EVERY = 5000;
 let extrasTimer = null;
 let extrasAt = 0;
-function refreshLiveExtras() {
+let extrasSeries = false;
+function refreshLiveExtras(series = false) {
+  extrasSeries = extrasSeries || series;
   if (extrasTimer) return;
   const wait = Math.max(300, extrasAt + EXTRAS_EVERY - Date.now());
   extrasTimer = setTimeout(async () => {
     extrasAt = Date.now();
+    const withSeries = extrasSeries;
+    extrasSeries = false;
     try {
-      await loadIndicators(charts.live);
-      renderTiming(await api("/api/timing"));
-      await refreshForecast();
-    } catch (error) {
-      console.error(error);
+      await liveExtras(withSeries);
     } finally {
       extrasTimer = null;
     }
@@ -1485,7 +1499,7 @@ function refreshSoon() { // coalesce bursts of state/signal events into one fetc
       renderSignalCard(state);
       renderPrice(state.context);
       drawSignal(charts.live, state.active);
-      renderTiming(await api("/api/timing"));
+      refreshLiveExtras(); // the timing windows follow the new state
     }
   }, 500);
 }

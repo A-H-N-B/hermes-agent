@@ -26,6 +26,18 @@ class LiveHub:
         # The engine's newest state from the bus: it arrives every evaluation, while the stored
         # copy only changes when the decision or the score moves noticeably.
         self.last_state: dict[str, Any] | None = None
+        # The newest market context from the bus (every few seconds; stored once a minute),
+        # parsed once per push for every reader.
+        self.last_context: dict[str, Any] | None = None
+        self._parsed: tuple[dict[str, Any], MarketContext] | None = None
+
+    def context(self) -> MarketContext | None:
+        raw = self.last_context
+        if raw is None:
+            return None
+        if self._parsed is None or self._parsed[0] is not raw:
+            self._parsed = (raw, MarketContext.model_validate(raw))
+        return self._parsed[1]
 
     @property
     def clients(self) -> int:
@@ -63,7 +75,8 @@ class LiveHub:
         )
 
     async def on_context(self, data: dict[str, Any]) -> None:
-        await self.broadcast("context", context_view(MarketContext.model_validate(data)))
+        self.last_context = data
+        await self.broadcast("context", context_view(self.context()))
 
     async def on_analysis(self, data: dict[str, Any]) -> None:
         analysis = Analysis.model_validate(data)

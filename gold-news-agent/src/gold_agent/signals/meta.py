@@ -55,6 +55,10 @@ PROVEN_T = 2.0  # Diebold-Mariano t against the base rate
 RIDGE = 2.0  # L2 penalty on standardised features: strong, the samples are few
 REFIT_EVERY = 10
 MAX_SETUPS = 400  # the most recent resolved setups: recent behaviour, bounded CPU per hour
+MEMO_ROWS = 4 * MAX_SETUPS * 5  # feature rows kept between hourly refits (all trade charts)
+# A past setup's features depend only on its (complete) bars, so each hourly refit reads the ones
+# it already computed instead of rebuilding a chart state per setup (the costly part).
+_memo: dict[tuple[Any, ...], list[float]] = {}
 
 
 def _clip(value: float, low: float = -1.0, high: float = 1.0) -> float:
@@ -152,6 +156,19 @@ def evaluate(x: Array, y: Array, closed: Sequence[datetime], entered: Sequence[d
     }
 
 
+def _row(tf: Timeframe, bars: Sequence[Candle], setup: Setup, window: int) -> list[float]:
+    chart = bars[max(0, setup.index + 1 - window) : setup.index + 1]
+    key = (tf, chart[0].source, chart[0].open_time, chart[-1].open_time, len(chart))
+    key += (setup.side, setup.at)
+    row = _memo.get(key)
+    if row is None:
+        row = features(timeframe_state(tf, chart, cache=False), setup.side, setup.at)
+        if len(_memo) >= MEMO_ROWS:
+            del _memo[next(iter(_memo))]  # the oldest
+        _memo[key] = row
+    return row
+
+
 def train_meta(tf: Timeframe, bars: Sequence[Candle], setups: Sequence[Setup], window: int) -> JSON:
     """The model for one chart from its replayed setups (signals/setups.py); runs in a worker
     thread. `window`: bars the live chart holds (market.candle_buffer)."""
@@ -159,15 +176,7 @@ def train_meta(tf: Timeframe, bars: Sequence[Candle], setups: Sequence[Setup], w
     summary: JSON = {"features": list(FEATURES), "samples": len(resolved), "proven": False}
     if len(resolved) < MIN_TRAIN:
         return summary | {"evaluated": 0}
-    rows = [
-        features(
-            timeframe_state(tf, bars[max(0, s.index + 1 - window) : s.index + 1], cache=False),
-            s.side,
-            s.at,
-        )
-        for s in resolved
-    ]
-    x = np.asarray(rows, dtype=np.float64)
+    x = np.asarray([_row(tf, bars, s, window) for s in resolved], dtype=np.float64)
     y = np.asarray([1.0 if s.outcome == "tp1" else 0.0 for s in resolved])
     scores = evaluate(x, y, [s.closed_at for s in resolved], [s.at for s in resolved])
     proven = (

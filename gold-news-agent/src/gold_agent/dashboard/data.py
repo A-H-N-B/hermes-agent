@@ -96,7 +96,7 @@ class DashboardData:
     def __init__(self, ctx: AppContext, hub: LiveHub | None = None) -> None:
         self._ctx = ctx
         self._hub = hub
-        self.book = AccuracyBook(ctx, learn=False)  # the signal service learns
+        self.book = AccuracyBook.shared(ctx)  # the signal service learns
         self._sessions = SessionClock(ctx.settings.sessions)
 
     async def _engine_state(self) -> SignalState | None:
@@ -109,8 +109,14 @@ class DashboardData:
         live = SignalState.model_validate(pushed)
         return live if stored is None or live.ts >= stored.ts else stored
 
+    async def _context(self) -> MarketContext | None:
+        """The newest market context: the one pushed every few seconds, else the stored one
+        (stored once a minute; parsing it costs more than the push)."""
+        pushed = self._hub.context() if self._hub else None
+        return pushed if pushed is not None else await self._ctx.market.latest_context()
+
     async def _source(self) -> str | None:
-        context = await self._ctx.market.latest_context()
+        context = await self._context()
         return context.source if context else None
 
     async def state(self) -> JSON:
@@ -128,7 +134,7 @@ class DashboardData:
             "mode": ctx.settings.mode,
             "state": state.model_dump(mode="json") if state else None,
             "active": active.model_dump(mode="json") if active else None,
-            "context": context_view(await ctx.market.latest_context()),
+            "context": context_view(await self._context()),
             "halted": bool(halt and halt.get("halted")),
             "next_event": event_view(upcoming, now) if upcoming else None,
             "tradingview_symbol": ctx.settings.dashboard.tradingview_symbol,
@@ -176,7 +182,7 @@ class DashboardData:
             events=await ctx.calendar.between(
                 now - timedelta(hours=1), now + timedelta(days=span_days)
             ),
-            context=await ctx.market.latest_context(),
+            context=await self._context(),
         )
         accuracy = await self.book.accuracy(tf, source=await self._source())
         session = session_key(self._sessions.session(now))
@@ -186,20 +192,22 @@ class DashboardData:
             "session_label": SESSION_LABEL_ID.get(session, session),
         }
 
-    async def indicators(self, tf: str, limit: int) -> JSON:
+    async def indicators(self, tf: str, limit: int, *, series: bool = True) -> JSON:
+        """The chart overlays (`series`, only needed when the chart loads or a bar closes) and
+        the read of every timeframe."""
         ctx = self._ctx
         source = await self._source()
-        bars = await self.bars(tf, limit + WARMUP_BARS)
         extras = {
             name: momentum(await ctx.market.latest_candles(name, 120, source=source))
             for name in SUMMARY_TFS
         }
         stored = await ctx.ops.kv_get(KV_FUNDAMENTALS)
         fundamentals = FundamentalSnapshot.model_validate(stored) if stored else None
-        return {
-            "series": indicator_series(bars, limit),
-            "summary": indicator_summary(await ctx.market.latest_context(), extras, fundamentals),
-        }
+        summary = indicator_summary(await self._context(), extras, fundamentals)
+        if not series:
+            return {"summary": summary}
+        bars = await self.bars(tf, limit + WARMUP_BARS)
+        return {"series": indicator_series(bars, limit), "summary": summary}
 
     async def timing(self) -> JSON:
         ctx = self._ctx
@@ -213,7 +221,7 @@ class DashboardData:
             state=await self._engine_state(),
             outlook=await ctx.signals.latest_outlook(),
             events=await ctx.calendar.between(now - timedelta(hours=1), now + timedelta(days=2)),
-            context=await ctx.market.latest_context(),
+            context=await self._context(),
             choice=await ctx.ops.kv_get(KV_TIMEFRAME),
         )
 
@@ -306,7 +314,7 @@ class DashboardData:
             for (_, stage), s in sorted(latency.items())
             if stage in ("triaged", "analyzed", "flash", "signal", "notified")
         ]
-        context = await ctx.market.latest_context()
+        context = await self._context()
         heartbeats = await ctx.ops.heartbeats()
         return {
             "now": _iso(now),

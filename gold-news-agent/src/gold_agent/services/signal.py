@@ -126,7 +126,7 @@ class SignalService:
             clock=ctx.clock,
             client=anthropic_client,
         )
-        self.accuracy = AccuracyBook(ctx)
+        self.accuracy = AccuracyBook.shared(ctx, learn=True)
         self.desk = Desk(settings.llm.desk_reviews_per_day)
         self.desk_prompt = load_prompt("desk", DriverKB.from_file())
         self.desk_label = desk_label(settings)

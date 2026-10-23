@@ -255,5 +255,15 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   is; replays and tests compute in line); the dashboard's book skips meta-labeling
   (`learn=False`). The engine state goes on the bus every evaluation (`publish_state_seconds` 5,
   stored only on change) and the dashboard serves the newest pushed one (`LiveHub.last_state`).
+  Speed: minute series (`market/minutes.py`, shared by the dollar tracker and the related
+  markets) keep numpy arrays rebuilt only when a minute is added, so a context costs a few ms
+  instead of a few hundred; `market/physics.py` returns arrays, not per-minute dicts. One
+  `AccuracyBook.shared(ctx)` per process (the dashboard reads the signal service's results; a
+  learning user joining rebuilds once with the meta model); meta feature rows are memoised
+  across hourly refits. The dashboard serves the pushed context (`LiveHub.context()`, parsed
+  once per push) instead of the one stored a minute ago; between bars the Live page fetches the
+  indicator read only (`/api/indicators?series=0`), the overlay lines on a new bar; the read,
+  timing and forecast load side by side, so one failing panel never leaves the others on
+  "Memuat…".
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

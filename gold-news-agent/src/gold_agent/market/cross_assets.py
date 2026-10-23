@@ -12,14 +12,14 @@ with no stable rule (equities) counts only when the data shows one.
 from __future__ import annotations
 
 import math
-from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from itertools import pairwise
-from statistics import fmean, pstdev
+from datetime import datetime
 from typing import Any
 
+import numpy as np
+
+from gold_agent.market.minutes import MinuteSeries
 from gold_agent.market.usd import DXY_CONSTANT, DXY_WEIGHTS
 from gold_agent.models import CrossAsset
 
@@ -169,92 +169,23 @@ def dollar_index(quotes: Mapping[str, float]) -> tuple[float | None, int]:
 # ------------------------------------------------------------------ series
 
 
-class MinuteSeries:
-    """The last value seen in each minute, a few days long."""
-
-    def __init__(self, days: int) -> None:
-        self.points: deque[tuple[datetime, float]] = deque(maxlen=days * 24 * 60)
-
-    def update(self, ts: datetime, value: float) -> None:
-        if not math.isfinite(value) or value <= 0:
-            return
-        minute = ts.replace(second=0, microsecond=0)
-        if self.points and self.points[-1][0] == minute:
-            self.points[-1] = (minute, value)
-        elif not self.points or minute > self.points[-1][0]:
-            self.points.append((minute, value))
-
-    def seed(self, points: Iterable[tuple[datetime, float]]) -> None:
-        """History from the broker, before live quotes: only points older than what we have."""
-        first = self.points[0][0] if self.points else None
-        older = sorted(p for p in points if first is None or p[0] < first)
-        merged = [*older, *self.points]
-        self.points.clear()
-        for ts, value in merged:
-            self.update(ts, value)
-
-    @property
-    def latest(self) -> float | None:
-        return self.points[-1][1] if self.points else None
-
-    def value_at(self, moment: datetime) -> float | None:
-        for ts, value in reversed(self.points):
-            if ts <= moment:
-                return value
-        return None
-
-    def change_pct(self, now: datetime, minutes: int) -> float | None:
-        current, previous = self.value_at(now), self.value_at(now - timedelta(minutes=minutes))
-        if current is None or previous is None or previous == current == 0:
-            return None
-        return 100 * (current / previous - 1)
-
-    def zscore(self, now: datetime, minutes: int, min_samples: int = 60) -> float | None:
-        """This move against every move of the same length in the series."""
-        current, previous = self.value_at(now), self.value_at(now - timedelta(minutes=minutes))
-        if current is None or previous is None:
-            return None
-        points = list(self.points)
-        changes = [
-            math.log(points[i][1] / points[i - minutes][1])
-            for i in range(minutes, len(points))
-            if points[i][0] - points[i - minutes][0] <= timedelta(minutes=minutes * 2)
-        ]
-        if len(changes) < min_samples:
-            return None
-        sigma = pstdev(changes)
-        if sigma == 0:
-            return 0.0
-        return (math.log(current / previous) - fmean(changes)) / sigma
-
-    def buckets(self, step_minutes: int) -> dict[datetime, float]:
-        """Last value per `step_minutes` bucket."""
-        out: dict[datetime, float] = {}
-        for ts, value in self.points:
-            out[ts - timedelta(minutes=ts.minute % step_minutes)] = value
-        return out
-
-
 def correlation(a: MinuteSeries, b: MinuteSeries, step_minutes: int) -> tuple[float | None, int]:
     """Pearson correlation of `step_minutes` log returns over the buckets both series have."""
-    left, right = a.buckets(step_minutes), b.buckets(step_minutes)
-    times = sorted(set(left) & set(right))
-    step = timedelta(minutes=step_minutes)
-    xs: list[float] = []
-    ys: list[float] = []
-    for previous, current in pairwise(times):
-        if current - previous != step:
-            continue
-        xs.append(math.log(left[current] / left[previous]))
-        ys.append(math.log(right[current] / right[previous]))
-    if len(xs) < CORR_MIN_PAIRS:
-        return None, len(xs)
-    sx, sy = pstdev(xs), pstdev(ys)
+    left_ids, left = a.buckets(step_minutes)
+    right_ids, right = b.buckets(step_minutes)
+    common, in_left, in_right = np.intersect1d(
+        left_ids, right_ids, assume_unique=True, return_indices=True
+    )
+    adjacent = np.diff(common) == 1
+    xs = np.diff(left[in_left])[adjacent]
+    ys = np.diff(right[in_right])[adjacent]
+    pairs = len(xs)
+    if pairs < CORR_MIN_PAIRS:
+        return None, pairs
+    sx, sy = float(xs.std()), float(ys.std())
     if sx == 0 or sy == 0:
-        return None, len(xs)
-    mx, my = fmean(xs), fmean(ys)
-    cov = fmean((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
-    return cov / (sx * sy), len(xs)
+        return None, pairs
+    return float(((xs - xs.mean()) * (ys - ys.mean())).mean()) / (sx * sy), pairs
 
 
 def relevance(spec: AssetSpec, measured: float | None, pairs: int) -> tuple[int, float, float]:

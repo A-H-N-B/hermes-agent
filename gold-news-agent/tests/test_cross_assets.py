@@ -14,12 +14,12 @@ import pytest
 from gold_agent.market.cross_assets import (
     SPECS,
     CrossTracker,
-    MinuteSeries,
     correlation,
     dollar_index,
     relevance,
     resolve_symbols,
 )
+from gold_agent.market.minutes import MinuteSeries
 from gold_agent.market.usd import synthetic_dxy
 
 T0 = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)

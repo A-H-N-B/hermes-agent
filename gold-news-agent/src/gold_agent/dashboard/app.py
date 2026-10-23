@@ -168,8 +168,9 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
             default=settings.chart_timeframe, pattern="^(M1|M5|M15|M30|H1|H4|D1|W1|MN)$"
         ),
         limit: int = Query(default=settings.chart_bars, gt=0, le=5000),
+        series: bool = Query(default=True),
     ) -> dict[str, Any]:
-        return await data.indicators(tf, limit)
+        return await data.indicators(tf, limit, series=series)
 
     @app.get("/api/forecast", dependencies=guard)
     async def api_forecast(

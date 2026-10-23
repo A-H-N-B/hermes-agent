@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from gold_agent.config import (
     PROJECT_ROOT,
@@ -23,6 +24,9 @@ from gold_agent.storage.news_repo import NewsRepo
 from gold_agent.storage.notify_repo import NotifyRepo
 from gold_agent.storage.ops_repo import OpsRepo
 from gold_agent.storage.signal_repo import SignalRepo
+
+if TYPE_CHECKING:
+    from gold_agent.signals.accuracy import AccuracyBook
 
 DATA_DIR = PROJECT_ROOT / "data"
 TELEGRAM_SESSION = DATA_DIR / "telegram" / "gold_agent"
@@ -44,6 +48,8 @@ class AppContext:
     calendar: CalendarRepo = field(init=False)
     signals: SignalRepo = field(init=False)
     notify: NotifyRepo = field(init=False)
+    # One per process, shared by the services in it (signals/accuracy.py: AccuracyBook.shared).
+    accuracy_book: AccuracyBook | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.news = NewsRepo(self.db)

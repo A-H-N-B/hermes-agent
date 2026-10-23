@@ -6,7 +6,8 @@ takes seconds per timeframe, so results are cached for REFRESH and the numeric p
 event loop. On the wall clock nobody waits for a rebuild: the last result keeps serving while the
 new one is computed in the background (one timeframe at a time), so evaluations and the
 dashboard's forecast stay real-time. Replays and tests compute in line, so their results stay
-deterministic.
+deterministic. One book serves every service of a process (`AccuracyBook.shared`), so the
+dashboard reads the signal service's results instead of computing them a second time.
 """
 
 from __future__ import annotations
@@ -66,6 +67,23 @@ class AccuracyBook:
         self._pending: dict[str, asyncio.Task[JSON]] = {}
         self._failed: dict[str, datetime] = {}
 
+    @classmethod
+    def shared(cls, ctx: AppContext, *, learn: bool = False) -> AccuracyBook:
+        """The process's book; it learns once any of its users does."""
+        book = ctx.accuracy_book
+        if book is None:
+            book = ctx.accuracy_book = cls(ctx, learn=learn)
+        book._learn = book._learn or learn
+        return book
+
+    def _fresh(self, tf: str, now: datetime) -> JSON | None:
+        cached = self._results.get(tf)
+        if cached is None or now - cached[0] >= REFRESH:
+            return None
+        if self._learn and tf in TRADE_TIMEFRAMES and "meta" not in cached[1]:
+            return None  # built before a learning user joined
+        return cached[1]
+
     async def _load_shared(self, now: datetime) -> _Shared:
         if self._shared is not None and now - self._shared.at < REFRESH:
             return self._shared
@@ -96,9 +114,10 @@ class AccuracyBook:
         if tf not in SCORED:
             return None
         now = self._ctx.clock.now()
+        fresh = self._fresh(tf, now)
+        if fresh is not None:
+            return fresh
         cached = self._results.get(tf)
-        if cached is not None and now - cached[0] < REFRESH:
-            return cached[1]
         if not self._background:
             return await self._rebuild(tf, source)
         failed = self._failed.get(tf)
@@ -120,9 +139,9 @@ class AccuracyBook:
     async def _rebuild(self, tf: str, source: str | None) -> JSON:
         async with self._lock:  # one timeframe at a time: bounded CPU next to the live loop
             now = self._ctx.clock.now()
-            cached = self._results.get(tf)
-            if cached is not None and now - cached[0] < REFRESH:
-                return cached[1]
+            fresh = self._fresh(tf, now)
+            if fresh is not None:
+                return fresh
             shared = await self._load_shared(now)
             start = now - timedelta(days=days_for(tf))
             bars = await self._ctx.market.candles(

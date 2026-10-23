@@ -18,9 +18,10 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from itertools import pairwise
+from functools import reduce
 
 import numpy as np
+from numpy.typing import NDArray
 
 from gold_agent.market import econophysics as ep
 from gold_agent.models import (
@@ -32,7 +33,7 @@ from gold_agent.models import (
 )
 
 Points = Sequence[tuple[datetime, float]]
-MINUTE = timedelta(minutes=1)
+Returns = tuple[NDArray[np.int64], NDArray[np.float64]]
 FACTOR_STEP = timedelta(minutes=5)
 FACTOR_COVERAGE = 0.8  # a market joins the factor analysis when it trades 80% of gold's buckets
 
@@ -47,27 +48,33 @@ class PhysicsInputs:
     daily_as_of: str | None  # the last of them, as a date
 
 
-def minute_returns(points: Points) -> dict[datetime, float]:
-    """Log return ending at each minute whose previous point is exactly one minute earlier."""
-    out: dict[datetime, float] = {}
-    for (t0, v0), (t1, v1) in pairwise(points):
-        if t1 - t0 == MINUTE and v0 > 0 and v1 > 0:
-            out[t1] = math.log(v1 / v0)
-    return out
+def _log_series(points: Points) -> Returns:
+    """(epoch minute, log value) of the positive points, oldest first."""
+    minutes = np.fromiter((int(ts.timestamp() // 60) for ts, _ in points), np.int64, len(points))
+    values = np.fromiter((value for _, value in points), np.float64, len(points))
+    keep = values > 0
+    return minutes[keep], np.log(values[keep])
 
 
-def bucket_returns(points: Points, step: timedelta = FACTOR_STEP) -> dict[datetime, float]:
-    """Log return of the last value per `step` bucket against the bucket before it."""
-    size = int(step.total_seconds() // 60)
-    last: dict[datetime, float] = {}
-    for ts, value in points:
-        last[ts - timedelta(minutes=ts.minute % size, seconds=ts.second)] = value
-    times = sorted(last)
-    return {
-        b: math.log(last[b] / last[a])
-        for a, b in pairwise(times)
-        if b - a == step and last[a] > 0 and last[b] > 0
-    }
+def minute_returns(points: Points) -> Returns:
+    """(epoch minute, log return ending there) for each minute whose previous point is exactly one
+    minute earlier."""
+    minutes, logs = _log_series(points)
+    whole = np.diff(minutes) == 1
+    return minutes[1:][whole], np.diff(logs)[whole]
+
+
+def bucket_returns(points: Points, step: timedelta = FACTOR_STEP) -> Returns:
+    """(bucket number, log return) of the last value per `step` bucket against the bucket
+    before it."""
+    minutes, logs = _log_series(points)
+    if not len(minutes):
+        return minutes, logs
+    ids = minutes // int(step.total_seconds() // 60)
+    last = np.append(np.flatnonzero(np.diff(ids)), len(ids) - 1)
+    ids, logs = ids[last], logs[last]
+    adjacent = np.diff(ids) == 1
+    return ids[1:][adjacent], np.diff(logs)[adjacent]
 
 
 def aftershock(gold: Points) -> Aftershock | None:
@@ -95,19 +102,18 @@ def leaders(
     gold: Points, related: Mapping[str, Points], labels: Mapping[str, str], now: datetime
 ) -> list[Leader]:
     """Each related market's information about gold's next minute, strongest first."""
-    target = minute_returns(gold)
+    target_minutes, target = minute_returns(gold)
     out: list[Leader] = []
     for key, points in related.items():
-        source = minute_returns(points)
-        common = sorted(set(source) & set(target))
-        flow = ep.information_flow(
-            np.array([source[t] for t in common]), np.array([target[t] for t in common])
+        source_minutes, source = minute_returns(points)
+        _, in_source, in_target = np.intersect1d(
+            source_minutes, target_minutes, assume_unique=True, return_indices=True
         )
+        flow = ep.information_flow(source[in_source], target[in_target])
         if flow is None:
             continue
-        latest = max(source) if source else None
-        fresh = latest is not None and now - latest <= 2 * MINUTE
-        move = source[latest] if fresh and latest is not None else None
+        fresh = bool(len(source)) and now.timestamp() - 60 * int(source_minutes[-1]) <= 120
+        move = float(source[-1]) if fresh else None
         implied = 0
         if flow.leads and move:
             implied = 1 if move * flow.corr > 0 else -1
@@ -129,17 +135,18 @@ def leaders(
 
 def common_factor(gold: Points, related: Mapping[str, Points]) -> CommonFactor | None:
     base = bucket_returns(gold)
-    if len(base) < 100:
+    base_ids = base[0]
+    if len(base_ids) < 100:
         return None
     columns = [base]
     for points in related.values():
-        series = bucket_returns(points)
-        if len(set(series) & set(base)) >= FACTOR_COVERAGE * len(base):
-            columns.append(series)
+        ids, returns = bucket_returns(points)
+        if len(np.intersect1d(ids, base_ids)) >= FACTOR_COVERAGE * len(base_ids):
+            columns.append((ids, returns))
     if len(columns) < 3:
         return None
-    times = sorted(set.intersection(*(set(column) for column in columns)))
-    matrix = np.array([[column[t] for column in columns] for t in times])
+    times = reduce(np.intersect1d, (ids for ids, _ in columns))
+    matrix = np.column_stack([returns[np.searchsorted(ids, times)] for ids, returns in columns])
     mode = ep.market_mode(matrix) if len(times) else None
     if mode is None:
         return None

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import math
-from collections import deque
 from collections.abc import Mapping
-from datetime import datetime, timedelta
-from statistics import fmean, pstdev
+from datetime import datetime
+
+from gold_agent.market.minutes import MinuteSeries
 
 # ICE U.S. Dollar Index definition (geometric weights of six USD pairs).
 DXY_CONSTANT = 50.14348112
@@ -35,17 +34,11 @@ class UsdTracker:
 
     def __init__(self, *, source: str, history_days: int = 5, min_samples: int = 60) -> None:
         self.source = source
-        self._points: deque[tuple[datetime, float]] = deque(maxlen=history_days * 24 * 60)
+        self._series = MinuteSeries(history_days)
         self._min_samples = min_samples
 
     def update(self, ts: datetime, value: float) -> None:
-        if value <= 0:
-            return
-        minute = ts.replace(second=0, microsecond=0)
-        if self._points and self._points[-1][0] == minute:
-            self._points[-1] = (minute, value)
-        elif not self._points or minute > self._points[-1][0]:
-            self._points.append((minute, value))
+        self._series.update(ts, value)
 
     def update_eurusd(self, ts: datetime, eurusd: float) -> None:
         """EURUSD proxy: USD strength rises as EURUSD falls."""
@@ -54,29 +47,7 @@ class UsdTracker:
 
     @property
     def latest(self) -> float | None:
-        return self._points[-1][1] if self._points else None
-
-    def _value_at(self, moment: datetime) -> float | None:
-        for ts, value in reversed(self._points):
-            if ts <= moment:
-                return value
-        return None
+        return self._series.latest
 
     def zscore(self, now: datetime, minutes: int) -> float | None:
-        current = self._value_at(now)
-        previous = self._value_at(now - timedelta(minutes=minutes))
-        if current is None or previous is None:
-            return None
-        points = list(self._points)
-        lag = minutes
-        changes = [
-            math.log(points[i][1] / points[i - lag][1])
-            for i in range(lag, len(points))
-            if points[i][0] - points[i - lag][0] <= timedelta(minutes=lag * 2)
-        ]
-        if len(changes) < self._min_samples:
-            return None
-        sigma = pstdev(changes)
-        if sigma == 0:
-            return 0.0
-        return (math.log(current / previous) - fmean(changes)) / sigma
+        return self._series.zscore(now, minutes, self._min_samples)
