@@ -1,8 +1,12 @@
 """Walk-forward accuracy of the forecast per timeframe and session, from the stored history.
 
 The signal service reads it to choose the timeframe (signals/timeframe.py); the dashboard shows
-it under the forecast. A rebuild reads 30 days of bars (M1: 7) and the engine's stored scores,
-so results are cached for REFRESH and the numeric part runs off the event loop.
+it under the forecast. A rebuild reads 30 days of bars (M1: 7) and the engine's stored scores and
+takes seconds per timeframe, so results are cached for REFRESH and the numeric part runs off the
+event loop. On the wall clock nobody waits for a rebuild: the last result keeps serving while the
+new one is computed in the background (one timeframe at a time), so evaluations and the
+dashboard's forecast stay real-time. Replays and tests compute in line, so their results stay
+deterministic.
 """
 
 from __future__ import annotations
@@ -13,8 +17,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+import structlog
+
 from gold_agent.config import TRADE_TIMEFRAMES
 from gold_agent.core.app import AppContext
+from gold_agent.core.clock import SystemClock
 from gold_agent.models import CalendarEvent
 from gold_agent.signals.forecast import SPAN
 from gold_agent.signals.forecast_score import Held, forecast_accuracy
@@ -23,7 +30,9 @@ from gold_agent.signals.setups import replay_setups, tally
 from gold_agent.timeutils.sessions import SessionClock
 
 JSON = dict[str, Any]
+log = structlog.get_logger(__name__)
 REFRESH = timedelta(hours=1)
+RETRY = timedelta(minutes=5)  # after a failed background rebuild
 WARMUP_BARS = 460  # EMA200 has forgotten its seed by the first measured bar
 SCORED = (*TRADE_TIMEFRAMES, "H4", "D1")  # W1/MN have too few bars in 30 days
 
@@ -41,12 +50,21 @@ class _Shared:
 
 
 class AccuracyBook:
-    def __init__(self, ctx: AppContext) -> None:
+    def __init__(
+        self, ctx: AppContext, *, learn: bool = True, background: bool | None = None
+    ) -> None:
+        """`learn`: also train the meta-labeling model (the signal service; the dashboard only
+        shows accuracy). `background`: rebuild without making callers wait (default: on the
+        wall clock only)."""
         self._ctx = ctx
         self._sessions = SessionClock(ctx.settings.sessions)
         self._shared: _Shared | None = None
         self._results: dict[str, tuple[datetime, JSON]] = {}
         self._lock = asyncio.Lock()
+        self._learn = learn
+        self._background = isinstance(ctx.clock, SystemClock) if background is None else background
+        self._pending: dict[str, asyncio.Task[JSON]] = {}
+        self._failed: dict[str, datetime] = {}
 
     async def _load_shared(self, now: datetime) -> _Shared:
         if self._shared is not None and now - self._shared.at < REFRESH:
@@ -72,11 +90,36 @@ class AccuracyBook:
         return self._shared
 
     async def accuracy(self, tf: str, *, source: str | None) -> JSON | None:
-        """One timeframe's walk-forward result (total, per session, news/chart parts)."""
+        """One timeframe's walk-forward result (total, per session, news/chart parts). In the
+        background mode a stale or missing result starts a rebuild and returns what there is
+        (None before the first one)."""
         if tf not in SCORED:
             return None
         now = self._ctx.clock.now()
-        async with self._lock:
+        cached = self._results.get(tf)
+        if cached is not None and now - cached[0] < REFRESH:
+            return cached[1]
+        if not self._background:
+            return await self._rebuild(tf, source)
+        failed = self._failed.get(tf)
+        if tf not in self._pending and (failed is None or now - failed >= RETRY):
+            task = asyncio.create_task(self._rebuild(tf, source))
+            self._pending[tf] = task
+            task.add_done_callback(lambda done, tf=tf: self._settle(tf, done))
+        return cached[1] if cached else None
+
+    def _settle(self, tf: str, task: asyncio.Task[JSON]) -> None:
+        self._pending.pop(tf, None)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            self._failed[tf] = self._ctx.clock.now()
+            log.warning("accuracy.rebuild_failed", tf=tf, error=repr(error)[:200])
+
+    async def _rebuild(self, tf: str, source: str | None) -> JSON:
+        async with self._lock:  # one timeframe at a time: bounded CPU next to the live loop
+            now = self._ctx.clock.now()
             cached = self._results.get(tf)
             if cached is not None and now - cached[0] < REFRESH:
                 return cached[1]
@@ -113,7 +156,7 @@ class AccuracyBook:
                 start=start,
             )
             result["setups"] = tally(setups, self._sessions.session)
-            if tf in TRADE_TIMEFRAMES:  # the charts a signal can trade on
+            if self._learn and tf in TRADE_TIMEFRAMES:  # the charts a signal can trade on
                 result["meta"] = await asyncio.to_thread(
                     train_meta, tf, bars, setups, settings.market.candle_buffer
                 )

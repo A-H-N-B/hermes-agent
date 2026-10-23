@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from gold_agent.analysis.llm_client import wib_day_start
 from gold_agent.core.app import AppContext
@@ -18,7 +18,14 @@ from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
 from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
 from gold_agent.market.reads import momentum
-from gold_agent.models import Analysis, CalendarEvent, Candle, FundamentalSnapshot, MarketContext
+from gold_agent.models import (
+    Analysis,
+    CalendarEvent,
+    Candle,
+    FundamentalSnapshot,
+    MarketContext,
+    SignalState,
+)
 from gold_agent.ops.metrics import summarize as latency_summary
 from gold_agent.signals.accuracy import WARMUP_BARS as FORECAST_BARS
 from gold_agent.signals.accuracy import AccuracyBook
@@ -28,6 +35,9 @@ from gold_agent.signals.forecast import aggregate, forecast_next
 from gold_agent.signals.timeframe import KV_TIMEFRAME, session_key
 from gold_agent.signals.tvcode import tradingview_code
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wib
+
+if TYPE_CHECKING:  # live.py imports this module
+    from gold_agent.dashboard.live import LiveHub
 
 JSON = dict[str, Any]
 
@@ -83,10 +93,21 @@ def event_view(event: CalendarEvent, now: datetime) -> JSON:
 
 
 class DashboardData:
-    def __init__(self, ctx: AppContext) -> None:
+    def __init__(self, ctx: AppContext, hub: LiveHub | None = None) -> None:
         self._ctx = ctx
-        self.book = AccuracyBook(ctx)
+        self._hub = hub
+        self.book = AccuracyBook(ctx, learn=False)  # the signal service learns
         self._sessions = SessionClock(ctx.settings.sessions)
+
+    async def _engine_state(self) -> SignalState | None:
+        """The newest engine state: the one pushed every evaluation when it is newer than the
+        stored one (stored only on change)."""
+        stored = await self._ctx.signals.latest_state()
+        pushed = self._hub.last_state if self._hub else None
+        if pushed is None:
+            return stored
+        live = SignalState.model_validate(pushed)
+        return live if stored is None or live.ts >= stored.ts else stored
 
     async def _source(self) -> str | None:
         context = await self._ctx.market.latest_context()
@@ -97,7 +118,7 @@ class DashboardData:
         now = ctx.clock.now()
         stored = await ctx.ops.kv_get(KV_ENGINE)
         engine = EngineState.from_json(stored) if stored else EngineState()
-        state = await ctx.signals.latest_state()
+        state = await self._engine_state()
         halt = await ctx.ops.kv_get(KV_HALT)
         events = await ctx.calendar.between(now, now + timedelta(days=7))
         upcoming = next((e for e in events if e.impact == "high" and not e.all_day), None)
@@ -150,7 +171,7 @@ class DashboardData:
             bars=await self.bars(tf, FORECAST_BARS),
             now=now,
             settings=ctx.settings,
-            state=await ctx.signals.latest_state(),
+            state=await self._engine_state(),
             active=engine.active(now),
             events=await ctx.calendar.between(
                 now - timedelta(hours=1), now + timedelta(days=span_days)
@@ -189,7 +210,7 @@ class DashboardData:
             now=now,
             settings=ctx.settings,
             active=engine.active(now),
-            state=await ctx.signals.latest_state(),
+            state=await self._engine_state(),
             outlook=await ctx.signals.latest_outlook(),
             events=await ctx.calendar.between(now - timedelta(hours=1), now + timedelta(days=2)),
             context=await ctx.market.latest_context(),

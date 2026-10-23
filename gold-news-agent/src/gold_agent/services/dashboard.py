@@ -72,6 +72,8 @@ class DashboardService:
         handler = handlers.get(kind)
 
         async def forward(message: Message) -> None:
+            if kind == "state":
+                self.hub.last_state = message.data
             if not self.hub.clients:
                 return
             if handler is not None:

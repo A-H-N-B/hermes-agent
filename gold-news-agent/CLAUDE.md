@@ -163,7 +163,7 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   high-impact release falls inside the horizon. Not a calibrated probability. Live indicators
   start unticked (created on tick, removed with their pane on untick; choice kept in
   localStorage); the board shows a SELL↔BUY gauge of the engine score vs entry_threshold and
-  refreshes every 30 s; a mirrored-market test pins BUY/SELL symmetry of the forecast.
+  refreshes on every context push (at most every 5 s; 30 s fallback without the WebSocket); a mirrored-market test pins BUY/SELL symmetry of the forecast.
   Automatic timeframe (`trading.timeframe`, `signals/timeframe.py`): every evaluation picks the
   chart a trade is sized, timed and valid on from M1..H1: usable = EMA20 + ATR14 present and
   spread / (1.2 ATR) <= `max_cost_ratio`; the usable one with the best walk-forward accuracy in
@@ -250,5 +250,10 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   (then the record's TP1/SL split follows the model). Words in one place
   (`market/physics_read.py`) for the dashboard ("Ekonofisika pasar" card, per-TF rows), the
   brief (`<ekonofisika>` + per-TF fields, prompt rule 5) and Telegram (`Signal.physics_note`).
+  Real-time: `AccuracyBook` on the wall clock never makes a caller wait (a stale or missing
+  result starts a background rebuild, one timeframe at a time, and the caller gets what there
+  is; replays and tests compute in line); the dashboard's book skips meta-labeling
+  (`learn=False`). The engine state goes on the bus every evaluation (`publish_state_seconds` 5,
+  stored only on change) and the dashboard serves the newest pushed one (`LiveHub.last_state`).
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

@@ -969,6 +969,8 @@ async function refreshForecast() {
   box.append(el("p", { class: "muted", text: f.reasons.join(" · ") }));
   const accuracy = accuracyLines(f.accuracy, f.session, f.session_label);
   if (accuracy) box.append(...accuracy);
+  else box.append(el("p", { class: "muted", text: "Akurasi sedang dihitung di latar belakang…" }));
+  box.append(el("p", { class: "muted updated", text: `diperbarui ${new Date().toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` }));
   drawForecast(state, f);
   tickLiveCountdowns();
 }
@@ -1451,15 +1453,26 @@ async function show(page) {
   }
 }
 
+// The prediction follows the market in real time: every new context (about every 5 s) refreshes
+// the indicator read, the timing windows and the forecast, at most once per EXTRAS_EVERY ms.
+const EXTRAS_EVERY = 5000;
 let extrasTimer = null;
-function refreshLiveExtras() { // new bar: indicators move and the timing windows roll forward
+let extrasAt = 0;
+function refreshLiveExtras() {
   if (extrasTimer) return;
+  const wait = Math.max(300, extrasAt + EXTRAS_EVERY - Date.now());
   extrasTimer = setTimeout(async () => {
-    extrasTimer = null;
-    await loadIndicators(charts.live);
-    renderTiming(await api("/api/timing"));
-    await refreshForecast();
-  }, 1500);
+    extrasAt = Date.now();
+    try {
+      await loadIndicators(charts.live);
+      renderTiming(await api("/api/timing"));
+      await refreshForecast();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      extrasTimer = null;
+    }
+  }, wait);
 }
 
 let refreshTimer = null;
@@ -1488,7 +1501,10 @@ function connect(delay = 1000) {
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
     if (message.type === "tick") onTick(message.data);
-    else if (message.type === "context") renderPrice(message.data);
+    else if (message.type === "context") {
+      renderPrice(message.data);
+      if (currentPage === "live") refreshLiveExtras();
+    }
     else if (message.type === "news" && currentPage === "live") prependNews(message.data);
     else if (message.type === "state" || message.type === "signal") refreshSoon();
     else if (message.type === "outlook" && (currentPage === "outlook" || currentPage === "tradingview")) show(currentPage);
@@ -1504,8 +1520,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#ind-toggles").addEventListener("change", () => { saveToggles(); applyIndicatorToggles(charts.live); });
   $("#credit-form").addEventListener("submit", saveCredit);
   buildRing();
-  // The board, indicator read and forecast follow the agent: refresh every 30 s even when no bar,
-  // signal or outlook event arrives.
+  // Fallback when the live push is down: the board, indicator read and forecast still refresh.
   setInterval(() => { if (currentPage === "live") refreshLiveExtras(); }, 30000);
   refreshCredit();
   setInterval(refreshCredit, 60000);

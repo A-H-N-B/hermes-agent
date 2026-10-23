@@ -23,6 +23,9 @@ class LiveHub:
         self._clients: set[WebSocket] = set()
         self._tick_interval = 1.0 / tick_per_second
         self._last_tick: datetime | None = None
+        # The engine's newest state from the bus: it arrives every evaluation, while the stored
+        # copy only changes when the decision or the score moves noticeably.
+        self.last_state: dict[str, Any] | None = None
 
     @property
     def clients(self) -> int:

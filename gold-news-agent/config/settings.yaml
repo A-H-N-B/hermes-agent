@@ -142,7 +142,7 @@ signal_engine:
   # Past setups like this one lost money (expected value < 0 across its 95% band, with at
   # least this many setups on record): wait. 0 = off.
   ev_gate_min_setups: 30
-  publish_state_seconds: 60
+  publish_state_seconds: 5 # every evaluation reaches the dashboard (stored only on change)
   evaluate_seconds: 5
   levels:
     sl_atr_multiple: 1.2

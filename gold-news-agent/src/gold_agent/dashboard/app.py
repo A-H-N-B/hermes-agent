@@ -68,7 +68,7 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
     limiter = LoginLimiter(
         settings.login_attempts_per_window, timedelta(minutes=settings.login_window_minutes)
     )
-    data = DashboardData(ctx)
+    data = DashboardData(ctx, hub)
     tradingview = settings.tradingview_symbol is not None
     app = FastAPI(title="Gold News Agent", docs_url=None, redoc_url=None, openapi_url=None)
 
