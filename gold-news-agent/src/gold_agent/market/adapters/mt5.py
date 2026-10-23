@@ -70,9 +70,6 @@ class Mt5Adapter:
         clock: Clock,
         poll_ms: int = 100,
         offset_hours: int | None = None,
-        login: int | None = None,
-        password: str | None = None,
-        server: str | None = None,
         module: Any = None,
     ) -> None:
         if module is None:
@@ -83,29 +80,19 @@ class Mt5Adapter:
         self._poll = poll_ms / 1000
         self._offset = offset_hours
         self._fixed_offset = offset_hours is not None
-        self._credentials = (login, password, server)
         self._initialised = False
         self._last_epoch: float | None = None
 
     def _ensure(self) -> None:
         if self._initialised:
             return
-        # Attach to the running terminal as it is. Logging in from here (initialize/login with
-        # credentials) switches the terminal's account, and a wrong server or password in .env
-        # then logs the user out of their own account, so .env is used only when the terminal
-        # has no account at all.
+        # Attach to the running terminal as it is and never log in from here: a login from a
+        # second place switches or drops the account the user is logged into. Until the user
+        # logs in in MT5 itself this keeps failing with a reason the dashboard shows.
         if not self._mt5.initialize():
-            raise ConnectionError(f"MT5 initialize failed: {self._mt5.last_error()}")
-        login, password, server = self._credentials
-        account = self._mt5.account_info()
-        if account is None and login:
-            if not self._mt5.login(int(login), password=password, server=server):
-                raise ConnectionError(
-                    f"MT5 login {login} @ {server} gagal: {self._mt5.last_error()} "
-                    "(cek MT5_SERVER/MT5_PASSWORD di .env, atau kosongkan dan login di MT5)"
-                )
-        elif account is not None and login and int(account.login) != int(login):
-            log.warning("mt5.other_account", using=int(account.login), env_login=int(login))
+            raise ConnectionError(f"MT5 tidak tersambung: {self._mt5.last_error()}")
+        if self._mt5.account_info() is None:
+            raise ConnectionError("MT5 terbuka tetapi belum login: login di terminal MT5")
         if not self._symbol:
             found = pick_gold_symbol(self._mt5.symbols_get() or ())
             if found is None:

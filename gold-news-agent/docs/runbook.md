@@ -199,8 +199,8 @@ dalam satu jaringan Tailscale/WireGuard.
    terbuka di IP Tailscale dan tetap memakai password. Supaya Redis tetap bisa dibuka saat boot
    walau Tailscale belum siap, izinkan bind lebih awal: `net.ipv4.ip_nonlocal_bind = 1` di
    `/etc/sysctl.d/99-gold-bind.conf`, lalu `sudo sysctl --system`.
-2. Windows: pasang Python 3.12 + uv, clone repo, `uv sync --extra mt5`. Isi `.env` dengan
-   `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER`, dan
+2. Windows: pasang Python 3.12 + uv, clone repo, `uv sync --extra mt5`. Login di terminal MT5 (agent tidak
+   pernah login sendiri) dan isi `.env` dengan
    `REDIS_URL=redis://:<REDIS_PASSWORD>@<IP Tailscale VPS>:6379/0`. Jalankan
    `uv run gold-agent mt5-bridge` sebagai service (NSSM atau Task Scheduler "At startup").
 3. Di VPS Linux: `gold-agent config set price_feed.primary mt5_bridge` (tersimpan di

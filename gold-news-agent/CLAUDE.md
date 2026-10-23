@@ -265,5 +265,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   indicator read only (`/api/indicators?series=0`), the overlay lines on a new bar; the read,
   timing and forecast load side by side, so one failing panel never leaves the others on
   "Memuat…".
+  MT5: the agent never logs in (no MT5_* secrets): it attaches to the terminal's logged-in
+  account and fails with "belum login" otherwise; `FailoverAdapter.problem` says why no ticks
+  come (context note "sumber harga: ...", the engine's WAIT reason, the Live price line), and
+  when every feed is down it goes back to the primary at once instead of after 15 min.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

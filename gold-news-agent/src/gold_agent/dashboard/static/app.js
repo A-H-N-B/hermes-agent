@@ -182,7 +182,8 @@ function renderSignalCard(payload) {
 function renderPrice(context) {
   const price = $("#price");
   if (!context || context.mid === null) {
-    price.textContent = "data harga tidak tersedia";
+    const why = context && (context.notes || []).find((n) => n.startsWith("sumber harga"));
+    price.textContent = why ? `data harga tidak tersedia · ${why}` : "data harga tidak tersedia";
     price.classList.add("stale");
     return;
   }

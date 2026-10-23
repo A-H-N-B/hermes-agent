@@ -480,18 +480,41 @@ async def test_a_feed_switch_reloads_history_instead_of_mixing_two_instruments(
         await context.close()
 
 
-def test_mt5_never_switches_the_account_the_user_is_logged_into() -> None:
-    secret = "-".join(["not", "real"])
+def test_mt5_reads_the_logged_in_account_and_never_logs_in_itself() -> None:
     clock = ManualClock(utc("2026-10-13T12:30"))
-    logged_in = FakeMt5(clock, account=777)
-    adapter = Mt5Adapter(
-        symbol="XAUUSD", clock=clock, module=logged_in, login=999, password=secret, server="B-Demo"
-    )
+    logged_out = FakeMt5(clock, account=None)
+    adapter = Mt5Adapter(symbol="XAUUSD", clock=clock, module=logged_out)
+    with pytest.raises(ConnectionError, match="belum login"):
+        adapter.read_tick()
+    logged_out.account = 777  # the user logs in in MT5
     adapter.read_tick()
-    assert logged_in.logins == [] and logged_in.account == 777
-    logged_out = FakeMt5(clock, account=None)  # a terminal with no account: .env logs in
-    adapter = Mt5Adapter(
-        symbol="XAUUSD", clock=clock, module=logged_out, login=999, password=secret, server="B-Live"
-    )
-    adapter.read_tick()
-    assert logged_out.logins == [(999, "B-Live")]
+    logged_out.quote_epoch += 1.5
+    assert adapter.read_tick() is not None
+    assert logged_out.logins == [] and logged_out.account == 777
+
+
+async def test_every_feed_down_goes_back_to_the_primary_and_says_why() -> None:
+    import gold_agent.market.adapters.failover as failover_module
+    from gold_agent.core.clock import SystemClock
+
+    primary, backup = FlakyAdapter("mt5", fail=True), FlakyAdapter("binance", fail=True)
+    adapter = FailoverAdapter([primary, backup], SystemClock(), max_failures=2)
+    stop = asyncio.Event()
+
+    async def emit(tick: Tick) -> None:
+        stop.set()
+
+    async def no_sleep(stop_event: asyncio.Event, seconds: float) -> bool:
+        await asyncio.sleep(0)
+        if backup.runs >= 2:
+            primary.fail = False  # MT5 is back
+        return stop_event.is_set()
+
+    original = failover_module.sleep_or_stop
+    failover_module.sleep_or_stop = no_sleep  # type: ignore[assignment]
+    try:
+        await asyncio.wait_for(adapter.run(emit, stop), timeout=5)
+    finally:
+        failover_module.sleep_or_stop = original
+    assert adapter.name == "mt5" and primary.runs == 3  # not 15 minutes later
+    assert adapter.problem is None  # ticks again

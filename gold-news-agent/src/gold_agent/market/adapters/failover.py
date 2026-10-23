@@ -42,6 +42,8 @@ class FailoverAdapter:
         self._market_open = market_open or (lambda _now: True)
         self._check = check_seconds
         self.active = 0
+        # Why no ticks are coming (shown on the dashboard), None while a feed delivers.
+        self.problem: str | None = None
 
     def find(self, name: str) -> PriceAdapter | None:
         return next((a for a in self._adapters if a.name == name), None)
@@ -62,6 +64,7 @@ class FailoverAdapter:
         async def relay(tick: Tick) -> None:
             nonlocal last_tick
             last_tick = self._clock.now()
+            self.problem = None
             await emit(tick)
 
         async def watchdog() -> None:
@@ -75,6 +78,7 @@ class FailoverAdapter:
                     continue
                 if (now - last_tick).total_seconds() > self._silence:
                     log.warning("feed.silent", feed=adapter.name, seconds=self._silence)
+                    self.problem = f"{adapter.name}: tidak ada harga {self._silence:.0f} dtk"
                     local_stop.set()
 
         async def forward_stop() -> None:
@@ -101,15 +105,17 @@ class FailoverAdapter:
                 failures += 1
             except Exception as exc:
                 failures += 1
+                self.problem = f"{adapter.name}: {exc}"[:200]
                 log.warning("feed.failed", feed=adapter.name, error=repr(exc)[:200])
-            if failures >= self._max_failures and self.active + 1 < len(self._adapters):
+            last = self.active + 1 == len(self._adapters)
+            if failures >= self._max_failures and not last:
                 self.active += 1
                 failures = 0
                 switched_at = self._clock.now()
                 log.warning("feed.failover", to=self._adapters[self.active].name)
-            elif (
-                self.active > 0
-                and (self._clock.now() - switched_at).total_seconds() > self._retry_primary
+            elif self.active > 0 and (
+                (failures >= self._max_failures and last)  # every feed is down: back to the top
+                or (self._clock.now() - switched_at).total_seconds() > self._retry_primary
             ):
                 self.active = 0
                 failures = 0

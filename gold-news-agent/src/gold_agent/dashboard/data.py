@@ -61,6 +61,7 @@ def context_view(context: MarketContext | None) -> JSON | None:
         "tick_age_seconds": context.tick_age_seconds,
         "market_open": context.market_open,
         "session": SESSION_LABEL_ID.get(context.session, context.session),
+        "notes": context.notes,
     }
 
 

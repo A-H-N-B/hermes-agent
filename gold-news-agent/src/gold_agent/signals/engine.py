@@ -158,7 +158,10 @@ class SignalEngine:
         if not status.open:
             reasons.append(f"pasar tutup: {status.reason}")
         if context.mid is None:
-            reasons.append("data harga tidak tersedia")
+            why = next((n for n in context.notes if n.startswith("sumber harga")), None)
+            reasons.append(
+                f"data harga tidak tersedia ({why})" if why else "data harga tidak tersedia"
+            )
         elif context.stale:
             reasons.append(f"data harga basi ({context.tick_age_seconds or 0:.0f} dtk tanpa tick)")
         if context.spread and context.spread > cfg.risk.max_spread_usd:

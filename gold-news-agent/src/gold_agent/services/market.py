@@ -180,6 +180,11 @@ class MarketService:
             yields=self.yields,
             weekend=self.weekend,
         )
+        problem = getattr(self._feed, "problem", None)
+        if problem and (snapshot.mid is None or snapshot.stale):
+            snapshot = snapshot.model_copy(
+                update={"notes": [*snapshot.notes, f"sumber harga: {problem}"]}
+            )
         return snapshot.model_copy(
             update={
                 "contract_size": self.contract_size,

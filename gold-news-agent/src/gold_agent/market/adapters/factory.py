@@ -115,15 +115,11 @@ def mt5_adapter(ctx: AppContext) -> Mt5Adapter:
 
     settings = ctx.settings
     offset = settings.price_feed.mt5_server_utc_offset
-    login = ctx.env.get("MT5_LOGIN")
     return Mt5Adapter(
         symbol=settings.price_feed.mt5_symbol,
         clock=ctx.clock,
         poll_ms=settings.market.mt5_poll_ms,
         offset_hours=None if offset == "auto" else int(offset),
-        login=int(login) if login else None,
-        password=ctx.env.get("MT5_PASSWORD"),
-        server=ctx.env.get("MT5_SERVER"),
     )
 
 

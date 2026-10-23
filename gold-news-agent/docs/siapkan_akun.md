@@ -214,16 +214,9 @@ Data FRED harian (bukan real-time). Sistem memakainya untuk konteks yield 10 tah
 1. Pasang terminal MT5 dari broker-mu (versi 64-bit), lalu login. **Gunakan akun demo dulu**.
    Sistem ini tidak pernah mengirim order, tetapi tetap jangan mencampur eksperimen dengan
    akun uang sungguhan.
-2. Biasanya tidak perlu apa-apa lagi: agent memakai akun yang sedang login di terminal dan tidak
-   pernah menggantinya. Hanya bila MT5 sering terbuka tanpa login, catat tiga hal dari jendela
-   login MT5: nomor login, password, dan nama server **persis** (akun demo `NamaBroker-Demo`,
-   akun real biasanya `NamaBroker-Live`/`-Real`; server yang salah = login ditolak). Tulis di
-   `.env`:
-   ```
-   MT5_LOGIN=12345678
-   MT5_PASSWORD=passwordmu
-   MT5_SERVER=NamaBroker-Demo
-   ```
+2. Tidak ada yang perlu ditulis di `.env`: agent hanya membaca akun yang sedang login di
+   terminal dan tidak pernah login sendiri (login dari dua tempat bisa mengeluarkan akunmu).
+   Bila MT5 belum login, dashboard menulis "MT5 terbuka tetapi belum login".
 3. Tidak perlu mengisi nama simbol: sumber harga bawaan `auto` memakai MT5 bila terminalnya
    terbuka dan mencari sendiri simbol emas broker (`XAUUSD`, `XAUUSDm`, `GOLD`, ...; yang ada di
    Market Watch didahulukan). Bila yang terpilih salah, tetapkan sendiri:
@@ -263,9 +256,6 @@ TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
 FRED_API_KEY=
 TWELVEDATA_API_KEY=
-MT5_LOGIN=
-MT5_PASSWORD=
-MT5_SERVER=
 DATABASE_URL=
 REDIS_URL=
 DASHBOARD_PASSWORD=

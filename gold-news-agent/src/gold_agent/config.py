@@ -611,9 +611,6 @@ class Secrets(BaseSettings):
     twelvedata_api_key: SecretStr | None = None
     finnhub_api_key: SecretStr | None = None
     x_bearer_token: SecretStr | None = None
-    mt5_login: SecretStr | None = None
-    mt5_password: SecretStr | None = None
-    mt5_server: SecretStr | None = None
     dashboard_password: SecretStr | None = None
     database_url: SecretStr | None = None
     redis_url: SecretStr | None = None

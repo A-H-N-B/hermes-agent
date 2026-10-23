@@ -131,10 +131,8 @@ kamu), dan `ANTHROPIC_API_KEY` bila ada. **Biarkan `DATABASE_URL` dan `REDIS_URL
 kosong berarti SQLite di `data\gold.db`. `DASHBOARD_PASSWORD` tidak perlu selama dashboard
 hanya dibuka di komputer ini. `.env` tidak pernah masuk git.
 
-Untuk MT5: cukup login di terminal MT5 seperti biasa; agent memakai akun yang sedang terbuka
-dan tidak pernah menggantinya. `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER` boleh dikosongkan; bila
-diisi, hanya dipakai saat terminal belum login sama sekali, dan servernya harus persis sama
-(akun real = server `...-Live`/`...-Real`, bukan `...-Demo`).
+Untuk MT5 tidak ada isian: login di terminal MT5 seperti biasa. Agent hanya membaca akun yang
+sedang terbuka dan tidak pernah login sendiri, jadi akunmu tidak pernah diganti atau dikeluarkan.
 
 ## Langkah 5 — Sesuaikan config
 
