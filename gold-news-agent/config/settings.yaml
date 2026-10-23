@@ -63,7 +63,8 @@ price_feed:
 
 market:
   candle_buffer: 600 # bars kept in memory per timeframe
-  history_bars: { M1: 1500, M5: 1500, M15: 1000, M30: 600, H1: 1500 } # H4/D1 are built from H1
+  # H4/D1 are built from H1; 7000 H1 bars (~300 trading days) give D1 enough depth for LPPLS.
+  history_bars: { M1: 1500, M5: 1500, M15: 1000, M30: 600, H1: 7000 }
   tick_store_min_interval_ms: 1000 # archive at most one tick per second
   tick_publish_min_interval_ms: 250 # bus/dashboard tick rate cap
   context_store_seconds: 60

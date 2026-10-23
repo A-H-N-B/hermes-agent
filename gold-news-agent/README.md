@@ -49,6 +49,11 @@ tambahan hasil review Fase 0).
   setup serupa di masa lalu. Setup yang terbukti rugi (seluruh pita 95 % EV negatif) menunggu.
 - Keputusan akhir: komite AI tiga suara (Claude Fable 5.1, dihitung 2×, dan dua Claude Opus 5.5).
   Trade lolos hanya bila Fable dan minimal satu Opus setuju. Biaya AI dibatasi keras $20/hari.
+- Ekonofisika (dihitung program, lalu ditimbang komite AI): ekor distribusi, entropi permutasi,
+  multifraktal (MF-DFA), mean reversion Ornstein-Uhlenbeck, badai susulan Hawkes, pasar pemimpin
+  (transfer entropy), faktor bersama (teori matriks acak), risiko gelembung LPPLS. Setiap ukuran
+  diuji pada data acak. Plus pembelajaran mesin (meta-labeling) yang baru dipakai setelah
+  terbukti lebih baik dari tebakan dasar secara walk-forward.
 
 Semua angka di atas ada di `config/settings.yaml` dan bisa diubah tanpa mengubah kode: tulis
 nilai sendiri di `config/local.yaml` (tidak ikut git) atau `uv run gold-agent config set KEY NILAI`.
@@ -210,10 +215,11 @@ src/gold_agent/
   econ_calendar/   kalender (FF + FOMC), parser rilis (fast path), playbook, kalibrasi surprise
   fundamentals/    bias harian: yield Treasury, CFTC COT, GLD, kejutan data AS, geopolitik
   market/          adapter harga (Binance PAXG, Twelve Data, MT5), candle, indikator, level,
-                   pasar penggerak dari MT5, statistik (GARCH, Hurst, Kalman, rezim)
+                   pasar penggerak dari MT5, statistik (GARCH, Hurst, Kalman, rezim),
+                   ekonofisika (econophysics.py, physics.py)
   timeutils/       sesi pasar & DST, jam rawan
-  signals/         skor gabungan, SL/TP & lot, mesin sinyal, peluang & EV, komite AI,
-                   outlook 24 jam, profil per jam
+  signals/         skor gabungan, SL/TP & lot, mesin sinyal, peluang & EV, meta-labeling,
+                   komite AI, outlook 24 jam, profil per jam
   notify/          template Telegram, kebijakan prioritas, dispatcher, perintah bot
   dashboard/       FastAPI + WebSocket, halaman statis (JS polos, CSP ketat), grafik vendored
   services/        collector, market, calendar, analyzer, signal, paper, evaluator, notifier,

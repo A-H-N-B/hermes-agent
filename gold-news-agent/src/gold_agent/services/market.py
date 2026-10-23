@@ -23,14 +23,23 @@ from gold_agent.market.adapters.base import PriceAdapter, TickSink
 from gold_agent.market.adapters.factory import binance_adapter, build_price_adapter
 from gold_agent.market.candles import CandleBuilder, aggregate
 from gold_agent.market.context import WeekendTracker, YieldSnapshot, build_market_context
-from gold_agent.market.cross_assets import CrossTracker, resolve_symbols
+from gold_agent.market.cross_assets import SPECS, CrossTracker, resolve_symbols
 from gold_agent.market.fred import fetch_series
+from gold_agent.market.physics import PhysicsInputs, build_physics
 from gold_agent.market.usd import DXY_WEIGHTS, UsdTracker
-from gold_agent.models import Alert, Candle, FundamentalSnapshot, MarketContext, Tick
+from gold_agent.models import (
+    Alert,
+    Candle,
+    FundamentalSnapshot,
+    MarketContext,
+    MarketPhysics,
+    Tick,
+)
 from gold_agent.models.common import Timeframe
 from gold_agent.timeutils.sessions import SessionClock
 
 log = structlog.get_logger(__name__)
+PHYSICS_SECONDS = 60.0  # market-wide econophysics (market/physics.py) is rebuilt this often
 
 
 class _FeedRunner:
@@ -64,6 +73,7 @@ class MarketService:
         self.last_tick: Tick | None = None
         self.cross = CrossTracker(days=market.usd_history_days)
         self.fundamentals: FundamentalSnapshot | None = None
+        self.physics: MarketPhysics | None = None
         self.fetcher = FundamentalsFetcher(ctx.sources, ctx.env)
         self.spreads: deque[tuple[datetime, float]] = deque(maxlen=20_000)
         self.usd: UsdTracker | None = None
@@ -179,6 +189,7 @@ class MarketService:
                 "fundamental_as_of": (
                     self.fundamentals.built_at.isoformat() if self.fundamentals else None
                 ),
+                "physics": self.physics,
             }
         )
 
@@ -229,6 +240,43 @@ class MarketService:
                 await self.publish_context()
             except Exception:
                 log.exception("market.context_failed")
+
+    # ------------------------------------------------------------------ econophysics
+
+    def _physics_inputs(self, now: datetime) -> PhysicsInputs:
+        """Copies of the series the loop keeps updating, for the worker thread."""
+        related = {
+            key: list(series.points) for key, series in self.cross.series.items() if key in SPECS
+        }
+        daily = [c for c in self.builder.candles("D1") if c.complete]
+        return PhysicsInputs(
+            now=now,
+            gold=list(self.cross.gold.points),
+            related=related,
+            labels={key: SPECS[key].label for key in related},
+            daily=[c.close for c in daily],
+            daily_as_of=daily[-1].open_time.isoformat() if daily else None,
+        )
+
+    async def refresh_physics(self) -> MarketPhysics:
+        inputs = self._physics_inputs(self._ctx.clock.now())
+        self.physics = await asyncio.to_thread(build_physics, inputs, self.physics)
+        return self.physics
+
+    async def _physics_loop(self, stop: asyncio.Event) -> None:
+        while not await self._ctx.clock.wait(stop, PHYSICS_SECONDS):
+            try:
+                await self.refresh_physics()
+            except Exception:
+                log.exception("market.physics_failed")
+
+    async def _seed_gold_minutes(self) -> None:
+        """Gold's minute series from stored M1 bars (the aftershock read needs days of it; with
+        MT5 the broker's own history fills in what is older, market/cross_assets.py)."""
+        now = self._ctx.clock.now()
+        start = now - timedelta(days=self._ctx.settings.market.usd_history_days)
+        bars = await self._ctx.market.candles("M1", start, now, source=self.builder.source)
+        self.cross.gold.seed([(c.open_time, c.close) for c in bars if c.complete])
 
     # ------------------------------------------------------------------ macro feeds
 
@@ -414,6 +462,7 @@ class MarketService:
             tasks: list[asyncio.Task[None]] = [asyncio.create_task(self._context_loop(stop))]
             if adapter is not None:
                 await self.load_history(adapter)
+                await self._seed_gold_minutes()
                 tasks.append(
                     asyncio.create_task(
                         run_with_restart(_FeedRunner("price-feed", adapter, self.on_tick), stop)
@@ -434,6 +483,7 @@ class MarketService:
                 tasks.append(asyncio.create_task(self._cross_loop(stop)))
             tasks.append(asyncio.create_task(self._fred_loop(client, stop)))
             tasks.append(asyncio.create_task(self._fundamentals_loop(client, stop)))
+            tasks.append(asyncio.create_task(self._physics_loop(stop)))
             try:
                 await asyncio.gather(*tasks)
             finally:

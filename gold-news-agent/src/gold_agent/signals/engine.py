@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from gold_agent.config import CONFIG_DIR, Settings
+from gold_agent.market.physics_read import signal_note
 from gold_agent.models import Analysis, CalendarEvent, MarketContext, Signal, SignalState, TradeOdds
 from gold_agent.models.common import Action
 from gold_agent.models.signals import SetupType
@@ -322,6 +323,7 @@ class SignalEngine:
             accuracy=option.accuracy if option else None,
             min_calls=MIN_CALLS,
             tp1_fraction=self._settings.paper.tp1_fraction,
+            at=context.ts,
         )
 
     def _losing_setup(self, odds: TradeOdds | None, tf: str) -> str | None:
@@ -515,4 +517,5 @@ class SignalEngine:
             timeframe=tf,
             timeframe_reason=choice.reason,
             odds=odds,
+            physics_note=signal_note(context.timeframes.get(tf), context.physics),
         )

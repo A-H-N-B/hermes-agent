@@ -126,3 +126,20 @@ def test_regime_labels_rarely_fire_on_a_random_walk_and_find_real_ones() -> None
     assert [label(reverting()) for _ in range(50)].count("ranging") >= 40
     trends = [label(list(2650 + np.cumsum(rng.standard_normal(600) + 0.5))) for _ in range(50)]
     assert trends.count("trending") >= 20
+
+
+def test_fat_tails_jump_to_a_distant_target_more_often_and_invent_no_direction() -> None:
+    normal = quant.simulate_passage(3.0, 3.0, 0.0, [1.0])
+    fat = quant.simulate_passage(3.0, 3.0, 0.0, [1.0], nu=3.0)
+    assert fat.target > 2.5 * normal.target  # a 3-sigma bar is rare on a normal curve only
+    assert fat.target == pytest.approx(fat.stop, abs=0.003)  # no drift: still symmetric
+    near = quant.simulate_passage(1.0, 1.0, 0.0, [1.0] * 6, nu=4.0)
+    assert near.target == pytest.approx(near.stop, abs=0.01)
+
+
+def test_a_real_mean_reversion_pulls_the_odds_towards_the_mean() -> None:
+    plain = quant.simulate_passage(1.0, 1.0, 0.0, [1.0] * 6)
+    towards = quant.simulate_passage(1.0, 1.0, 0.0, [1.0] * 6, revert=(0.2, 3.0))
+    away = quant.simulate_passage(1.0, 1.0, 0.0, [1.0] * 6, revert=(0.2, -3.0))
+    assert towards.target > plain.target + 0.1 and away.target < plain.target - 0.1
+    assert towards == quant.simulate_passage(1.0, 1.0, 0.0, [1.0] * 6, revert=(0.2, 3.0))

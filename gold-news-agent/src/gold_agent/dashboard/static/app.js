@@ -86,7 +86,8 @@ function oddsBlock(o) {
     el("p", { class: "odds" }, el("b", { text: `🎲 Peluang TP1 sebelum SL ${pct(o.tp1)}` }),
       ` · SL dulu ${pct(o.stop)} · tidak tersentuh ${pct(o.neither)} · EV ${signed(o.ev_r)}R${band}`),
     bar,
-    el("p", { class: "muted", text: `${basis} · ${o.drift_basis} · volatilitas ${num(o.sigma)}$/candle (${o.sigma_model})` }),
+    el("p", { class: "muted", text: `${basis} · ${o.drift_basis} · ${o.model_note || `volatilitas ${num(o.sigma)}$/candle (${o.sigma_model})`}` }),
+    ...(o.meta_note ? [el("p", { class: "muted", text: `🧠 ${o.meta_note}` })] : []),
   ];
 }
 
@@ -510,6 +511,16 @@ function readRow(label, value, meaning, tone) {
     el("span", { class: "read-value", text: value }), el("span", { class: `tone ${tone || ""}`, text: meaning }));
 }
 
+// Econophysics rows (market/physics_read.py): the server decides the words and the colour, so a
+// threshold lives in one place; the detail line explains the tag in plain words.
+function physicsRows(rows) {
+  return (rows || []).map((p) => {
+    const row = readRow(p.label, p.value, p.tag, p.tone);
+    if (p.detail) row.append(el("div", { class: "read-detail", text: p.detail }));
+    return row;
+  });
+}
+
 function trendRead(r) {
   if (r.ema20 === null || r.ema50 === null || r.ema20 === undefined) return ["–", "belum ada data", ""];
   const up = r.ema20 > r.ema50 && r.close > r.ema50;
@@ -564,6 +575,7 @@ function tfCard(r) {
     const tone = r.regime === "volatile" ? "warn" : r.regime === "trending" ? "up" : "";
     card.append(readRow("Kondisi", r.hurst !== null && r.hurst !== undefined ? `Hurst ${num(r.hurst)}` : "", REGIME_TEXT[r.regime], tone));
   }
+  card.append(...physicsRows(r.physics));
   const up = r.reasons ? r.reasons.length : 0;
   card.append(el("p", { class: "tf-foot", text: `skor ${signed(r.score, 0)} dari ${r.votes} indikator · ${up ? r.reasons.slice(0, 3).join(", ") : "–"}` }));
   return card;
@@ -581,7 +593,17 @@ function pullTone(value) {
   return [`• netral (${signed(value)})`, ""];
 }
 
+function renderPhysics(rows) {
+  const box = clear($("#physics-rows"));
+  if (!rows || !rows.length) {
+    box.append(el("p", { class: "muted", text: "Data menit belum cukup (butuh beberapa hari; dengan MT5 terisi dari riwayat broker)." }));
+    return;
+  }
+  box.append(...physicsRows(rows));
+}
+
 function renderDrivers(summary) {
+  renderPhysics(summary.physics);
   const body = clear($("#cross-table tbody"));
   for (const a of summary.cross || []) {
     const [pull, tone] = pullTone(a.effect);

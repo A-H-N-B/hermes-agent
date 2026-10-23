@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from gold_agent.models.common import Timeframe
+from gold_agent.models.physics import MarketPhysics
 
 
 class Tick(BaseModel):
@@ -86,6 +87,15 @@ class TimeframeState(BaseModel):
     vol_persistence: float | None = None  # GARCH alpha + beta
     vol_pct: float | None = None  # current 20-bar volatility within recent history, 0..1
     regime: Literal["trending", "ranging", "volatile", "normal"] | None = None
+    # Econophysics of the chart (market/econophysics.py), from complete bars.
+    tail_alpha: float | None = None  # power-law tail index of the moves (~3 in most markets)
+    tail_nu: float | None = None  # Student-t d.f. after GARCH; None = normal tails
+    entropy: float | None = None  # permutation entropy of the moves: 1 = as patternless as noise
+    mf_width: float | None = None  # MF-DFA h(-3) - h(3): intermittency, 0 for a monofractal
+    dfa_h: float | None = None  # Hurst exponent by DFA
+    ou_t: float | None = None  # Dickey-Fuller t of mean reversion (below -2.87 it is real)
+    ou_half_life: float | None = None  # bars to close half the gap to ou_mean (when real)
+    ou_mean: float | None = None  # the level price reverts to (when real)
     bars: int = 0
 
 
@@ -153,4 +163,5 @@ class MarketContext(BaseModel):
     cross: dict[str, CrossAsset] = Field(default_factory=lambda: dict[str, CrossAsset]())
     fundamental_bias: float | None = None  # daily fundamentals, -1 (bearish) .. +1 (bullish)
     fundamental_as_of: str | None = None
+    physics: MarketPhysics | None = None  # market-wide econophysics (market/physics.py)
     notes: list[str] = Field(default_factory=list)

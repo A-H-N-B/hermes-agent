@@ -1,5 +1,5 @@
 """How past setups like the current one ended, from the stored history (the empirical half of
-"peluang TP1 sebelum SL", signals/odds.py).
+"peluang TP1 sebelum SL", signals/odds.py, and the training data of signals/meta.py).
 
 A setup is a bar whose close found the engine saying BUY or SELL (its stored score at or past
 the entry threshold, or an active signal). Entry at that close, stop `sl_atr` ATR(14) of the
@@ -11,6 +11,7 @@ neither. One setup at a time, like a trader: the next can only start after this 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
@@ -22,6 +23,15 @@ JSON = dict[str, Any]
 Outcome = Literal["tp1", "sl", "expired"]
 
 
+@dataclass(frozen=True)
+class Setup:
+    index: int  # the entry bar in `bars`
+    at: datetime  # entry: that bar's close
+    side: int  # +1 BUY, -1 SELL
+    outcome: Outcome
+    closed_at: datetime  # when the outcome was known
+
+
 def _outcome(side: int, stop: float, target: float, after: Sequence[Candle]) -> tuple[Outcome, int]:
     for offset, bar in enumerate(after, start=1):
         if (bar.low <= stop) if side > 0 else (bar.high >= stop):
@@ -31,7 +41,7 @@ def _outcome(side: int, stop: float, target: float, after: Sequence[Candle]) -> 
     return "expired", len(after)
 
 
-def setup_outcomes(
+def replay_setups(
     *,
     bars: Sequence[Candle],
     scores: Sequence[tuple[datetime, float]],
@@ -42,11 +52,9 @@ def setup_outcomes(
     validity_bars: int,
     now: datetime,
     start: datetime,
-    session_of: Callable[[datetime], str],
-) -> JSON:
+) -> list[Setup]:
     atr = ind.atr([b.high for b in bars], [b.low for b in bars], [b.close for b in bars], 14)
-    totals: dict[str, int] = {"tp1": 0, "sl": 0, "expired": 0}
-    sessions: dict[str, dict[str, int]] = {}
+    found: list[Setup] = []
     cursor = [0]
     i = 0
     while i < len(bars) - validity_bars:
@@ -69,12 +77,47 @@ def setup_outcomes(
         stop = bar.close - side * risk
         target = bar.close + side * tp1_r * risk
         outcome, used = _outcome(side, stop, target, window)
-        totals[outcome] += 1
-        tally = sessions.setdefault(session_of(at), {"tp1": 0, "sl": 0, "expired": 0})
-        tally[outcome] += 1
+        found.append(Setup(i, at, side, outcome, window[used - 1].close_time))
         i += used + 1
+    return found
+
+
+def tally(setups: Sequence[Setup], session_of: Callable[[datetime], str]) -> JSON:
+    totals: dict[str, int] = {"tp1": 0, "sl": 0, "expired": 0}
+    sessions: dict[str, dict[str, int]] = {}
+    for setup in setups:
+        totals[setup.outcome] += 1
+        counts = sessions.setdefault(session_of(setup.at), {"tp1": 0, "sl": 0, "expired": 0})
+        counts[setup.outcome] += 1
     return {
         **totals,
         "n": sum(totals.values()),
         "by_session": {name: {**t, "n": sum(t.values())} for name, t in sorted(sessions.items())},
     }
+
+
+def setup_outcomes(
+    *,
+    bars: Sequence[Candle],
+    scores: Sequence[tuple[datetime, float]],
+    held: Sequence[Held],
+    threshold: float,
+    sl_atr: float,
+    tp1_r: float,
+    validity_bars: int,
+    now: datetime,
+    start: datetime,
+    session_of: Callable[[datetime], str],
+) -> JSON:
+    setups = replay_setups(
+        bars=bars,
+        scores=scores,
+        held=held,
+        threshold=threshold,
+        sl_atr=sl_atr,
+        tp1_r=tp1_r,
+        validity_bars=validity_bars,
+        now=now,
+        start=start,
+    )
+    return tally(setups, session_of)

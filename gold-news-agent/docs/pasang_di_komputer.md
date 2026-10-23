@@ -200,6 +200,13 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
    `uv run gold-agent verify-sources --only spdr_gld_holdings` lalu
    `uv run gold-agent config verified spdr_gld_holdings`. Faktor yang datanya belum ada
    dihitung netral dan disebut di dashboard.
+8. Ekonofisika dan pembelajaran mesin berjalan sendiri, tanpa pengaturan. Kartu "Ekonofisika
+   pasar" di halaman Live terisi setelah ada data menit beberapa hari: dengan MT5 langsung dari
+   riwayat broker, tanpa MT5 setelah program berjalan ±2 hari. Model pembelajaran mesin butuh
+   minimal 30 setup selesai di sebuah timeframe, dan angkanya baru ikut menghitung peluang
+   setelah lolos uji walk-forward; sebelum itu ditampilkan sebagai "belum terbukti, tidak
+   dipakai". Saat start, program memuat ±300 hari candle H1 (sekali, beberapa detik) untuk
+   analisis harian.
 
 Jam tenang (00:00–05:00 WIB), ambang sinyal, dan batas rugi harian juga ada di
 `config\settings.yaml` dan bisa ditimpa dengan cara yang sama.

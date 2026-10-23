@@ -59,6 +59,12 @@ class TradeOdds(BaseModel):
     sigma_model: str  # garch | ewma | atr
     horizon_bars: int
     cost_r: float  # the spread as a share of the risk
+    tail_nu: float | None = None  # Student-t bars in the simulation; None = normal
+    revert_half_life: float | None = None  # Ornstein-Uhlenbeck pull in the simulation (bars)
+    paths: int = 0  # simulated price paths
+    model_note: str = ""  # how the model was set up, in words
+    meta_tp1: float | None = None  # the meta-labeling model's P(TP1 first) for this chart state
+    meta_note: str | None = None  # what it is based on and whether it counts
     note: str  # one line for people
 
 
@@ -107,6 +113,7 @@ class Signal(BaseModel):
     timeframe_reason: str | None = None  # why that chart (signals/timeframe.py, or the AI)
     review: SignalReview | None = None  # the AI committee's final say; None = engine alone
     odds: TradeOdds | None = None  # chances of TP1 / stop and the expected value
+    physics_note: str | None = None  # the chart's and the market's econophysics, one line
 
 
 class SignalState(BaseModel):

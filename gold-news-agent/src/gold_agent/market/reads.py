@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from gold_agent.market import indicators as ind
+from gold_agent.market.physics_read import chart_rows
 from gold_agent.models import Candle
 from gold_agent.models.market import TimeframeState
 
@@ -119,5 +120,6 @@ def timeframe_read(state: TimeframeState, extra: JSON | None = None) -> JSON:
         "sigma": state.sigma,
         "vol_pct": state.vol_pct,
         "regime": state.regime,
+        "physics": chart_rows(state),
         **{key: (extra or {}).get(key) for key in ("stoch_k", "stoch_d", "sar", "sar_up")},
     }

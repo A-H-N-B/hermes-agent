@@ -65,6 +65,26 @@ def test_a_proven_edge_tilts_the_odds_and_the_expected_value() -> None:
     assert "terbukti" in odds.drift_basis
 
 
+def plan(**changes: Any) -> dict[str, Any]:
+    return {**PLAN, **changes}
+
+
+def test_the_chart_s_physics_shapes_the_odds() -> None:
+    flat = trade_odds(**PLAN, accuracy=None)
+    reverting = STATE.model_copy(update={"ou_half_life": 3.0, "ou_mean": 2662.0})
+    up = trade_odds(**plan(state=reverting), accuracy=None)
+    sell = plan(side="SELL", stop_loss=2656.0, tp1=2644.0, tp2=2638.0, state=reverting)
+    against = trade_odds(**sell, accuracy=None)
+    assert flat is not None and up is not None and against is not None
+    assert up.tp1 > flat.tp1 + 0.05  # BUY towards the level price keeps returning to
+    assert against.tp1 < flat.tp1 - 0.05  # SELL away from it
+    assert up.revert_half_life == 3.0 and "mean reversion (OU) ke 2662.00" in up.model_note
+    fat = trade_odds(**plan(state=STATE.model_copy(update={"tail_nu": 3.0})), accuracy=None)
+    assert fat is not None and fat.tail_nu == 3.0 and "Student-t ν=3" in fat.model_note
+    assert fat.tp1 == pytest.approx(fat.stop, abs=0.03)  # fat tails alone pick no side
+    assert flat.paths == 20_000 and "ekor normal" in flat.model_note
+
+
 def test_the_record_of_past_setups_takes_over_as_it_grows() -> None:
     losing = {"tp1": 30, "sl": 60, "expired": 10}
     few = trade_odds(**PLAN, accuracy=proven(0.56, setups={"tp1": 3, "sl": 6, "expired": 1}))

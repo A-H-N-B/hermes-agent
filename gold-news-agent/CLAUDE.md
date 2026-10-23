@@ -232,5 +232,23 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   Windows: the updater tests the official fundamentals sources and marks the passing ones
   verified (step 6/7); the "Perbarui" shortcut runs the newest updater (fetched first), so a
   change to the update steps applies on the same update.
+  Econophysics + meta-labeling (ADR-022/023): `market/econophysics.py` (numpy only, each
+  estimator recovered on known series and calibrated on random walks in
+  `tests/test_econophysics.py`): Hill tail index + Student-t nu of GARCH residuals (MLE),
+  permutation entropy (structured < 0.989), MF-DFA h(2) and width, OU with Dickey-Fuller
+  (-2.87), Hawkes MLE (branching, intensity, next-hour odds; time in trading minutes, weekend
+  gaps are not moves), transfer entropy with shuffle surrogates + White-robust lag-1 corr,
+  RMT vs Marchenko-Pastur, LPPLS confidence (interior fits, damping, gain filters). Per chart:
+  cached in `quant.slow_reads` (cache=False for past reads in worker threads) onto
+  `TimeframeState`; market-wide: `market/physics.py` built every 60 s on the context clock from
+  copies of the minute series in a thread, `MarketContext.physics`, LPPLS once per new D1 bar
+  (H1 history 7000 bars so D1 has ~300 days); gold minutes seeded from stored M1. Odds: 20,000
+  paths, Student-t bars by scale mixture, OU pull when real. `signals/meta.py`: L2 logistic
+  meta-labeling on the last 400 replayed setups with features from `timeframe_state` (no
+  train/serve skew),
+  walk-forward Brier vs base rate, used only when Diebold-Mariano t >= 2 on >= 40 predictions
+  (then the record's TP1/SL split follows the model). Words in one place
+  (`market/physics_read.py`) for the dashboard ("Ekonofisika pasar" card, per-TF rows), the
+  brief (`<ekonofisika>` + per-TF fields, prompt rule 5) and Telegram (`Signal.physics_note`).
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import Any
 
 from gold_agent.config import Settings
-from gold_agent.models import Candle, DeepAnalysis, Level, Signal
+from gold_agent.models import Aftershock, Candle, DeepAnalysis, Leader, Level, MarketPhysics, Signal
 from gold_agent.signals.desk import (
     APPROVAL_TTL,
     COOLDOWN,
@@ -184,6 +184,48 @@ def test_the_brief_carries_the_systems_numbers_and_neutralised_news(settings: Se
     assert "rezim " in brief and "tren Kalman t" in brief
     assert "- data pasar terkait (MT5) tidak tersedia" in brief
     assert "<fundamental>data fundamental harian tidak tersedia</fundamental>" in brief
+    # The program's econophysics: the odds model, and the market-wide block (empty here).
+    assert "simulasi 20.000 jalur harga" in brief
+    assert "<ekonofisika>data belum cukup" in brief
+    physics = MarketPhysics(
+        built_at=NOW,
+        aftershock=Aftershock(
+            branching=0.6,
+            clustered=True,
+            intensity_ratio=2.5,
+            next_hour=0.62,
+            half_life_minutes=14,
+            events=72,
+            minutes=7200,
+            threshold_pct=0.08,
+        ),
+        leaders=[
+            Leader(
+                key="XAGUSD",
+                label="Perak (XAGUSD)",
+                bits=0.01,
+                reverse_bits=0.001,
+                z=4.2,
+                corr=0.12,
+                leads=True,
+                last_move_pct=0.05,
+                implied=1,
+            )
+        ],
+    )
+    shaken = desk_brief(
+        candidate=buy,
+        choice=choice,
+        breakdown=breakdown,
+        context=CONTEXT.model_copy(update={"physics": physics}),
+        analyses=[story],
+        events=[],
+        active=None,
+        settings=settings,
+        now=NOW,
+    )
+    assert "- Badai susulan (Hawkes): 2.5× rata-rata → berlangsung: lonjakan" in shaken
+    assert "- Pemimpin emas: Perak (XAGUSD) →" in shaken and "emas cenderung naik" in shaken
 
 
 def m1(start: Any, lows_highs: list[tuple[float, float]]) -> list[Candle]:

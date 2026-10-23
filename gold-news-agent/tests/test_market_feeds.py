@@ -28,6 +28,7 @@ from gold_agent.market.adapters.twelvedata import (
     check_response,
     parse_time_series,
 )
+from gold_agent.market.econophysics import PE_STRUCTURED
 from gold_agent.models import Candle, MarketContext, Tick
 from gold_agent.models.common import Timeframe
 from gold_agent.services.market import MarketService
@@ -384,6 +385,9 @@ async def test_market_service_builds_context_and_flags_stale_prices(
         assert snapshot.market_open and snapshot.session == "overlap"
         assert snapshot.timeframes["H1"].ema50 is not None
         assert snapshot.timeframes["D1"].bars > 10
+        h1 = snapshot.timeframes["H1"]  # the econophysics of the chart rides along
+        assert h1.entropy is not None and h1.entropy < PE_STRUCTURED  # one repeating pattern
+        assert h1.tail_alpha is not None and h1.mf_width is not None and h1.ou_t is not None
         assert snapshot.prev_day_high is not None
         assert any("proxy" in note for note in snapshot.notes)
         clock.advance(120)  # no ticks for two minutes during market hours

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from gold_agent.analysis.prompts import untrusted
 from gold_agent.config import Settings
+from gold_agent.market.physics_read import chart_rows, line, market_rows, meaning
 from gold_agent.market.quant import REGIME_ID
 from gold_agent.models import (
     Analysis,
@@ -387,11 +388,25 @@ def _statistics(state: TimeframeState) -> str:
     if state.sigma is not None:
         pct = f", persentil {state.vol_pct:.0%}" if state.vol_pct is not None else ""
         vol = f"{state.sigma:.2f}$/bar ({state.sigma_model}{pct})"
+    physics = line(chart_rows(state))
     return (
         f"rezim {REGIME_ID.get(state.regime or '', '-')} (ER {_num(state.efficiency)}, "
-        f"Hurst {_num(state.hurst)}, ADX {_num(state.adx, '{:.0f}')}) · MACD {macd} · "
-        f"tren Kalman t {_num(state.kalman_t, '{:+.1f}')} · volatilitas {vol}"
+        f"Hurst {_num(state.hurst)}, DFA h {_num(state.dfa_h)}, ADX {_num(state.adx, '{:.0f}')}) · "
+        f"MACD {macd} · tren Kalman t {_num(state.kalman_t, '{:+.1f}')} · volatilitas {vol}"
+        + (f" · ekonofisika: {physics}" if physics else "")
     )
+
+
+def _physics_lines(context: MarketContext) -> list[str]:
+    """Market-wide econophysics (market/physics.py), computed by the program."""
+    rows = market_rows(context.physics)
+    if not rows:
+        return ["<ekonofisika>data belum cukup (butuh beberapa hari data menit)</ekonofisika>"]
+    return [
+        "<ekonofisika>",
+        *(f"- {r['label']}: {r['value']} → {meaning(r)}" for r in rows),
+        "</ekonofisika>",
+    ]
 
 
 def _cross_lines(context: MarketContext) -> list[str]:
@@ -437,11 +452,11 @@ def _odds_lines(candidate: Signal) -> list[str]:
     if odds is None:
         return ["<peluang>tidak bisa dihitung (volatilitas belum tersedia)</peluang>"]
     band = f" (95%: {odds.ev_r_ci95[0]:+.2f}…{odds.ev_r_ci95[1]:+.2f}R)" if odds.ev_r_ci95 else ""
+    learned = f"; {odds.meta_note}" if odds.meta_note else ""
     return [
         f"<peluang>{odds.note}; EV{band}; TP2 setelah TP1 {odds.tp2_after_tp1:.0%}; "
-        f"model saja {odds.model_tp1:.0%}; {odds.drift_basis}; volatilitas {odds.sigma:.2f}$/bar "
-        f"({odds.sigma_model}) selama {odds.horizon_bars} candle; biaya spread {odds.cost_r:.2f}R"
-        "</peluang>"
+        f"model saja {odds.model_tp1:.0%}; {odds.drift_basis}; {odds.model_note or ''} selama "
+        f"{odds.horizon_bars} candle; biaya spread {odds.cost_r:.2f}R{learned}</peluang>"
     ]
 
 
@@ -537,5 +552,6 @@ def desk_brief(
         f"{_num(context.real_yield_change_1d, '{:+.2f}')}</makro>"
     )
     lines += _cross_lines(context)
+    lines += _physics_lines(context)
     lines += _fundamental_lines(fundamentals)
     return "\n".join(lines)

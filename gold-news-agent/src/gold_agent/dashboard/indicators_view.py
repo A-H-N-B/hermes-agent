@@ -15,6 +15,7 @@ from typing import Any
 
 from gold_agent.market import indicators as ind
 from gold_agent.market.levels import nearest_above, nearest_below
+from gold_agent.market.physics_read import market_rows
 from gold_agent.market.reads import SAR, STOCH, timeframe_read
 from gold_agent.models import Candle, FundamentalSnapshot, MarketContext
 from gold_agent.signals.scoring import macro_component, macro_parts
@@ -74,6 +75,7 @@ def drivers(context: MarketContext, fundamentals: FundamentalSnapshot | None) ->
             ],
         },
         "fundamentals": fundamentals.model_dump(mode="json") if fundamentals else None,
+        "physics": market_rows(context.physics),
     }
 
 
@@ -91,6 +93,7 @@ def indicator_summary(
             "cross": [],
             "macro": {"value": None, "parts": []},
             "fundamentals": fundamentals.model_dump(mode="json") if fundamentals else None,
+            "physics": [],
         }
     extras = extras or {}
     reads = [

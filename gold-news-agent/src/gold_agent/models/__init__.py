@@ -28,6 +28,7 @@ from gold_agent.models.market import (
 from gold_agent.models.news import NewsCluster, NewsItem, PrefilterResult
 from gold_agent.models.notify import Notification
 from gold_agent.models.ops import Alert, LatencyStage, SourceHealth
+from gold_agent.models.physics import Aftershock, BubbleRisk, CommonFactor, Leader, MarketPhysics
 from gold_agent.models.signals import (
     Outlook,
     OutlookRow,
@@ -41,11 +42,14 @@ from gold_agent.models.signals import (
 
 __all__ = [
     "Action",
+    "Aftershock",
     "Alert",
     "Analysis",
+    "BubbleRisk",
     "CalendarEvent",
     "Candle",
     "Category",
+    "CommonFactor",
     "CrossAsset",
     "DeepAnalysis",
     "Direction",
@@ -53,8 +57,10 @@ __all__ = [
     "Factor",
     "FundamentalSnapshot",
     "LatencyStage",
+    "Leader",
     "Level",
     "MarketContext",
+    "MarketPhysics",
     "NewsCluster",
     "NewsItem",
     "Notification",

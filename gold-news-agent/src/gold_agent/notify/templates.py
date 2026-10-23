@@ -113,6 +113,8 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
             f"🎲 Peluang TP1 sebelum SL {odds.tp1:.0%} · SL dulu {odds.stop:.0%} · "
             f"EV {odds.ev_r:+.2f}R ({basis})"
         )
+    if signal.physics_note:
+        lines.append("🧪 Ekonofisika: " + esc(signal.physics_note))
     lines.append("🧾 Alasan: " + "; ".join(esc(r) for r in signal.top_reasons))
     lines.append("⚠️ Batal jika: " + "; ".join(esc(r) for r in signal.invalidation[:4]))
     if next_event is not None:

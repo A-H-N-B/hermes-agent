@@ -2,13 +2,18 @@
 
 Two halves, blended the Bayesian way:
 
-1. The volatility model. Price follows Brownian motion with the chart's volatility (GARCH,
-   else EWMA, else ATR / 1.6) and a drift that is only non-zero when the agent has *proven*
-   an edge on that chart: the lower end of the 95% interval of its walk-forward hit rate p
-   gives drift = sigma * InvNorm(p) per bar. Monte Carlo over the signal's validity (antithetic
-   paths, barriers checked within each bar) gives TP1 first / stop first / neither. Without a
-   proven edge the drift is zero and a 1R target is a coin flip, minus the spread: honest.
-2. The record. How past setups on that chart ended (signals/setups.py).
+1. The volatility model. Price follows a diffusion with the chart's volatility (GARCH, else
+   EWMA, else ATR / 1.6) and a drift that is only non-zero when the agent has *proven* an edge
+   on that chart: the lower end of the 95% interval of its walk-forward hit rate p gives
+   drift = sigma * InvNorm(p) per bar. When the chart's GARCH-standardised moves have fat
+   tails, bars are Student-t (econophysics); when its mean reversion is statistically real
+   (Dickey-Fuller), an Ornstein-Uhlenbeck pull towards its mean is added (the Langevin
+   equation). Monte Carlo over the signal's validity (20,000 antithetic paths, barriers checked
+   within each bar) gives TP1 first / stop first / neither. Without a proven edge or a real pull
+   the drift is zero and a 1R target is a coin flip, minus the spread: honest.
+2. The record. How past setups on that chart ended (signals/setups.py). Once the meta-labeling
+   model (signals/meta.py) has beaten the record's base rate walk-forward, it splits the
+   record's resolved setups by this chart's state instead of by their plain frequency.
 
 The model counts like PRIOR_STRENGTH past setups (a Dirichlet prior), so with few setups the
 model speaks and with many the record does. Expected value: TP1 pays `tp1_fraction` of the
@@ -18,11 +23,14 @@ probability), the stop costs 1R, the spread costs spread/risk.
 
 from __future__ import annotations
 
+import math
+from datetime import datetime
 from typing import Any
 
-from gold_agent.market.quant import drift_from_hit_rate, first_passage, simulate_passage
+from gold_agent.market.quant import PATHS, drift_from_hit_rate, first_passage, simulate_passage
 from gold_agent.models import TimeframeState, TradeOdds
 from gold_agent.signals.forecast_score import wilson
+from gold_agent.signals.meta import MIN_TRAIN, features, predict
 
 JSON = dict[str, Any]
 PRIOR_STRENGTH = 20
@@ -50,6 +58,30 @@ def _drift(sigma: float, accuracy: JSON | None, tf: str, min_calls: int) -> tupl
     return 0.0, f"belum ada bukti keunggulan di {tf}: arah dianggap acak (drift 0)"
 
 
+def _meta(
+    meta: JSON, state: TimeframeState | None, side: str, at: datetime | None
+) -> tuple[float | None, str | None]:
+    """The meta-labeling model's P(TP1 first) for this chart state, and a line on whether it
+    counts (signals/meta.py)."""
+    if not meta:
+        return None, None
+    samples = int(meta.get("samples") or 0)
+    if "weights" not in meta or state is None or at is None:
+        return None, f"pembelajaran mesin: baru {samples} setup selesai (butuh {MIN_TRAIN})"
+    p = predict(meta, features(state, 1 if side == "BUY" else -1, at))
+    skill, t = meta.get("skill"), meta.get("t")
+    tested = (
+        f"skill walk-forward {skill:+.0%} (t {t:+.1f}, {meta.get('evaluated')} prediksi)"
+        if skill is not None and t is not None
+        else "belum ada uji walk-forward"
+    )
+    verdict = "terbukti, dipakai" if meta.get("proven") else "belum terbukti, tidak dipakai"
+    return p, (
+        f"pembelajaran mesin (meta-labeling dari {samples} setup): P(TP1 dulu) {p:.0%} · "
+        f"{tested} → {verdict}"
+    )
+
+
 def ev_r(
     tp1: float, stop: float, runner: float, *, r1: float, r2: float, fraction: float, cost_r: float
 ) -> float:
@@ -72,6 +104,7 @@ def trade_odds(
     accuracy: JSON | None,
     min_calls: int,
     tp1_fraction: float,
+    at: datetime | None = None,
 ) -> TradeOdds | None:
     vol = _volatility(state)
     risk = abs(entry - stop_loss)
@@ -80,11 +113,22 @@ def trade_odds(
         return None
     sigma, model = vol
     mu, basis = _drift(sigma, accuracy, tf, min_calls)
-    passage = simulate_passage(reach, risk, mu, [sigma**2] * validity_bars)
+    nu = state.tail_nu if state else None
+    revert = None
+    if state and state.ou_half_life and state.ou_mean is not None:
+        towards = state.ou_mean - entry if side == "BUY" else entry - state.ou_mean
+        revert = (math.log(2) / state.ou_half_life, towards)
+    passage = simulate_passage(reach, risk, mu, [sigma**2] * validity_bars, nu=nu, revert=revert)
     runner = first_passage(abs(tp2 - tp1), reach, mu, sigma)
     record = (accuracy or {}).get("setups") or {}
-    counts = (int(record.get("tp1", 0)), int(record.get("sl", 0)), int(record.get("expired", 0)))
-    n = sum(counts)
+    seen = (int(record.get("tp1", 0)), int(record.get("sl", 0)), int(record.get("expired", 0)))
+    n = sum(seen)
+    meta = (accuracy or {}).get("meta") or {}
+    meta_tp1, meta_note = _meta(meta, state, side, at)
+    counts: tuple[float, float, float] = seen
+    if meta_tp1 is not None and meta.get("proven"):
+        resolved = seen[0] + seen[1]
+        counts = (meta_tp1 * resolved, (1 - meta_tp1) * resolved, seen[2])
     prior = (passage.target, passage.stop, passage.neither)
     blended = [
         (PRIOR_STRENGTH * m + c) / (PRIOR_STRENGTH + n) for m, c in zip(prior, counts, strict=True)
@@ -117,6 +161,17 @@ def trade_odds(
         )
         ev_band = (round(low, 3), round(high, 3))
     source = f"model + {n} setup historis" if n else "model volatilitas (belum ada setup historis)"
+    tails = f"ekor tebal Student-t ν={nu:g}" if nu else "ekor normal"
+    pull = (
+        f"tarikan mean reversion (OU) ke {state.ou_mean:.2f}, half-life "
+        f"{state.ou_half_life:.0f} candle"
+        if revert and state and state.ou_mean is not None and state.ou_half_life
+        else "tanpa mean reversion yang nyata"
+    )
+    model_note = (
+        f"simulasi {PATHS:,} jalur harga".replace(",", ".")
+        + f" · volatilitas {model} {sigma:.2f}$/candle · {tails} · {pull}"
+    )
     note = (
         f"Peluang TP1 sebelum SL {p_tp1:.0%} (SL dulu {p_stop:.0%}, tidak tersentuh "
         f"{p_neither:.0%}) · EV {ev:+.2f}R · {source}"
@@ -131,13 +186,21 @@ def trade_odds(
         ev_r_ci95=ev_band,
         model_tp1=round(passage.target, 4),
         setups=n,
-        setups_tp1=counts[0],
-        setups_stop=counts[1],
-        setups_neither=counts[2],
+        setups_tp1=seen[0],
+        setups_stop=seen[1],
+        setups_neither=seen[2],
         drift_basis=basis,
         sigma=round(sigma, 4),
         sigma_model=model,
         horizon_bars=validity_bars,
         cost_r=round(cost_r, 4),
+        tail_nu=nu,
+        revert_half_life=round(state.ou_half_life, 1)
+        if revert and state and state.ou_half_life
+        else None,
+        paths=PATHS,
+        model_note=model_note,
+        meta_tp1=round(meta_tp1, 4) if meta_tp1 is not None else None,
+        meta_note=meta_note,
         note=note,
     )

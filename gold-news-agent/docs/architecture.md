@@ -11,7 +11,8 @@ collectors (async, 1 per sumber) ─► normalizer ─► dedup/cluster ─► R
                                     └─► LLM triage (Opus 5.5, effort low) ─► deep analysis (Opus 5.5, effort high, impact ≥ 3)
 market context (tick, candle, DXY, yield, teknikal, kalender) ─► signal engine ─► Telegram / dashboard / paper tracker
    ├─ pasar penggerak dari MT5 (ADR-018) + fundamental harian (ADR-019) ─► skor makro M
-   └─ statistik chart + peluang TP1/SL & EV (ADR-020) ─► gerbang EV, brief komite AI (ADR-021)
+   ├─ statistik chart + peluang TP1/SL & EV (ADR-020) ─► gerbang EV, brief komite AI (ADR-021)
+   └─ ekonofisika per chart & pasar (ADR-022) + meta-labeling (ADR-023) ─► peluang, brief, dashboard
 scheduler: kalender, playbook T-60, outlook per jam, brief sesi, laporan
 ```
 
@@ -347,6 +348,63 @@ Indikator klasik (EMA, RSI, BB) tidak mengatakan apakah sebuah gerak lebih dari 
 - Fable 5.1 adalah *Covered Model*: retensi data 30 hari wajib (organisasi ZDR ditolak). Isi
   permintaan hanya berita publik dan angka pasar.
 
+### ADR-022 Ekonofisika: fisika statistik atas data harga — Diterapkan
+
+Pengguna meminta perhitungan matematika tingkat tinggi dan ekonofisika untuk keputusan Fable.
+Perhitungannya dikerjakan **program**, bukan model bahasa: angka dari kode presisi penuh,
+deterministik (replay identik), dan bisa diuji, sedangkan model bahasa yang menghitung di
+kepalanya lebih mudah keliru dan jauh lebih mahal. Fable dan Opus menerima hasilnya di brief dan
+wajib menimbangnya (aturan 5 di `prompts/desk_system.md`). Setiap ukuran diuji pada data yang
+parameternya diketahui dan dikalibrasi pada data acak (`tests/test_econophysics.py`):
+
+| Ukuran | Ilmu | Hasil uji |
+|---|---|---|
+| Ekor distribusi (Hill α) + Student-t ν dari residu GARCH (MLE) | fisika statistik (hukum pangkat, "inverse cubic law") | t(3) → α ±2,7; normal → α ±6 dan ν = normal 94% |
+| Entropi permutasi (Bandt-Pompe) | teori informasi | data acak < 0,989 hanya ±1%; AR(0,3) terdeteksi 78% |
+| MF-DFA: h(2) dan lebar Δh = h(−3) − h(3) | fisika sistem kompleks (multifraktal) | acak: h(2) 0,50, Δh ≥ 0,12 hanya 5%; kaskade multiplikatif > 0,12 |
+| Ornstein-Uhlenbeck + uji Dickey-Fuller | persamaan Langevin | salah alarm 5,0% di random walk; θ = 0,05 terdeteksi 100% |
+| Proses Hawkes (MLE): endogenitas, intensitas, peluang gerak besar 1 jam | seismologi (gempa susulan, hukum Omori) | n = 0,6 → n̂ 0,55; proses Poisson: 0% salah "berkelompok" |
+| Transfer entropy + korelasi lag-1 robust (White) | teori informasi (Schreiber) | acak 0%, limpahan volatilitas 0%, pemimpin nyata 87% |
+| Teori matriks acak (batas Marchenko-Pastur) | fisika nuklir / RMT | acak: 0,5% faktor palsu; satu faktor nyata selalu ditemukan |
+| LPPLS (Sornette) pada data harian | fisika fenomena kritis | gelembung sintetis ≥ 0,3: 55%; random walk 2%; tren naik biasa 7% |
+
+- **Per chart** (cache per candle yang selesai, `market/quant.py` `slow_reads`): ekor α/ν,
+  entropi, Δh dan h(2), OU. Masuk ke `TimeframeState`, kartu tiap timeframe, dan brief.
+- **Seluruh pasar** (`market/physics.py`, loop 60 detik di market service memakai jam konteks
+  sehingga replay tetap deterministik; hitungannya di thread dari salinan data): Hawkes pada
+  gerak besar 1 menit emas (5 hari data menit; tanpa MT5 diisi dari M1 tersimpan), transfer
+  entropy tiap pasar terkait → emas, RMT pada return 5 menit, LPPLS sekali per candle harian
+  baru (riwayat H1 dinaikkan ke 7.000 bar, ±300 hari bursa, supaya D1 cukup).
+- **Peluang** (`signals/odds.py`): simulasi kini 20.000 jalur, bar Student-t (campuran skala
+  normal: total per bar tepat Student-t, jalur di dalam bar tetap kontinu) bila ekor tebal, dan
+  tarikan OU ke level rata-rata bila mean reversion nyata. Tanpa keduanya hasilnya sama dengan
+  model lama.
+- **Kalimat yang dibaca manusia** dibuat satu tempat (`market/physics_read.py`) untuk dashboard,
+  brief, dan Telegram, jadi ambang dan bunyinya tidak bisa berbeda antar layar.
+- Kejujuran: ukuran-ukuran ini memperbaiki kalibrasi peluang dan kesadaran risiko; tidak ada yang
+  membuat arah emas intraday bisa ditebak dengan pasti. LPPLS ditandai eksperimental.
+
+### ADR-023 Meta-labeling: pembelajaran mesin dari setup sendiri — Diterapkan
+
+- `signals/meta.py`: model kedua (López de Prado) yang belajar dari setup masa lalu di chart yang
+  sama (`signals/setups.py`) kondisi apa yang membuat TP1 tersentuh lebih dulu: t Kalman, jarak
+  ke EMA20, RSI, MACD, ADX, efficiency ratio, persentil volatilitas, entropi, Hurst, Δh, ekor,
+  t Dickey-Fuller, dan jam. Fiturnya dihitung dengan `timeframe_state` atas jendela bar yang
+  sama dengan chart live (tanpa cache), jadi data latih dan data live tidak bisa berbeda cara
+  hitungnya.
+- Regresi logistik L2 (metode Newton, fitur distandarkan). Uji **walk-forward**: tiap setup
+  diprediksi model yang hanya dilatih dari setup yang hasilnya sudah diketahui sebelum setup itu
+  dimasuki, lalu dibandingkan dengan tebakan dasar (base rate) memakai skor Brier.
+- Model **baru dipakai** bila mengalahkan tebakan dasar di luar kebetulan: statistik
+  Diebold-Mariano t ≥ 2 pada ≥ 40 prediksi. Sesudah itu peluang TP1 memakai pembagian
+  TP1/SL dari model untuk kondisi chart saat ini, bukan frekuensi polos. Sebelumnya angkanya
+  hanya ditampilkan ("belum terbukti, tidak dipakai"). Pada random walk model tidak lolos uji;
+  pada data dengan pola nyata ia lolos (`tests/test_meta.py`).
+- Dilatih ulang tiap jam bersama akurasi walk-forward (thread terpisah), dari paling banyak 400
+  setup terbaru (perilaku terkini, dan CPU tetap ringan: ±3 detik per timeframe pada kasus
+  terberat). Butuh minimal 30 setup yang selesai, jadi di minggu-minggu awal masih "belum cukup
+  setup".
+
 ## Estimasi biaya LLM (untuk Q4)
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):
@@ -367,15 +425,16 @@ yang selalu aktif di Opus 5.5 dan Fable 5.1 dan makin panjang pada effort lebih 
 | Deep (effort high) | 40 | 0,9k / 3k / 6k | ±$5,30 |
 | Narasi outlook per jam (effort low; tabelnya tidak memakai AI) | 24 | – / 5k / 2k | ±$1,45 |
 | Brief harian (effort high) | 1 | – / 30k / 8k | ±$0,30 |
-| Keputusan akhir sinyal (komite, effort high): 1 suara Fable 5.1 | ≤ 30 review (biasanya < 10) | 1,9k / 3k / 5k | ±$0,28 per review |
-| … dan 2 suara Opus 5.5 paralel | 2 per review | 1,9k / 3k / 3,5k | ±$0,17 per review; komite **±$0,45 per review: ≤ ±$13,50 (biasanya ±$4,50)** |
+| Keputusan akhir sinyal (komite, effort high): 1 suara Fable 5.1 | ≤ 30 review (biasanya < 10) | 2,4k / 3,5k / 5k | ±$0,29 per review |
+| … dan 2 suara Opus 5.5 paralel | 2 per review | 2,4k / 3,5k / 3,5k | ±$0,17 per review; komite **±$0,45 per review: ≤ ±$13,50 (biasanya ±$4,50)** |
 | Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 1–1,5k | ±$0,60 |
 | **Total tanpa rem, hari ramai (komite ±10 review)** | | | **±$23/hari** |
 
 Kolom cache memakai ukuran system prompt + KB yang diukur (triage ±4.400 karakter, deep ±3.300,
-desk ±6.600). Brief komite yang terisi penuh (8 berita dengan analisis mendalam, 5 timeframe,
-7 pasar penggerak, 8 faktor fundamental, peluang) diukur ±7.700 karakter. Prompt outlook dan
-brief harian di bawah minimum cache 512 token, jadi tidak di-cache.
+desk ±8.400). Brief komite yang terisi penuh (8 berita dengan analisis mendalam, 5 timeframe
+dengan ekonofisikanya, 7 pasar penggerak, blok ekonofisika pasar, 8 faktor fundamental,
+peluang dan meta-labeling) diukur ±9.000 karakter. Prompt outlook dan brief harian di bawah
+minimum cache 512 token, jadi tidak di-cache.
 
 `budget.llm_daily_usd` (bawaan **$20**) adalah plafon keras per hari WIB. Setiap panggilan lebih
 dulu mencatat biaya terburuknya (seluruh prompt dihitung sebagai tulis cache + `max_tokens`

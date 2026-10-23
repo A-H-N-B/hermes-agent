@@ -66,6 +66,9 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
     assert lines[10].startswith("🎲 Peluang TP1 sebelum SL ")  # odds of the plan, model-based
     assert lines[10].endswith("(model volatilitas)")
     assert any(line.startswith("⚠️ Batal jika: harga menembus SL 2643.60") for line in lines)
+    noted = signal.model_copy(update={"physics_note": "keteraturan hampir acak · ekor <tebal>"})
+    noted_lines = render_signal(noted, now=NOW, next_event=release).split("\n")
+    assert noted_lines[11] == "🧪 Ekonofisika: keteraturan hampir acak · ekor &lt;tebal&gt;"
     assert "📅 Event berikutnya: USD Retail Sales m/m pukul 21:35 WIB (2 jam lagi)" in lines
     assert any("isi risk.account_equity" in line for line in lines)  # no guessed lot size
     assert lines[-1] == "<i>Bukan saran keuangan. Keputusan &amp; risiko di tanganmu.</i>"

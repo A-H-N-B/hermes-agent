@@ -12,8 +12,11 @@ Regime
     trending / ranging / volatile / normal, from the reads above and ADX.
 First passage
     The chance price reaches a target before a stop: closed form for Brownian motion with
-    drift, and a Monte Carlo over the trade's validity window with GARCH volatility, so a target
-    that is unlikely to be reached in time is not counted as reached.
+    drift, and a Monte Carlo over the trade's validity window with GARCH volatility (Student-t
+    bars when the tails are fat, an Ornstein-Uhlenbeck pull when mean reversion is real), so a
+    target that is unlikely to be reached in time is not counted as reached.
+The econophysics reads of each chart (tails, order, multifractality, mean reversion) are in
+econophysics.py and cached here with the other per-bar reads.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+
+from gold_agent.market import econophysics as ep
 
 Array = NDArray[np.float64]
 Regime = Literal["trending", "ranging", "volatile", "normal"]
@@ -246,30 +251,48 @@ class Passage:
     neither: float  # P(neither before the window ends)
 
 
+PATHS = 20_000  # 0.35 percentage point standard error at 50%, less with antithetic pairs
+
+
 def simulate_passage(
     up: float,
     down: float,
     mu: float,
     bar_vars: Sequence[float],
     *,
+    nu: float | None = None,
+    revert: tuple[float, float] | None = None,
     substeps: int = 12,
-    paths: int = 4000,
+    paths: int = PATHS,
     seed: int = 7,
 ) -> Passage:
-    """Monte Carlo of Brownian paths over the window (one variance per bar, e.g. GARCH's term
-    structure), checking the barriers `substeps` times per bar. Antithetic pairs halve the noise;
-    the fixed seed keeps the answer identical for identical inputs (replays)."""
+    """Monte Carlo of the price path over the window (one variance per bar, e.g. GARCH's term
+    structure), checking the barriers `substeps` times per bar.
+
+    `nu`: each bar is a unit-variance Student-t with nu degrees of freedom instead of normal.
+    Its variance is scaled by (nu - 2) / chi-square(nu), a scale mixture of normals, so the path
+    inside a bar stays continuous and the bar's total is exactly Student-t: jumps through a
+    stop happen as often as fat tails say.
+    `revert`: (theta per bar, level) adds the Ornstein-Uhlenbeck pull theta * (level - x)
+    towards `level`, measured like x (from the entry, in the trade's direction).
+    Antithetic pairs (same scale, opposite shocks) cut the noise; the fixed seed keeps the
+    answer identical for identical inputs (replays)."""
     rng = np.random.default_rng(seed)
     half = paths // 2
     alive = np.ones(2 * half, dtype=bool)
     hit_up = np.zeros(2 * half, dtype=bool)
     hit_down = np.zeros(2 * half, dtype=bool)
     x = np.zeros(2 * half)
+    theta, level = revert if revert is not None else (0.0, 0.0)
     for var in bar_vars:
-        step_sd = math.sqrt(max(var, 0.0) / substeps)
+        step: Array | float = math.sqrt(max(var, 0.0) / substeps)
+        if nu is not None:
+            scale = np.sqrt((nu - 2.0) / rng.chisquare(nu, half))
+            step = step * np.concatenate([scale, scale])
         for _ in range(substeps):
             shocks = rng.standard_normal(half)
-            x = x + mu / substeps + step_sd * np.concatenate([shocks, -shocks])
+            pull = theta * (level - x) / substeps if theta else 0.0
+            x = x + mu / substeps + pull + step * np.concatenate([shocks, -shocks])
             up_now = alive & (x >= up)
             down_now = alive & (x <= -down)
             hit_up |= up_now
@@ -295,19 +318,38 @@ class SlowReads:
     persistence: float | None
     hurst: float | None
     vol_pct: float | None  # current 20-bar volatility within this history, 0..1
+    tail_alpha: float | None = None  # Hill tail index of the returns (econophysics.py)
+    tail_nu: float | None = None  # Student-t d.f. of the GARCH-standardised returns
+    entropy: float | None = None  # permutation entropy of the returns, 1 = noise
+    multifractal: ep.Multifractal | None = None
+    reversion: ep.OrnsteinUhlenbeck | None = None
+
+
+def garch_residuals(returns: Array, fit: Garch) -> Array:
+    """Returns divided by their GARCH volatility: what is left once the clustering is explained."""
+    var = fit.long_var
+    out: list[float] = []
+    for value in (returns - returns.mean()).tolist():
+        out.append(value / math.sqrt(var))
+        var = fit.omega + fit.alpha * value * value + fit.beta * var
+    return np.asarray(out)
 
 
 _SLOW_CACHE: dict[tuple[str, float, int, float], SlowReads] = {}
 _SLOW_CACHE_SIZE = 64
 
 
-def slow_reads(tf: str, last_open: float, closes: Sequence[float]) -> SlowReads:
-    """GARCH (EWMA when history is short), Hurst and the volatility percentile over complete
-    bars, recomputed only when a new bar completes (`last_open`: the newest bar's open time)."""
+def slow_reads(
+    tf: str, last_open: float, closes: Sequence[float], *, cache: bool = True
+) -> SlowReads:
+    """GARCH (EWMA when history is short), Hurst, the volatility percentile and the
+    econophysics reads over complete bars, recomputed only when a new bar completes
+    (`last_open`: the newest bar's open time). `cache=False` for reads of the past from a
+    worker thread (signals/meta.py): they would only push the live charts out of the cache."""
     if not closes:
         return SlowReads(None, None, None, None, None)
     key = (tf, last_open, len(closes), closes[-1])
-    cached = _SLOW_CACHE.get(key)
+    cached = _SLOW_CACHE.get(key) if cache else None
     if cached is not None:
         return cached
     returns = log_returns(closes)
@@ -328,7 +370,14 @@ def slow_reads(tf: str, last_open: float, closes: Sequence[float]) -> SlowReads:
         persistence=persistence,
         hurst=hurst(closes),
         vol_pct=vol_pct,
+        tail_alpha=ep.hill_alpha(returns),
+        tail_nu=ep.student_nu(garch_residuals(returns, garch)) if garch is not None else None,
+        entropy=ep.permutation_entropy(returns),
+        multifractal=ep.mfdfa(returns),
+        reversion=ep.ou_fit(closes),
     )
+    if not cache:
+        return reads
     if len(_SLOW_CACHE) >= _SLOW_CACHE_SIZE:
         _SLOW_CACHE.pop(next(iter(_SLOW_CACHE)))
     _SLOW_CACHE[key] = reads

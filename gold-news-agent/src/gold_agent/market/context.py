@@ -82,7 +82,7 @@ def nearest_swings(
 
 
 def timeframe_state(
-    tf: Timeframe, candles: Sequence[Candle], swing_half_width: int = 3
+    tf: Timeframe, candles: Sequence[Candle], swing_half_width: int = 3, *, cache: bool = True
 ) -> TimeframeState:
     if not candles:
         return TimeframeState(tf=tf)
@@ -101,10 +101,11 @@ def timeframe_state(
     _, kalman_slope, kalman_se = quant.kalman_series(closes)
     done = [c for c in candles if c.complete]
     last_open = done[-1].open_time.timestamp() if done else 0.0
-    slow = quant.slow_reads(tf, last_open, [c.close for c in done])
+    slow = quant.slow_reads(tf, last_open, [c.close for c in done], cache=cache)
     efficiency = quant.efficiency_ratio(closes)
     adx_now = ind.last(adx)
     slope, se = ind.last(kalman_slope), ind.last(kalman_se)
+    reversion = slow.reversion if slow.reversion and slow.reversion.significant else None
     return TimeframeState(
         tf=tf,
         close=closes[-1],
@@ -140,6 +141,14 @@ def timeframe_state(
         regime=quant.classify(efficiency, slow.hurst, adx_now, slow.vol_pct)
         if len(candles) >= 50
         else None,
+        tail_alpha=slow.tail_alpha,
+        tail_nu=slow.tail_nu,
+        entropy=slow.entropy,
+        mf_width=slow.multifractal.width if slow.multifractal else None,
+        dfa_h=slow.multifractal.h2 if slow.multifractal else None,
+        ou_t=slow.reversion.t if slow.reversion else None,
+        ou_half_life=reversion.half_life if reversion else None,
+        ou_mean=reversion.mean if reversion else None,
         bars=len(candles),
     )
 

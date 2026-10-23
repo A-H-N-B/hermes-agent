@@ -74,6 +74,16 @@
               pasar lebih ramai dari biasanya, SL mudah tersentuh.</li>
             <li><b>Kondisi pasar</b>: tren kuat / sideways / sangat volatil / normal, dari
               efficiency ratio, eksponen Hurst, dan ADX (ambangnya diuji pada pasar acak).</li>
+            <li><b>Ekor (α)</b>: seberapa sering lonjakan ekstrem terjadi (ekonofisika: kebanyakan
+              pasar α ≈ 3). Makin kecil α, makin sering SL tersapu satu lonjakan. ν = ekor yang
+              dipakai simulasi peluang.</li>
+            <li><b>Keteraturan</b>: entropi permutasi; 1 = seacak lempar koin. "Ada pola berulang"
+              hanya muncul bila hampir mustahil terjadi pada data acak.</li>
+            <li><b>Multifraktal (Δh)</b>: dari MF-DFA; besar = gerak kecil dan besar berperilaku
+              berbeda, pasar bergejolak dan rawan lonjakan.</li>
+            <li><b>Mean reversion</b>: persamaan Langevin / Ornstein-Uhlenbeck; "nyata" bila lolos
+              uji Dickey-Fuller (salah alarm 5% di pasar acak). Half-life = berapa candle untuk
+              kembali separuh jalan ke level itu.</li>
           </ul>
         </details>
         <details class="more"><summary>Lihat tabel lengkap</summary>
@@ -115,6 +125,32 @@
           </table>
         </div>
         <p id="fund-missing" class="muted"></p>
+      </article>
+      <article class="card">
+        <h2>Ekonofisika pasar</h2>
+        <p class="muted">Fisika statistik atas data menit emas dan pasar terkait, dihitung ulang
+          tiap menit. Setiap ukuran sudah diuji pada data acak supaya tidak "melihat pola" di
+          derau. Bahan pertimbangan komite AI, bukan sinyal sendiri.</p>
+        <div id="physics-rows" class="read-list"></div>
+        <details class="more"><summary>Arti tiap ukuran</summary>
+          <ul class="notes glossary">
+            <li><b>Badai susulan (Hawkes)</b>: seperti gempa susulan, satu gerak besar memicu gerak
+              besar berikutnya. Intensitas ≥ 2× rata-rata = sedang berlangsung.</li>
+            <li><b>Endogenitas</b>: bagian gerak besar yang dipicu pasar sendiri, bukan berita
+              baru (rasio percabangan proses Hawkes).</li>
+            <li><b>Pemimpin emas</b>: pasar yang geraknya terbukti mendahului emas ±1 menit
+              (transfer entropy, diuji terhadap data yang diacak). Arah tersirat = ke mana emas
+              cenderung menyusul.</li>
+            <li><b>Faktor bersama (RMT)</b>: teori matriks acak; faktor di atas batas
+              Marchenko-Pastur adalah gerak bersama yang nyata, sisanya derau.</li>
+            <li><b>Risiko gelembung (LPPLS)</b>: model Sornette untuk kenaikan yang makin cepat
+              sebelum koreksi; persentase jendela waktu yang menunjukkan pola itu. Harian dan
+              eksperimental: peringatan, bukan sinyal.</li>
+            <li><b>Pembelajaran mesin</b>: model meta-labeling belajar dari setup masa lalu di
+              chart yang sama; baru dipakai bila terbukti lebih baik dari tebakan dasar
+              (uji walk-forward).</li>
+          </ul>
+        </details>
       </article>
       <article class="card">
         <h2>Berita terbaru</h2>
