@@ -273,6 +273,7 @@ sources:
     url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${YEAR}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${YEAR}&page&_format=csv
     tier: 3
     poll_seconds: 21600
+    timeout_seconds: 90 # the CSV is built on request and often takes 15-60 s
     reliability: 1.0
     enabled: true
     official: true
@@ -287,6 +288,7 @@ sources:
     url: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${YEAR}/all?type=daily_treasury_real_yield_curve&field_tdr_date_value=${YEAR}&page&_format=csv
     tier: 3
     poll_seconds: 21600
+    timeout_seconds: 90 # the CSV is built on request and often takes 15-60 s
     reliability: 1.0
     enabled: true
     official: true

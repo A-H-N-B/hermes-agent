@@ -391,3 +391,23 @@ async def test_websocket_lag_uses_the_exchange_event_time() -> None:
     assert result.ws_lag is not None
     assert result.ws_lag.p50_seconds is not None
     assert 0.0 <= result.ws_lag.p50_seconds < 5.0
+
+
+async def test_a_source_that_builds_its_file_on_request_is_waited_for_longer() -> None:
+    waited: dict[str, float] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        waited[request.url.host] = request.extensions["timeout"]["read"]
+        return httpx.Response(200, content=rss(("x", T0)))
+
+    slow = source(id="slow", url="https://slow.example.com/feed", timeout_seconds=90)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), follow_redirects=True, timeout=15
+    ) as client:
+        for checked in (slow, source()):
+            await check_http_source(
+                client, checked, {}, robots=RobotsCache("ua"), clock=FakeClock(T0)
+            )
+    assert waited == {"slow.example.com": 90, "news.example.com": 15}

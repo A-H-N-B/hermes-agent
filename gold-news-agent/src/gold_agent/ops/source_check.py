@@ -290,7 +290,7 @@ async def check_http_source(
 
     started = time.perf_counter()
     try:
-        response = await client.get(url)
+        response = await client.get(url, timeout=source.timeout_seconds or client.timeout)
     except httpx.HTTPError as exc:
         return SourceCheck(
             **base, status="fail", reason=redact(describe_error(exc)), robots=robots_state

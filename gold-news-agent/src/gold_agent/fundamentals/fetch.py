@@ -53,7 +53,10 @@ class FundamentalsFetcher:
             self._fetched[source_id] = now
 
     async def _get(self, client: httpx.AsyncClient, source: Source, year: int | None = None) -> Any:
-        response = await client.get(expand_url(source.url or "", self._env, year=year))
+        response = await client.get(
+            expand_url(source.url or "", self._env, year=year),
+            timeout=source.timeout_seconds or client.timeout,
+        )
         response.raise_for_status()
         return response
 

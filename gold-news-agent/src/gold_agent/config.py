@@ -106,6 +106,8 @@ class Source(StrictModel):
     requires_env: tuple[str, ...] = ()
     official: bool = False
     silence_alert_minutes: int | None = None
+    # A server that builds its file on request (Treasury) can take longer than http.timeout.
+    timeout_seconds: float | None = Field(default=None, gt=0)
     tos_url: str | None = None
     tos_note: str
 
