@@ -214,8 +214,11 @@ Data FRED harian (bukan real-time). Sistem memakainya untuk konteks yield 10 tah
 1. Pasang terminal MT5 dari broker-mu (versi 64-bit), lalu login. **Gunakan akun demo dulu**.
    Sistem ini tidak pernah mengirim order, tetapi tetap jangan mencampur eksperimen dengan
    akun uang sungguhan.
-2. Catat tiga hal dari jendela login MT5: nomor login, password, dan nama server
-   (mis. `NamaBroker-Demo`). Tulis di `.env`:
+2. Biasanya tidak perlu apa-apa lagi: agent memakai akun yang sedang login di terminal dan tidak
+   pernah menggantinya. Hanya bila MT5 sering terbuka tanpa login, catat tiga hal dari jendela
+   login MT5: nomor login, password, dan nama server **persis** (akun demo `NamaBroker-Demo`,
+   akun real biasanya `NamaBroker-Live`/`-Real`; server yang salah = login ditolak). Tulis di
+   `.env`:
    ```
    MT5_LOGIN=12345678
    MT5_PASSWORD=passwordmu

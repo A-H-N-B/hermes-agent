@@ -125,12 +125,22 @@ def test_mt5_offset_detection_and_conversion() -> None:
 class FakeMt5:
     TIMEFRAME_M1 = 1
 
-    def __init__(self, clock: ManualClock) -> None:
+    def __init__(self, clock: ManualClock, account: int | None = 777) -> None:
         self.clock = clock
         self.server_offset = 3 * 3600
         self.quote_epoch = clock.now().timestamp() + self.server_offset
+        self.account = account
+        self.logins: list[tuple[int, str | None]] = []
 
     def initialize(self, **_: Any) -> bool:
+        return True
+
+    def account_info(self) -> Any:
+        return SimpleNamespace(login=self.account) if self.account else None
+
+    def login(self, login: int, *, password: str | None, server: str | None) -> bool:
+        self.logins.append((login, server))
+        self.account = login
         return True
 
     def symbol_select(self, *_: Any) -> bool:
@@ -468,3 +478,20 @@ async def test_a_feed_switch_reloads_history_instead_of_mixing_two_instruments(
         assert max(bar.high for bar in bars) < 2690  # no PAXG bar left to fake a jump
     finally:
         await context.close()
+
+
+def test_mt5_never_switches_the_account_the_user_is_logged_into() -> None:
+    secret = "-".join(["not", "real"])
+    clock = ManualClock(utc("2026-10-13T12:30"))
+    logged_in = FakeMt5(clock, account=777)
+    adapter = Mt5Adapter(
+        symbol="XAUUSD", clock=clock, module=logged_in, login=999, password=secret, server="B-Demo"
+    )
+    adapter.read_tick()
+    assert logged_in.logins == [] and logged_in.account == 777
+    logged_out = FakeMt5(clock, account=None)  # a terminal with no account: .env logs in
+    adapter = Mt5Adapter(
+        symbol="XAUUSD", clock=clock, module=logged_out, login=999, password=secret, server="B-Live"
+    )
+    adapter.read_tick()
+    assert logged_out.logins == [(999, "B-Live")]
