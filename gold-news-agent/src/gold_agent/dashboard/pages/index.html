@@ -36,6 +36,18 @@
         <details class="more"><summary>Lihat detail (alasan, semua jadwal, skenario)</summary>
           <div id="timing-details"></div></details>
       </article>
+      <article class="card chat">
+        <h2>Tanya AI <span class="muted">(Opus 5.5 · dijawab dari data alat ini saat ini)</span></h2>
+        <div id="chat-log" class="chat-log" aria-live="polite">
+          <p class="muted">Contoh: "kapan aku harus buy?", "sekarang sell atau tunggu?", "kenapa belum
+            ada sinyal?"</p>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" type="text" maxlength="1000" autocomplete="off" required
+            placeholder="Tulis pertanyaan lalu tekan Enter">
+          <button type="submit" class="button">Kirim</button>
+        </form>
+      </article>
       <details id="rebase" class="card rebase" hidden>
         <summary>Harga beda dengan broker (Finex)? Samakan di sini <span id="rebase-now" class="muted"></span></summary>
         <p class="muted">Harga di sini dari token emas PAXG (Binance), bukan dari brokermu, jadi
@@ -146,7 +158,7 @@
         <h2>Ekonofisika pasar</h2>
         <p class="muted">Fisika statistik atas data menit emas dan pasar terkait, dihitung ulang
           tiap menit. Setiap ukuran sudah diuji pada data acak supaya tidak "melihat pola" di
-          derau. Bahan pertimbangan komite AI, bukan sinyal sendiri.</p>
+          derau. Bahan pertimbangan AI, bukan sinyal sendiri.</p>
         <div id="physics-rows" class="read-list"></div>
         <details class="more"><summary>Arti tiap ukuran</summary>
           <ul class="notes glossary">

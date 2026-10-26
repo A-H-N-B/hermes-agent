@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from datetime import time as dtime
@@ -27,7 +27,8 @@ from gold_agent.timeutils.sessions import WIB
 
 log = structlog.get_logger(__name__)
 
-Route = Literal["triage", "triage_high", "deep", "outlook", "brief", "desk"]
+Route = Literal["triage", "triage_high", "deep", "outlook", "brief", "desk", "chat"]
+Turn = tuple[Literal["user", "assistant"], str]  # one chat message: who, what
 BudgetState = Literal["ok", "reserve", "exhausted"]  # reserve: only priority calls still run
 BUDGET_RANK: dict[BudgetState, int] = {"ok": 0, "reserve": 1, "exhausted": 2}
 IN_FLIGHT = "in flight (no result recorded)"
@@ -268,25 +269,81 @@ class LlmClient:
         priority: bool = False,
     ) -> LlmResult[T]:
         """`priority`: the signal decision or high-impact news, which may use the reserve."""
+
+        def parsed(response: Any) -> T:
+            value = getattr(response, "parsed_output", None)
+            if value is None:
+                raise LlmFailed("output kosong / tidak sesuai skema", invalid_output=True)
+            return value
+
+        return await self._call(
+            route,
+            system=system,
+            turns=[("user", user)],
+            extra={"output_format": schema},
+            extract=parsed,
+            ref_id=ref_id,
+            priority=priority,
+        )
+
+    async def text(
+        self,
+        route: Route,
+        *,
+        system: str,
+        turns: Sequence[Turn],
+        ref_id: str | None = None,
+        priority: bool = False,
+    ) -> LlmResult[str]:
+        """A free-text answer to a conversation (oldest turn first, the last one the user's)."""
+
+        def written(response: Any) -> str:
+            blocks = getattr(response, "content", None) or []
+            answer = "".join(
+                str(getattr(block, "text", "")) for block in blocks if block.type == "text"
+            ).strip()
+            if not answer:
+                raise LlmFailed("jawaban kosong", invalid_output=True)
+            return answer
+
+        return await self._call(
+            route,
+            system=system,
+            turns=turns,
+            extra={},
+            extract=written,
+            ref_id=ref_id,
+            priority=priority,
+        )
+
+    async def _call[V](
+        self,
+        route: Route,
+        *,
+        system: str,
+        turns: Sequence[Turn],
+        extra: dict[str, Any],
+        extract: Callable[[Any], V],
+        ref_id: str | None,
+        priority: bool,
+    ) -> LlmResult[V]:
         if not self._settings.llm.enabled:
             raise LlmUnavailable("LLM dimatikan (mode rules-only)")
         if self._client is None:
             raise LlmUnavailable("ANTHROPIC_API_KEY belum diisi")
         if self.breaker.is_open:
             raise LlmUnavailable("circuit breaker terbuka setelah kegagalan beruntun")
-        hold = await self._admit(
-            route, priority=priority, prompt_chars=len(system) + len(user), ref_id=ref_id
-        )
+        chars = len(system) + sum(len(text) for _, text in turns)
+        hold = await self._admit(route, priority=priority, prompt_chars=chars, ref_id=ref_id)
 
         config = self.route(route)
         request: dict[str, Any] = {
             "model": config.model,
             "max_tokens": config.max_tokens,
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            "messages": [{"role": "user", "content": user}],
-            "output_format": schema,
+            "messages": [{"role": role, "content": text} for role, text in turns],
             "output_config": {"effort": config.effort},
-        }
+        } | extra
         if config.thinking == "disabled":
             request["thinking"] = {"type": "disabled"}
         if self._settings.llm.fallbacks == "default":
@@ -297,14 +354,15 @@ class LlmClient:
         usage: Any = None
         try:
             client = self._client.with_options(timeout=config.timeout_seconds, max_retries=0)
-            response = await client.beta.messages.parse(**request)
+            messages = client.beta.messages
+            response = await (messages.parse if "output_format" in request else messages.create)(
+                **request
+            )
             usage = getattr(response, "usage", None)
             served = getattr(response, "model", None) or config.model
             if getattr(response, "stop_reason", None) == "refusal":  # the whole chain declined
                 raise LlmFailed("model menolak (refusal)")
-            parsed = getattr(response, "parsed_output", None)
-            if parsed is None:
-                raise LlmFailed("output kosong / tidak sesuai skema", invalid_output=True)
+            value = extract(response)
         except (pydantic.ValidationError, ValueError) as exc:
             latency = (time.perf_counter() - started) * 1000
             await self._record(
@@ -353,7 +411,7 @@ class LlmClient:
             log.info("llm.fallback_served", route=route, requested=config.model, served=served)
         self.breaker.success()
         return LlmResult(
-            value=parsed,
+            value=value,
             model=served,
             latency_ms=round(latency, 1),
             cost_usd=cost,

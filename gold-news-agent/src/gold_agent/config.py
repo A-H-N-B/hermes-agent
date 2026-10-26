@@ -373,7 +373,7 @@ class ModelPrice(StrictModel):
     cache_read: float = Field(ge=0)
 
 
-ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk")
+ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk", "chat")
 
 # Models on which `thinking: {type: "disabled"}` is a 400 at every effort level: thinking is
 # always on and `effort` is the only control.
@@ -394,6 +394,8 @@ class LlmSettings(StrictModel):
     desk: LlmRoute  # each vote on a signal's final BUY/SELL/WAIT + timeframe
     desk_votes: int = Field(ge=1, le=5)  # independent answers per review, in parallel
     desk_reviews_per_day: int = Field(ge=0)
+    chat: LlmRoute  # answers to the user's questions (dashboard chat, Telegram /tanya)
+    chat_per_day: int = Field(ge=0)  # questions answered by the AI per WIB day, per process
     # Server-side refusal fallback: if a safety classifier declines a request (false positives
     # happen on benign news), the API re-runs it on the model Anthropic recommends for that
     # category instead of failing. "off" sends requests without it.

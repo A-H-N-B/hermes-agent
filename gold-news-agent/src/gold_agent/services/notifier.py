@@ -1,6 +1,7 @@
 """Notifier service: bus events -> notification policy -> dispatcher -> Telegram, plus the bot's
-commands. Without TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID it still records every notification (the
-dashboard shows them) and says so once in the log."""
+commands and the chat (questions answered from the newest market context and engine state, kept
+from the bus). Without TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID it still records every notification
+(the dashboard shows them) and says so once in the log."""
 
 from __future__ import annotations
 
@@ -12,16 +13,20 @@ from typing import Any
 
 import structlog
 
+from gold_agent.analysis.llm_client import LlmClient
+from gold_agent.assistant.chat import ChatAssistant, ChatFacts, gather_facts
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
     STREAM_ALERTS,
     STREAM_ANALYSES,
+    STREAM_CONTEXT,
     STREAM_EVENTS,
     STREAM_NOTIFY,
     STREAM_OUTLOOK,
     STREAM_PLAYBOOKS,
     STREAM_RELEASES,
     STREAM_SIGNALS,
+    STREAM_STATE,
     Handler,
     Message,
     StartAt,
@@ -31,11 +36,13 @@ from gold_agent.models import (
     Alert,
     Analysis,
     CalendarEvent,
+    MarketContext,
     Notification,
     Outlook,
     Playbook,
     ReleaseReading,
     Signal,
+    SignalState,
 )
 from gold_agent.notify.commands import BotCommands
 from gold_agent.notify.dispatcher import Dispatcher, Sender
@@ -55,7 +62,14 @@ FLUSH_SECONDS = 15.0
 class NotifierService:
     name = "notifier"
 
-    def __init__(self, ctx: AppContext, *, sender: Sender | None = None, poll: bool = True) -> None:
+    def __init__(
+        self,
+        ctx: AppContext,
+        *,
+        sender: Sender | None = None,
+        poll: bool = True,
+        anthropic_client: Any | None = None,
+    ) -> None:
         self._ctx = ctx
         token = ctx.env.get("TELEGRAM_BOT_TOKEN")
         chat_id = ctx.env.get("TELEGRAM_CHAT_ID")
@@ -67,11 +81,22 @@ class NotifierService:
             ctx.settings, repo=ctx.notify, ops=ctx.ops, clock=ctx.clock, sender=sender
         )
         self.policy = NotificationPolicy(ctx.settings)
+        llm = LlmClient(
+            ctx.settings,
+            api_key=ctx.env.get("ANTHROPIC_API_KEY"),
+            ops=ctx.ops,
+            clock=ctx.clock,
+            client=anthropic_client,
+        )
+        self.last_context: dict[str, Any] | None = None  # pushed every second
+        self.last_state: dict[str, Any] | None = None
         self.commands = BotCommands(
             ctx,
             self.dispatcher,
             admin_ids=parse_admin_ids(ctx.env.get("TELEGRAM_ADMIN_USER_IDS")),
             chat_id=chat_id,
+            assistant=ChatAssistant(ctx.settings, llm, ctx.ops),
+            facts=self.chat_facts,
         )
         if self._app is not None:
             add_commands(self._app, self.commands)
@@ -83,6 +108,17 @@ class NotifierService:
                 "notifier.no_telegram",
                 hint="set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env; recording only",
             )
+
+    async def chat_facts(self) -> ChatFacts:
+        context = MarketContext.model_validate(self.last_context) if self.last_context else None
+        state = SignalState.model_validate(self.last_state) if self.last_state else None
+        return await gather_facts(self._ctx, context=context, state=state)
+
+    async def handle_live(self, message: Message) -> None:
+        if message.stream == STREAM_CONTEXT:
+            self.last_context = message.data
+        else:
+            self.last_state = message.data
 
     async def _next_event(self) -> CalendarEvent | None:
         now = self._ctx.clock.now()
@@ -187,6 +223,8 @@ class NotifierService:
             (STREAM_PLAYBOOKS, "notifier-playbooks", self.handle_playbook, "earliest"),
             (STREAM_NOTIFY, "notifier-outbox", self.handle_outbox, "earliest"),
             (STREAM_EVENTS, "notifier-events", self.handle_event, "latest"),
+            (STREAM_CONTEXT, "notifier-context", self.handle_live, "latest"),
+            (STREAM_STATE, "notifier-state", self.handle_live, "latest"),
         ]
         tasks = [
             asyncio.create_task(

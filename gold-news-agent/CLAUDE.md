@@ -16,7 +16,7 @@ LLM triage → signal engine → Telegram + dashboard, with paper-trading evalua
 ```bash
 uv sync                                              # create/refresh .venv (Python 3.12)
 uv run pytest -q                                     # tests
-uv run pytest -q -m slow                             # + whole-day replay E2E (~4 min)
+uv run pytest -q -m slow                             # + whole-day replay E2E (~14 min)
 uv run ruff check . && uv run ruff format --check .  # lint/format
 uv run pyright                                       # strict type check
 uv run gold-agent verify-sources                     # one verification pass -> docs/source_report.md
@@ -163,7 +163,8 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   high-impact release falls inside the horizon. Not a calibrated probability. Live indicators
   start unticked (created on tick, removed with their pane on untick; choice kept in
   localStorage); the board shows a SELL↔BUY gauge of the engine score vs entry_threshold and
-  refreshes on every context push (at most every 5 s; 30 s fallback without the WebSocket); a mirrored-market test pins BUY/SELL symmetry of the forecast.
+  refreshes on every context push (every second since 26 Oct; 30 s fallback without the
+  WebSocket); a mirrored-market test pins BUY/SELL symmetry of the forecast.
   Automatic timeframe (`trading.timeframe`, `signals/timeframe.py`): every evaluation picks the
   chart a trade is sized, timed and valid on from M1..H1: usable = EMA20 + ATR14 present and
   spread / (1.2 ATR) <= `max_cost_ratio`; the usable one with the best walk-forward accuracy in
@@ -176,13 +177,13 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   bars + `signal_states` scores via `SignalRepo.scores_between`, Wilson 95%, news-only and
   chart-only on the same bars, by session) loaded by `signals/accuracy.py` (cached 1 h, numeric
   part in a thread); the forecast and the per-TF vote moved to `signals/forecast.py` and
-  `market/reads.py`. Opus decision desk (`signals/desk.py`, route `llm.desk`, effort high,
-  prompt `prompts/desk_system.md` + driver KB): the engine's candidate goes to Opus in the
+  `market/reads.py`. Opus decision desk (`signals/desk.py`, route `llm.desk`, effort low since
+  26 Oct, prompt `prompts/desk_system.md` + driver KB): the engine's candidate goes to Opus in the
   background (state WAIT "menunggu keputusan AI"); the next evaluation applies the verdict on
   fresh prices. Guardrails: approve or WAIT only (a flip is held as WAIT), timeframe must be
   usable (else the selector's), levels always the engine's (re-evaluated on Opus's chart). A
-  WAIT stands 10 min unless |S| moves 0.10 or the side changes; approvals live 2 min; at most
-  `llm.desk_reviews_per_day`; no AI (disabled, outage, cap) = engine alone with
+  WAIT stands 3 min unless |S| moves 0.10 or the side or setup type changes; approvals live
+  2 min; at most `llm.desk_reviews_per_day`; no AI (disabled, outage, cap) = engine alone with
   `SignalReview(model=None, note=...)`. Reviews logged in kv `desk_reviews`; Performa compares
   approved vs held-back candidates by first touch (TP1 vs SL) on M1 bars.
   Each review is `llm.desk_votes` (3) independent answers in parallel, counted by `desk.tally`
@@ -225,9 +226,10 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   (Dirichlet, 20 pseudo-setups) with the replayed record of past setups (`signals/setups.py`,
   one trade at a time, stop first on a two-sided bar); EV in R; the EV gate waits when the whole
   95% EV band is negative with >= `ev_gate_min_setups` setups. `Signal.odds` shows in Telegram,
-  on Live and in the brief. Committee: route `desk` = Fable 5.1 (weight 2) + `desk_second` =
-  2x Opus 5.5; a trade needs Fable plus one Opus, or both Opus when Fable fails;
-  `desk_reviews_per_day` 30 (about $0.45 a review). Dashboard: per-timeframe detail cards with a
+  on Live and in the brief. Desk since 26 Oct: `desk_votes` (3) Opus 5.5 answers at effort
+  low (25 s timeout), a strict majority of the answers that came; Fable 5.1 and `desk_second`
+  removed (too slow: big moves were gone before the answer); `desk_reviews_per_day` 60 (about
+  $0.15 a review). Dashboard: per-timeframe detail cards with a
   glossary and the "Pasar penggerak emas" card (related markets, macro parts, fundamentals).
   Windows: the updater tests the official fundamentals sources and marks the passing ones
   verified (step 6/7); the "Perbarui" shortcut runs the newest updater (fetched first), so a
@@ -253,8 +255,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   Real-time: `AccuracyBook` on the wall clock never makes a caller wait (a stale or missing
   result starts a background rebuild, one timeframe at a time, and the caller gets what there
   is; replays and tests compute in line); the dashboard's book skips meta-labeling
-  (`learn=False`). The engine state goes on the bus every evaluation (`publish_state_seconds` 5,
-  stored only on change) and the dashboard serves the newest pushed one (`LiveHub.last_state`).
+  (`learn=False`). The engine state goes on the bus every evaluation (`publish_state_seconds`
+  1, stored on a decision change, a wording change at most once a minute) and the dashboard
+  serves the newest pushed one (`LiveHub.last_state`).
   Speed: minute series (`market/minutes.py`, shared by the dollar tracker and the related
   markets) keep numpy arrays rebuilt only when a minute is added, so a context costs a few ms
   instead of a few hundred; `market/physics.py` returns arrays, not per-minute dicts. One
@@ -269,5 +272,31 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   account and fails with "belum login" otherwise; `FailoverAdapter.problem` says why no ticks
   come (context note "sumber harga: ...", the engine's WAIT reason, the Live price line), and
   when every feed is down it goes back to the primary at once instead of after 15 min.
+  Fast moves (26 Oct, ADR-024..028): the user missed big rises and falls after the switch to
+  Fable. Everything runs every second (`infra.context_interval_seconds`, `evaluate_seconds`,
+  `publish_state_seconds` = 1): `ContextCache` recomputes a chart state only on a new bar or
+  per `STATE_REFRESH` (close always current), odds Monte Carlo in volatility units with an LRU
+  cache, dashboard bar reads cached per minute, the Live card and gauge follow the pushed state.
+  Momentum impulses (`market/impulse.py`, `signal_engine.impulse`): triggers per minute from
+  complete M1 bars (1/3/5/10-min move >= z 3 x RMS per-minute sigma x sqrt(k) AND a break of the
+  last 30-min range), checked against the price every second; an impulse becomes a candidate
+  ("impulse" setup, sized on M5, entry <= 1.5 ATR(M5) past where it began, replacing the EMA20
+  rule on its side) unless the composite leans against it by > `max_against` or strong news
+  opposes it. `signals/impulses.py` replays the last 7 days of impulses on stored M1 (intrabar
+  trigger, stop first) into a record (accuracy book key "impulses") that blends into the odds
+  and the EV gate; tests pin ~50% on random walks and a real edge on momentum data. Telegram
+  "⚡ Momentum" line, Live impulse banner, browser notification + chime per new BUY/SELL
+  ("🔕 Notifikasi" button). Proxy re-base (`market/rebase.py`): the broker bid typed on Live or
+  `/finex <bid>` (bus `price.calibrate`, answer in kv) shifts ticks, in-memory and stored bars
+  and minute series of the proxy feed by one offset (kv `price_offset`); refused for a broker
+  feed or during an active signal; `/finex reset`. Tanya AI (`assistant/chat.py`, route
+  `llm.chat` Opus 5.5 effort low, prompt `prompts/chat_system.md`): the program writes one brief
+  (price + re-base, engine state, active signal, impulse, the timing view, charts, events, news,
+  related markets, fundamentals), `LlmClient.text()` (messages.create, shares `_call` with
+  `structured()`), answers made plain text; dashboard POST `/api/chat` (same-origin JSON),
+  Telegram `/tanya` or any plain admin message (`block=False`, per-user thread of 6 turns);
+  `llm.chat_per_day` (60) counted in `llm_usage` (shared by dashboard and Telegram); without AI
+  the program's own summary answers. Pages and static files are sent `Cache-Control: no-cache`
+  so an update shows without a hard refresh.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

@@ -152,19 +152,15 @@ lewat Claude Console, dengan saldo (credit) sendiri.
 
 Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): triage tiap berita,
 analisis mendalam, outlook per jam, dan ringkasan harian/mingguan memakai **Claude Opus 5.5**,
-dengan tingkat `effort` berbeda per tugas. Keputusan akhir setiap sinyal dibuat komite tiga
-suara: **Claude Fable 5.1** (model Anthropic paling mampu, harganya 2,5× Opus, jadi hanya dipakai
-di sini; suaranya dihitung 2×) dan dua Opus 5.5. Biayanya ±$0,02 per berita biasa dan ±$0,45
-per keputusan sinyal. Di hari yang sangat ramai biaya tanpa rem bisa ±$23, jadi
-`budget.llm_daily_usd` (bawaan $20/hari) menahannya: setelah $15 berita biasa memakai aturan
-sampai pukul 00:00 WIB, sedangkan keputusan sinyal dan berita berdampak tinggi tetap memakai AI
-sampai $20. Biaya nyata tercatat di tabel `llm_usage` dan terlihat di header dashboard, laporan
-harian, dan `/stats`.
-
-Fable 5.1 mewajibkan Anthropic menyimpan data permintaan 30 hari (aturan standar akun biasa;
-hanya organisasi dengan *zero data retention* yang ditolak). Isi permintaan program ini hanya
-berita publik dan angka pasar, tanpa data akun atau rahasia. Bila Fable tidak bisa dipakai
-akunmu, keputusan tetap jalan dengan dua Opus yang harus sepakat.
+dengan tingkat `effort` berbeda per tugas. Keputusan akhir setiap sinyal dijawab tiga suara
+Opus 5.5 bersamaan (effort low, dalam hitungan detik; mayoritas menentukan), dan pertanyaan di
+"Tanya AI" juga dijawab Opus 5.5. Biayanya ±$0,02 per berita biasa, ±$0,15 per keputusan sinyal,
+dan ±$0,05 per pertanyaan. Di hari yang sangat ramai biaya tanpa rem bisa ±$24, jadi
+`budget.llm_daily_usd` (bawaan $20/hari) menahannya: setelah $15 berita biasa, outlook, dan Tanya
+AI memakai jawaban program sampai pukul 00:00 WIB, sedangkan keputusan sinyal dan berita
+berdampak tinggi tetap memakai AI sampai $20. Biaya nyata tercatat di tabel `llm_usage` dan
+terlihat di header dashboard, laporan harian, dan `/stats`. Isi permintaan program ini hanya
+berita publik dan angka pasar, tanpa data akun atau rahasia.
 
 **Memantau pemakaian:** Console → **Usage** menampilkan biaya per hari.
 **Bila key bocor:** Console → API Keys → klik key itu → **Delete** (atau *Disable*), buat yang

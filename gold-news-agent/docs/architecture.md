@@ -9,10 +9,12 @@ persetujuan di akhir Fase 0. Diagram alur utama ada di `PROMPT_XAUUSD_NEWS_AGENT
 collectors (async, 1 per sumber) ─► normalizer ─► dedup/cluster ─► Redis Stream news.raw
       ─► prefilter (regex, <10 ms) ─┬─► fast path: parser angka rilis + playbook ─► FLASH
                                     └─► LLM triage (Opus 5.5, effort low) ─► deep analysis (Opus 5.5, effort high, impact ≥ 3)
-market context (tick, candle, DXY, yield, teknikal, kalender) ─► signal engine ─► Telegram / dashboard / paper tracker
+market context tiap detik (ADR-026: tick, candle, DXY, yield, teknikal, kalender) ─► signal engine ─► desk AI (ADR-024) ─► Telegram / dashboard / paper tracker
    ├─ pasar penggerak dari MT5 (ADR-018) + fundamental harian (ADR-019) ─► skor makro M
-   ├─ statistik chart + peluang TP1/SL & EV (ADR-020) ─► gerbang EV, brief komite AI (ADR-021)
-   └─ ekonofisika per chart & pasar (ADR-022) + meta-labeling (ADR-023) ─► peluang, brief, dashboard
+   ├─ statistik chart + peluang TP1/SL & EV (ADR-020) ─► gerbang EV, brief desk AI
+   ├─ ekonofisika per chart & pasar (ADR-022) + meta-labeling (ADR-023) ─► peluang, brief, dashboard
+   └─ impuls momentum (ADR-025) ─► kandidat BUY/SELL di awal gerak besar
+harga proxy disamakan ke broker (ADR-027) · Tanya AI di dashboard dan Telegram (ADR-028)
 scheduler: kalender, playbook T-60, outlook per jam, brief sesi, laporan
 ```
 
@@ -327,9 +329,12 @@ Indikator klasik (EMA, RSI, BB) tidak mengatakan apakah sebuah gerak lebih dari 
 - **EV dalam R** = TP1 × (porsi TP1 × R1 + sisa × R2 × peluang runner) − SL − spread/risiko.
   **Gerbang EV**: bila seluruh pita 95 % EV negatif dengan ≥ `signal_engine.ev_gate_min_setups`
   (30) setup tercatat, sinyal menunggu ("setup serupa di M15 historis rugi"). Peluang dan EV
-  tampil di sinyal Telegram, kartu Live, dan brief komite AI.
+  tampil di sinyal Telegram, kartu Live, dan brief desk AI.
 
-### ADR-021 Komite keputusan dengan Claude Fable 5.1 — Diterapkan
+### ADR-021 Komite keputusan dengan Claude Fable 5.1 — Diganti oleh ADR-024
+
+Diganti 26 Okt 2026: Fable 5.1 menjawab terlalu lama untuk gerak cepat, sehingga sinyal datang
+setelah harga pergi. Dicatat di sini sebagai riwayat.
 
 - Keputusan akhir (setuju atau TUNGGU) dijawab tiga suara paralel: **Fable 5.1** (`llm.desk`,
   model Anthropic paling mampu, $10/$50 per juta token) dan dua **Opus 5.5** (`llm.desk_second`).
@@ -350,10 +355,10 @@ Indikator klasik (EMA, RSI, BB) tidak mengatakan apakah sebuah gerak lebih dari 
 
 ### ADR-022 Ekonofisika: fisika statistik atas data harga — Diterapkan
 
-Pengguna meminta perhitungan matematika tingkat tinggi dan ekonofisika untuk keputusan Fable.
+Pengguna meminta perhitungan matematika tingkat tinggi dan ekonofisika untuk keputusan AI.
 Perhitungannya dikerjakan **program**, bukan model bahasa: angka dari kode presisi penuh,
 deterministik (replay identik), dan bisa diuji, sedangkan model bahasa yang menghitung di
-kepalanya lebih mudah keliru dan jauh lebih mahal. Fable dan Opus menerima hasilnya di brief dan
+kepalanya lebih mudah keliru dan jauh lebih mahal. Desk AI menerima hasilnya di brief dan
 wajib menimbangnya (aturan 5 di `prompts/desk_system.md`). Setiap ukuran diuji pada data yang
 parameternya diketahui dan dikalibrasi pada data acak (`tests/test_econophysics.py`):
 
@@ -405,18 +410,93 @@ parameternya diketahui dan dikalibrasi pada data acak (`tests/test_econophysics.
   terberat). Butuh minimal 30 setup yang selesai, jadi di minggu-minggu awal masih "belum cukup
   setup".
 
+### ADR-024 Desk cepat: tiga suara Opus 5.5 — Diterapkan
+
+- Pengguna: sejak memakai Fable, gerak naik dan turun besar sering terlewat. Keputusan akhir kini
+  dijawab tiga suara **Opus 5.5** paralel (`llm.desk`, `llm.desk_votes` 3) dengan effort low,
+  timeout 25 detik, `max_tokens` 4096: jawaban dalam hitungan detik, bukan menit.
+- Trade lolos bila lebih dari separuh jawaban yang datang setuju (seri = TUNGGU); jawaban yang
+  tidak datang (timeout, gangguan) tidak dihitung. Chart = pilihan terbanyak suara yang setuju,
+  seri ke pilihan selektor.
+- TUNGGU dari AI bertahan **3 menit** (dulu 10) dan langsung ditanya ulang bila jenis setup
+  berubah (mis. dari skor berita ke impuls), jadi gerak baru tidak tertahan keputusan lama.
+- Biaya ±$0,15 per review; `llm.desk_reviews_per_day` 60, jadi paling banyak ±$9 sehari. Rute
+  `desk_second` dan harga Fable dihapus dari config.
+
+### ADR-025 Impuls momentum: gerak besar ditangkap di awalnya — Diterapkan
+
+Skor gabungan berita/makro/teknikal sengaja lambat; tanpa berita besar ia jarang lewat ambang,
+sehingga gerak teknikal yang cepat dan besar terlewat. `market/impulse.py` menambahkan jalur
+kedua yang diuji terhadap data acak:
+
+- Setiap menit, dari bar M1 yang sudah selesai: ambang naik/turun = gerak 1, 3, 5, atau 10 menit
+  ≥ `signal_engine.impulse.z` (3) × σ per menit × √menit (σ = RMS gerak per menit 120 menit
+  terakhir) **dan** tembus high/low 30 menit terakhir. Setiap detik harga dibandingkan dengan
+  ambang itu, jadi impuls terdeteksi di detik harga melewatinya, bukan di akhir candle.
+- Impuls menjadi kandidat bila skor gabungan tidak melawannya lebih dari `max_against` (0,15)
+  dan tidak ada berita kuat yang berlawanan. Ukuran SL/TP di M5; masuk hanya bila harga belum
+  lebih dari `max_extension_atr` (1,5) ATR M5 dari titik mulai impuls (aturan "tunggu kembali ke
+  EMA20" diganti aturan ini di sisi impuls, supaya tidak menunggu pullback yang tidak datang).
+- Jujur soal akurasi: `signals/impulses.py` memutar ulang semua impuls 7 hari terakhir pada M1
+  tersimpan (masuk di harga pemicu, atau di harga buka bila bar dibuka melewatinya; SL/TP sama
+  dengan live; stop dulu bila keduanya tersentuh di bar yang sama). Hasilnya dicampur ke peluang TP1/SL dan gerbang EV menahan impuls yang
+  historisnya rugi. Pada random walk catatannya ±50 % (tidak ada keunggulan, test menjaganya);
+  pada data dengan momentum nyata ±70 %.
+- Desk AI tetap memutuskan akhir (aturan 6 di `prompts/desk_system.md`); Telegram menulis baris
+  "⚡ Momentum", dashboard menampilkan banner impuls.
+
+### ADR-026 Pembaruan tiap detik — Diterapkan
+
+- `infra.context_interval_seconds`, `signal_engine.evaluate_seconds` dan `publish_state_seconds`
+  = 1. Supaya CPU tetap ringan: state tiap timeframe dihitung ulang hanya saat bar-nya berubah
+  atau per jadwal (`STATE_REFRESH`: M5 2 detik … D1 60 detik; harga penutup selalu terkini),
+  ambang impuls dihitung sekali per menit, Monte Carlo peluang di-cache dalam satuan volatilitas
+  (2 ms, dulu 20 ms), bacaan bar dashboard di-cache per menit.
+- Halaman Live mengikuti state yang didorong lewat WebSocket tiap detik tanpa fetch ulang. State
+  disimpan ke database hanya saat keputusan berubah, perubahan kata-kata paling sering sekali per
+  menit.
+- Diukur di container build: konteks 7 ms, CPU harness live ±27 %, jeda loop ≤ 25 ms.
+
+### ADR-027 Harga proxy disamakan ke harga broker — Diterapkan
+
+- Tanpa MT5, harga berasal dari token emas PAXG (Binance), yang beda beberapa dolar dari Finex.
+  Pengguna mengetik bid yang terlihat di brokernya (halaman Live "Samakan" atau `/finex 2662.4`).
+  Market service menghitung selisih (bid broker − bid feed saat itu) dan menggeser tick, candle di
+  memori, candle tersimpan dan seri menit dengan selisih yang sama, jadi tidak ada lompatan antara
+  bar lama dan baru, dan level sinyal terbaca seperti harga broker.
+- Ditolak untuk feed broker (MT5 sudah tepat) dan saat ada sinyal aktif (level sinyal itu tidak
+  boleh bergeser). Disimpan di kv `price_offset` (bertahan setelah restart); `/finex reset`
+  kembali ke harga asli. Selisih PAXG-spot bisa bergeser pelan, jadi samakan ulang sesekali.
+- Permintaan lewat bus (`price.calibrate` di `app.events`) karena dashboard dan bot bisa berjalan
+  di proses lain; jawabannya ditunggu di kv.
+
+### ADR-028 Tanya AI — Diterapkan
+
+- Pengguna bertanya "kapan aku harus buy?" di dashboard (kartu "Tanya AI") atau Telegram (`/tanya`
+  atau pesan biasa dari admin). Program menulis semua fakta ke satu brief (`assistant/chat.py`):
+  harga dan apakah sudah disamakan ke broker, keputusan mesin dan alasannya, sinyal aktif dengan
+  level dan peluangnya, impuls, kapan klik (jam rawan rilis, jam yang condong BUY/SELL, level
+  pemicu), chart M5–H4, event, berita, pasar terkait, fundamental.
+- Opus 5.5 (`llm.chat`, effort low) menjawab dari brief itu dengan aturan
+  `prompts/chat_system.md`: jawab BUY/SELL/TUNGGU dulu dan tidak boleh melawan sistem, hanya
+  mengutip angka dari fakta, tanpa saran lot, teks biasa tanpa markdown. Teks berita di brief
+  dinetralkan (data, bukan instruksi).
+- Rute rutin (berhenti di porsi rutin budget), paling banyak `llm.chat_per_day` (60) jawaban AI
+  per hari WIB, dihitung dari `llm_usage` sehingga dashboard dan Telegram berbagi batas yang sama
+  dan restart tidak mengulangnya. Tanpa AI (mati, gangguan, batas) program menjawab dengan
+  ringkasannya sendiri, jadi pertanyaan selalu dijawab. ±$0,05 per pertanyaan.
+
 ## Estimasi biaya LLM (untuk Q4)
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):
 
 | Model | Input | Output | Tulis cache (5 mnt) | Baca cache |
 |---|---|---|---|---|
-| Fable 5.1 (suara utama komite keputusan) | $10 | $50 | $12,50 | $0,25 |
-| Opus 5.5 (semua rute lain + 2 suara komite) | $4 | $20 | $5 | $0,20 |
+| Opus 5.5 (semua rute) | $4 | $20 | $5 | $0,20 |
 | Opus 5 / Opus 4.8 (hanya saat fallback refusal) | $5 | $25 | $6,25 | $0,50 |
 
 Asumsi berikut harus **diganti dengan data `llm_usage` nyata**. Output sudah termasuk thinking,
-yang selalu aktif di Opus 5.5 dan Fable 5.1 dan makin panjang pada effort lebih tinggi:
+yang selalu aktif di Opus 5.5 dan makin panjang pada effort lebih tinggi:
 
 | Tugas | Volume/hari | Token per panggilan (cache / baru / output+thinking) | Biaya/hari |
 |---|---|---|---|
@@ -425,13 +505,13 @@ yang selalu aktif di Opus 5.5 dan Fable 5.1 dan makin panjang pada effort lebih 
 | Deep (effort high) | 40 | 0,9k / 3k / 6k | ±$5,30 |
 | Narasi outlook per jam (effort low; tabelnya tidak memakai AI) | 24 | – / 5k / 2k | ±$1,45 |
 | Brief harian (effort high) | 1 | – / 30k / 8k | ±$0,30 |
-| Keputusan akhir sinyal (komite, effort high): 1 suara Fable 5.1 | ≤ 30 review (biasanya < 10) | 2,4k / 3,5k / 5k | ±$0,29 per review |
-| … dan 2 suara Opus 5.5 paralel | 2 per review | 2,4k / 3,5k / 3,5k | ±$0,17 per review; komite **±$0,45 per review: ≤ ±$13,50 (biasanya ±$4,50)** |
+| Keputusan akhir sinyal (desk, effort low): 3 suara Opus 5.5 paralel | ≤ 60 review (biasanya 10–30) | 2,4k / 3,5k / 1,5k per suara | **±$0,15 per review: ≤ ±$9 (biasanya ±$1,50–4,50)** |
+| Tanya AI (`chat`, effort low) | ≤ 60 pertanyaan | 1,6k / 1,5k / 1,5k | ±$0,05 per pertanyaan: ≤ ±$3 |
 | Tulis ulang cache saat sepi (> 5 menit tanpa panggilan) | ±100 | 1–1,5k | ±$0,60 |
-| **Total tanpa rem, hari ramai (komite ±10 review)** | | | **±$23/hari** |
+| **Total tanpa rem, hari ramai (±30 review, ±20 pertanyaan)** | | | **±$24/hari** |
 
 Kolom cache memakai ukuran system prompt + KB yang diukur (triage ±4.400 karakter, deep ±3.300,
-desk ±8.400). Brief komite yang terisi penuh (8 berita dengan analisis mendalam, 5 timeframe
+desk ±8.400, chat ±5.200). Brief desk yang terisi penuh (8 berita dengan analisis mendalam, 5 timeframe
 dengan ekonofisikanya, 7 pasar penggerak, blok ekonofisika pasar, 8 faktor fundamental,
 peluang dan meta-labeling) diukur ±9.000 karakter. Prompt outlook dan brief harian di bawah
 minimum cache 512 token, jadi tidak di-cache.
@@ -443,16 +523,16 @@ hari itu. Catatan sementara itu diganti biaya nyata saat panggilan selesai. Kare
 tabel bersama, panggilan yang berjalan bersamaan, dari proses mana pun, tidak bisa bersama-sama
 melewati plafon. Panggilan rutin (berita biasa, narasi outlook, laporan, deep untuk dampak 3)
 berhenti di `100 − budget.priority_reserve_pct` % (bawaan 75 % = $15). Sisanya hanya untuk
-keputusan sinyal (komite AI) dan berita berdampak tinggi (rilis data, dampak ≥ 4). Setelah itu
+keputusan sinyal (desk AI) dan berita berdampak tinggi (rilis data, dampak ≥ 4). Setelah itu
 berita biasa memakai aturan sampai 00:00 WIB, dan setelah plafon tercapai sinyal keluar tanpa
 review AI (ditandai di setiap sinyal). Kedua peristiwa itu dikirim sebagai alert sekali per hari.
 Panggilan yang timeout dicatat tanpa biaya, karena klien tidak tahu apa yang ditagih server untuk
 panggilan yang ditinggalkannya. Karena itu pasang juga *spend limit* bulanan di Claude Console
 (mis. $600) sebagai pengaman kedua.
 
-Uang ekstra dipakai untuk akurasi di tiga tempat: (1) keputusan akhir dijawab komite tiga suara
-paralel, Fable 5.1 (dihitung 2×) dan dua Opus 5.5 (ADR-021), jadi satu jawaban yang kebetulan
-meleset tidak bisa mengirim trade sendirian; (2) rilis data dan berita
+Uang ekstra dipakai untuk akurasi di tiga tempat: (1) keputusan akhir dijawab tiga suara Opus 5.5
+paralel dengan mayoritas (ADR-024), jadi satu jawaban yang kebetulan meleset tidak bisa mengirim
+trade sendirian; (2) rilis data dan berita
 yang oleh aturan sudah dinilai dampak ≥ 4 di-triage dengan effort medium (`triage_high`), karena
 skor berita paling bergantung pada pembacaan itu; (3) brief desk kini memuat hasil analisis
 mendalam (arah, keyakinan, narasi, risiko) di samping arah dan keyakinan triage, jadi keputusan

@@ -10,6 +10,8 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
+from gold_agent.analysis.llm_client import Turn
+from gold_agent.assistant.chat import MAX_TURNS, ChatAssistant, ChatFacts
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_EVENTS
 from gold_agent.evaluation.performance import summarize
@@ -18,6 +20,7 @@ from gold_agent.models import CalendarEvent, Signal
 from gold_agent.notify import templates
 from gold_agent.notify.dispatcher import Dispatcher
 from gold_agent.notify.format import esc
+from gold_agent.signals.desk import model_name
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT, EngineState
 from gold_agent.timeutils.sessions import fmt_wib
 
@@ -27,6 +30,7 @@ MAX_MUTE = timedelta(hours=24)
 HELP = "\n".join(
     [
         "🤖 <b>Perintah</b>",
+        "/tanya kapan aku harus buy? — tanya AI (atau ketik pesan biasa tanpa /)",
         "/status — harga, sesi, status sinyal, event berikutnya",
         "/signal — sinyal aktif / terakhir",
         "/outlook — outlook 24 jam terbaru",
@@ -52,6 +56,7 @@ class BotCommands:
     names = (
         "start",
         "help",
+        "tanya",
         "status",
         "signal",
         "outlook",
@@ -70,14 +75,21 @@ class BotCommands:
         *,
         admin_ids: frozenset[int],
         chat_id: str | None,
+        assistant: ChatAssistant | None = None,
+        facts: Callable[[], Awaitable[ChatFacts]] | None = None,
     ) -> None:
+        """`assistant` + `facts`: the chat (assistant/chat.py) and what it answers from."""
         self._ctx = ctx
         self._dispatcher = dispatcher
         self._admins = admin_ids
         self._chat_id = chat_id
+        self._assistant = assistant
+        self._facts = facts
+        self._history: dict[int | None, list[Turn]] = {}  # per user, this process only
         self._table: dict[str, Callable[[list[str], int | None], Awaitable[str]]] = {
             "start": self._help,
             "help": self._help,
+            "tanya": self._tanya,
             "status": self._status,
             "signal": self._signal,
             "outlook": self._outlook,
@@ -180,6 +192,26 @@ class BotCommands:
             f"🔕 Notifikasi 🟡/🔵 dibisukan s/d {when} WIB. "
             "Sinyal & berita 🔴 tetap masuk; sisanya dikirim sebagai ringkasan."
         )
+
+    @property
+    def can_chat(self) -> bool:
+        return self._assistant is not None and self._facts is not None
+
+    async def ask(self, question: str, user_id: int | None) -> str:
+        """A question in plain words (a /tanya or any non-command message from an admin)."""
+        if self._assistant is None or self._facts is None:
+            return "Fitur tanya AI belum aktif di layanan ini."
+        if not question.strip():
+            return "Tulis pertanyaannya, misalnya: /tanya kapan aku harus buy?"
+        history = self._history.setdefault(user_id, [])
+        reply = await self._assistant.answer(question, history, await self._facts())
+        history += [("user", question), ("assistant", reply.text)]
+        del history[: max(0, len(history) - MAX_TURNS)]
+        by = f"🤖 {model_name(reply.model)}" if reply.model else f"⚙️ tanpa AI: {reply.note}"
+        return f"{esc(reply.text)}\n\n<i>{esc(by)}</i>"
+
+    async def _tanya(self, args: list[str], user_id: int | None) -> str:
+        return await self.ask(" ".join(args), user_id)
 
     async def _finex(self, args: list[str], user_id: int | None) -> str:
         word = args[0].replace(",", ".") if args else ""

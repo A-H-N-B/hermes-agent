@@ -37,6 +37,18 @@ def parsed(
     return response
 
 
+def written(text: str, *, tokens: SimpleNamespace | None = None) -> Any:
+    """A create() response with one text block."""
+    return SimpleNamespace(
+        content=[
+            SimpleNamespace(type="thinking", thinking="..."),
+            SimpleNamespace(type="text", text=text),
+        ],
+        usage=tokens or usage(),
+        stop_reason="end_turn",
+    )
+
+
 def timeout_error() -> anthropic.APITimeoutError:
     return anthropic.APITimeoutError(
         request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -49,6 +61,9 @@ Responder = Callable[[dict[str, Any]], Any]
 class FakeMessages:
     def __init__(self, owner: FakeAnthropic) -> None:
         self._owner = owner
+
+    async def create(self, **request: Any) -> Any:
+        return await self.parse(**request)
 
     async def parse(self, **request: Any) -> Any:
         self._owner.requests.append(request)

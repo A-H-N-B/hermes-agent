@@ -228,6 +228,15 @@ llm:
   # A review costs about $0.15 (three short Opus answers): 60 a day stays under $10 even on the
   # busiest day; beyond it the engine decides alone (labelled "tanpa review AI").
   desk_reviews_per_day: 60
+  # Questions you ask (dashboard "Tanya AI", Telegram /tanya or a plain message): answered from
+  # everything the agent knows right now. A routine call (it stops at the routine share of the
+  # budget); beyond chat_per_day the agent answers from its own numbers without AI.
+  chat:
+    model: claude-opus-5-5
+    effort: low # an answer in seconds; the facts come from the program
+    timeout_seconds: 60
+    max_tokens: 6000
+  chat_per_day: 60
   fallbacks: default # a refused request is retried server-side on the recommended model
   circuit_breaker:
     failures: 5

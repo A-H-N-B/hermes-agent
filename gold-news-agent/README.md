@@ -47,9 +47,18 @@ tambahan hasil review Fase 0).
 - Tiap rencana trade membawa peluang TP1 sebelum SL dan nilai harapan (EV) dalam R: volatilitas
   GARCH + Monte Carlo, drift hanya dari keunggulan yang sudah terbukti, digabung dengan hasil
   setup serupa di masa lalu. Setup yang terbukti rugi (seluruh pita 95 % EV negatif) menunggu.
-- Keputusan akhir: komite AI tiga suara (Claude Fable 5.1, dihitung 2×, dan dua Claude Opus 5.5).
-  Trade lolos hanya bila Fable dan minimal satu Opus setuju. Biaya AI dibatasi keras $20/hari.
-- Ekonofisika (dihitung program, lalu ditimbang komite AI): ekor distribusi, entropi permutasi,
+- Keputusan akhir: desk AI tiga suara Claude Opus 5.5 paralel (effort low, jawaban dalam
+  hitungan detik); trade lolos bila mayoritas setuju. Biaya AI dibatasi keras $20/hari.
+- Impuls momentum: setiap detik harga dibandingkan dengan ambang gerak 1–10 menit yang luar biasa
+  (≥ 3σ) sekaligus tembus high/low 30 menit, jadi awal gerak naik/turun besar langsung menjadi
+  kandidat BUY/SELL tanpa menunggu berita. Akurasinya diukur ulang dari impuls 7 hari terakhir.
+- Semua diperbarui tiap detik (harga, konteks, mesin sinyal, dashboard). Sinyal baru langsung ke
+  Telegram, dan dashboard bisa memberi notifikasi + bunyi (tombol "Notifikasi").
+- Tanpa MT5, harga PAXG bisa disamakan ke harga brokermu (Finex): ketik bid broker di halaman Live
+  ("Samakan") atau `/finex 2662.4`; semua level ikut bergeser.
+- Tanya AI: tanya "kapan aku harus buy?" di dashboard atau Telegram (`/tanya` atau pesan biasa);
+  Opus 5.5 menjawab dari data alat ini saat itu.
+- Ekonofisika (dihitung program, lalu ditimbang desk AI): ekor distribusi, entropi permutasi,
   multifraktal (MF-DFA), mean reversion Ornstein-Uhlenbeck, badai susulan Hawkes, pasar pemimpin
   (transfer entropy), faktor bersama (teori matriks acak), risiko gelembung LPPLS. Setiap ukuran
   diuji pada data acak. Plus pembelajaran mesin (meta-labeling) yang baru dipakai setelah
@@ -191,7 +200,7 @@ tidak ada informasi dari masa depan yang ikut terpakai.
 
 ```bash
 uv run pytest -q
-uv run pytest -q -m slow          # replay satu hari penuh end-to-end (±4 menit)
+uv run pytest -q -m slow          # replay satu hari penuh end-to-end (±14 menit)
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 ```
@@ -205,7 +214,7 @@ Test integrasi PostgreSQL/Redis ikut berjalan jika `GOLD_TEST_POSTGRES_URL` dan
 config/      settings.yaml (perilaku), sources.yaml (registry sumber), local.yaml +
              sources.local.yaml (milik komputer ini, tidak ikut git), keywords.yaml,
              gold_drivers.yaml (knowledge base), events.yaml (rilis data AS), fed_officials.yaml
-prompts/     system prompt LLM (triage, deep, outlook, brief), berversi
+prompts/     system prompt LLM (triage, deep, outlook, brief, desk, chat), berversi
 src/gold_agent/
   config.py        pemuat + validasi config dan .env
   core/            bus (Redis Streams / memori), clock, supervisi service, logging
@@ -219,8 +228,9 @@ src/gold_agent/
                    ekonofisika (econophysics.py, physics.py)
   timeutils/       sesi pasar & DST, jam rawan
   signals/         skor gabungan, SL/TP & lot, mesin sinyal, peluang & EV, meta-labeling,
-                   komite AI, outlook 24 jam, profil per jam
+                   desk AI, impuls momentum, outlook 24 jam, profil per jam
   notify/          template Telegram, kebijakan prioritas, dispatcher, perintah bot
+  assistant/       Tanya AI (chat) dari data alat ini
   dashboard/       FastAPI + WebSocket, halaman statis (JS polos, CSP ketat), grafik vendored
   services/        collector, market, calendar, analyzer, signal, paper, evaluator, notifier,
                    dashboard, watchdog

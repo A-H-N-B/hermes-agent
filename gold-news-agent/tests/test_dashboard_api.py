@@ -92,6 +92,18 @@ async def test_login_sets_a_strict_cookie_and_unlocks_the_api(client: httpx.Asyn
     assert page.headers["x-frame-options"] == "DENY"
 
 
+async def test_an_update_reaches_the_browser_without_a_hard_refresh(
+    client: httpx.AsyncClient,
+) -> None:
+    await login(client)
+    for path in ("/", "/static/app.js", "/static/style.css"):
+        response = await client.get(path)
+        assert response.headers["cache-control"] == "no-cache", path  # revalidated every load
+    etag = (await client.get("/static/app.js")).headers["etag"]
+    unchanged = await client.get("/static/app.js", headers={"if-none-match": etag})
+    assert unchanged.status_code == 304  # an unchanged file is not sent again
+
+
 async def test_https_proxy_makes_the_cookie_secure(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/login",

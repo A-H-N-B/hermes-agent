@@ -20,6 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
+from gold_agent.analysis.llm_client import LlmClient, Turn
+from gold_agent.assistant.chat import MAX_QUESTION, MAX_TURNS, ChatAssistant
 from gold_agent.core.app import AppContext
 from gold_agent.dashboard.auth import COOKIE, LoginLimiter, SessionSigner
 from gold_agent.dashboard.credit import credit_view, set_balance
@@ -63,13 +65,36 @@ def _https(request: Request) -> bool:
     return request.url.scheme == "https" or forwarded.split(",")[0].strip() == "https"
 
 
-def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAPI:
+def _history(raw: Any) -> list[Turn]:
+    """Earlier chat messages the page sends along: [{"role": "user"|"assistant", "text": str}]."""
+    turns: list[Turn] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        role, text = item.get("role"), item.get("text")
+        if role in ("user", "assistant") and isinstance(text, str):
+            turns.append(("user" if role == "user" else "assistant", text))
+    return turns[-MAX_TURNS:]
+
+
+def create_app(
+    ctx: AppContext, hub: LiveHub, *, password: str | None, anthropic_client: Any | None = None
+) -> FastAPI:
+    """`anthropic_client`: a stand-in for tests (the chat's Claude client)."""
     settings = ctx.settings.dashboard
     signer = SessionSigner(password) if password else None
     limiter = LoginLimiter(
         settings.login_attempts_per_window, timedelta(minutes=settings.login_window_minutes)
     )
     data = DashboardData(ctx, hub)
+    llm = LlmClient(
+        ctx.settings,
+        api_key=ctx.env.get("ANTHROPIC_API_KEY"),
+        ops=ctx.ops,
+        clock=ctx.clock,
+        client=anthropic_client,
+    )
+    assistant = ChatAssistant(ctx.settings, llm, ctx.ops)
     tradingview = settings.tradingview_symbol is not None
     app = FastAPI(title="Gold News Agent", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -86,6 +111,8 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
         response.headers["Referrer-Policy"] = "no-referrer"
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        else:  # pages and their code are revalidated, so an update shows without a hard refresh
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     def authed(token: str | None) -> bool:
@@ -209,6 +236,20 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
             raise HTTPException(status_code=422, detail="saldo di luar batas wajar")
         await set_balance(ctx, float(balance))
         return await credit_view(ctx)
+
+    @app.post("/api/chat", dependencies=guard)
+    async def api_chat(request: Request) -> dict[str, Any]:
+        """A question about the market ("kapan aku harus BUY?"), answered from what the agent
+        knows now (assistant/chat.py)."""
+        body = await json_body(request)
+        question = body.get("message") if isinstance(body, dict) else None
+        if not isinstance(question, str) or not question.strip():
+            raise HTTPException(status_code=422, detail="tulis pertanyaan")
+        if len(question) > MAX_QUESTION:
+            raise HTTPException(status_code=422, detail=f"maksimal {MAX_QUESTION} karakter")
+        history = _history(body.get("history"))
+        reply = await assistant.answer(question, history, await data.chat_facts())
+        return {"answer": reply.text, "model": reply.model, "note": reply.note}
 
     @app.post("/api/price-offset", dependencies=guard)
     async def api_price_offset(request: Request) -> dict[str, Any]:

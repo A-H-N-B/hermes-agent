@@ -183,18 +183,23 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
    - setelah ada data, timeframe yang terbukti paling akurat di sesi itu (akurasi prediksi
      30 hari, batas bawah 95%-nya di atas 50%) menggantikan bawaan;
    - timeframe yang spread-nya terlalu besar dibanding SL (`max_cost_ratio`) dilewati;
-   - **Komite AI memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
-     chart-nya dari timeframe yang layak. Tiga jawaban terpisah dan bersamaan
-     (`llm.desk_votes`): **Claude Fable 5.1** (model Anthropic paling mampu, suaranya dihitung
-     2×) dan dua **Claude Opus 5.5**. Trade hanya lolos bila Fable setuju *dan* minimal satu Opus
-     ikut setuju; bila Fable tidak tersedia, kedua Opus harus sepakat. Jumlah suara dan alasan
-     suara yang menahan tampil di sinyal. Angka harga, SL, dan TP tetap dihitung sistem.
+   - **AI memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
+     chart-nya dari timeframe yang layak. Tiga jawaban **Claude Opus 5.5** terpisah dan
+     bersamaan (`llm.desk_votes`, effort low, selesai dalam hitungan detik); trade lolos bila
+     mayoritas setuju. Jumlah suara dan alasan suara yang menahan tampil di sinyal. Angka harga,
+     SL, dan TP tetap dihitung sistem. TUNGGU dari AI ditanya ulang setelah 3 menit, atau
+     langsung bila ada impuls baru;
+   - **impuls momentum** (`signal_engine.impulse`): bila harga bergerak luar biasa cepat (gerak
+     1–10 menit ≥ 3σ) dan menembus high/low 30 menit terakhir, sistem langsung membuat kandidat
+     BUY/SELL di chart M5 tanpa menunggu berita, asal skor berita/makro tidak melawan dan harga
+     belum terlalu jauh (≤ 1,5 ATR) dari awal gerak. Ini yang mencegah gerak besar terlewat.
    Timeframe tetap juga bisa: `uv run gold-agent config set trading.timeframe.select M5`.
 6. Biaya AI (`budget`). `llm_daily_usd` (bawaan **$20/hari**) adalah batas keras: tidak ada
    panggilan Claude yang dimulai bila bisa melewatinya. Berita biasa, outlook, dan laporan
    berhenti di 75 % (`priority_reserve_pct: 25`, jadi $15); sisa $5 khusus untuk keputusan sinyal
-   dan berita berdampak tinggi. Satu review komite sekitar $0,45 dan dibatasi
-   `llm.desk_reviews_per_day` (30) review per hari. Contoh menurunkan batas ke $10:
+   dan berita berdampak tinggi. Satu review AI sekitar $0,15 dan dibatasi
+   `llm.desk_reviews_per_day` (60) review per hari; satu pertanyaan Tanya AI sekitar $0,05,
+   paling banyak `llm.chat_per_day` (60) per hari (setelah itu dijawab program tanpa AI). Contoh menurunkan batas ke $10:
    `uv run gold-agent config set budget.llm_daily_usd 10`.
 7. Fundamental harian (`market.fundamentals_refresh_minutes`, bawaan 60). Bias harian emas
    dibangun dari: yield riil AS 10 tahun dan yield 2 tahun (Treasury AS), inflasi ekspektasi
@@ -280,6 +285,25 @@ Saat start, database dibuat/dimigrasi otomatis. Lalu cek:
 
 Berhenti: tekan **Ctrl+C**. Perintah bot yang berguna: `/signal`, `/outlook`, `/calendar`,
 `/stats`, `/mute 1h`, dan **`/stop`** (kill switch, tidak ada sinyal baru) / `/resume`.
+
+Yang baru di halaman Live dan bot:
+
+- **Tanya AI.** Di dashboard, kartu "Tanya AI": tulis "kapan aku harus buy?" lalu Enter. Di
+  Telegram: `/tanya kapan aku harus sell?`, atau ketik pesan biasa tanpa `/`. Claude Opus 5.5
+  menjawab dari data alat ini saat itu (harga, sinyal aktif, impuls, jam rawan rilis, berita):
+  BUY, SELL, atau TUNGGU dulu, lalu yang harus dipantau. Bukan saran keuangan.
+- **Notifikasi.** Sinyal BUY/SELL baru otomatis masuk Telegram. Di dashboard klik tombol
+  "🔕 Notifikasi" di atas sekali dan izinkan di browser: setiap sinyal baru muncul sebagai
+  notifikasi Windows dengan bunyi, selama tab dashboard terbuka.
+- **Harga beda dengan Finex.** Tanpa MT5, harga diambil dari token emas PAXG (Binance) yang
+  beda beberapa dolar dari brokermu. Lihat harga **Bid** XAUUSD di aplikasi Finex, lalu ketik
+  di halaman Live bagian "Harga beda dengan broker (Finex)? Samakan di sini", atau kirim
+  `/finex 2662.40` ke bot. Semua harga, candle, entry, SL dan TP di alat ini ikut bergeser ke
+  harga Finex. Samakan ulang sesekali (selisihnya bisa bergeser pelan); kembali ke harga asli:
+  `/finex reset`. Tidak bisa saat ada sinyal aktif. Dengan MT5 (terminal Finex terbuka dan
+  sudah login) harga sudah tepat dan langkah ini tidak perlu.
+- **Banner impuls.** Saat ada gerak cepat, halaman Live menampilkan "⚡ IMPULS NAIK/TURUN KUAT"
+  dengan besar gerak dan level yang ditembus. Semua angka diperbarui tiap detik.
 
 ## Langkah 10 — Jalan otomatis dan tidak tidur
 
@@ -402,6 +426,9 @@ uv sync
 | Alert "Offset jam sistem tidak diketahui" | Firewall memblokir NTP (UDP 123). Izinkan, atau ganti `watchdog.ntp_server` (mis. `time.windows.com`) |
 | Alert "Jam sistem melenceng" | Ulangi langkah 6 (`w32tm /resync`) |
 | Bot diam saat diberi perintah | `TELEGRAM_ADMIN_USER_IDS` harus berisi user ID-mu; token dipakai program lain (mis. bot lain/Hermes) |
+| Tanya AI menjawab "tanpa AI" | `ANTHROPIC_API_KEY` belum diisi, budget harian habis, atau batas `llm.chat_per_day` tercapai: program menjawab dengan ringkasannya sendiri |
+| Harga beda dengan Finex | Samakan di halaman Live atau `/finex <bid>` (lihat langkah 9), atau pakai MT5 |
+| Notifikasi browser tidak muncul | Klik "🔕 Notifikasi" lalu izinkan; cek izin notifikasi situs di browser dan Focus Assist Windows |
 | Ingin dibuka dari HP | Pasang Tailscale di PC dan HP, isi `DASHBOARD_PASSWORD`, lalu ubah `dashboard.host` ke IP Tailscale PC. Jangan buka port ke internet |
 
 Pindah ke VPS nanti: lihat `docs/runbook.md`. `config\` dan `.env` bisa dipakai lagi.

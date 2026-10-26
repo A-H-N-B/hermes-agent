@@ -119,6 +119,21 @@ def test_the_ai_budget_reserve_and_desk_votes_stay_in_range() -> None:
     assert Settings.model_validate(raw).budget.routine_daily_usd == 6
 
 
+def test_the_impulse_and_chat_knobs_stay_in_range() -> None:
+    raw = _settings_dict()
+    raw["signal_engine"]["impulse"]["z"] = 1.5  # ordinary noise would count as a big move
+    with pytest.raises(ValidationError, match=r"impulse\.z"):
+        Settings.model_validate(raw)
+    raw = _settings_dict()
+    raw["signal_engine"]["impulse"]["timeframe"] = "H4"  # impulses are traded on M1..H1
+    with pytest.raises(ValidationError, match=r"impulse\.timeframe"):
+        Settings.model_validate(raw)
+    raw = _settings_dict()
+    raw["llm"]["chat_per_day"] = -1
+    with pytest.raises(ValidationError, match="chat_per_day"):
+        Settings.model_validate(raw)
+
+
 def test_execution_cannot_be_enabled_from_config() -> None:
     raw = _settings_dict()
     raw["execution_enabled"] = True

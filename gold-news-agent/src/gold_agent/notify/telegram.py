@@ -17,7 +17,14 @@ import structlog
 from telegram import LinkPreviewOptions, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 from telegram.warnings import PTBDeprecationWarning
 
 from gold_agent.notify.commands import BotCommands
@@ -75,9 +82,10 @@ class TelegramSender:
 
 
 Reply = Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]
+Answer = Callable[[Update, ContextTypes.DEFAULT_TYPE, int | None], Coroutine[Any, Any, str]]
 
 
-def _guarded(commands: BotCommands, name: str) -> Reply:
+def _guarded(commands: BotCommands, name: str, answer: Answer) -> Reply:
     async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
         chat = update.effective_chat
@@ -89,7 +97,7 @@ def _guarded(commands: BotCommands, name: str) -> Reply:
         if not commands.authorized(user_id, chat_id):
             log.warning("telegram.unauthorized", command=name, user_id=user_id, chat_id=chat_id)
             return
-        text = await commands.run(name, list(context.args or []), user_id=user_id)
+        text = await answer(update, context, user_id)
         for chunk in split_message(text):
             await message.reply_text(
                 chunk,
@@ -105,5 +113,27 @@ def build_application(token: str) -> Application[Any, Any, Any, Any, Any, Any]:
 
 
 def add_commands(app: Application[Any, Any, Any, Any, Any, Any], commands: BotCommands) -> None:
+    """Every command, plus any plain message from an admin as a question for the AI. A question
+    takes seconds, so it does not hold the other updates up (block=False)."""
     for name in commands.names:
-        app.add_handler(CommandHandler(name, _guarded(commands, name)))
+
+        async def run(
+            _update: Update,
+            context: ContextTypes.DEFAULT_TYPE,
+            user_id: int | None,
+            name: str = name,
+        ) -> str:
+            return await commands.run(name, list(context.args or []), user_id=user_id)
+
+        handler = _guarded(commands, name, run)
+        app.add_handler(CommandHandler(name, handler, block=name != "tanya"))
+    if commands.can_chat:
+
+        async def ask(
+            update: Update, _context: ContextTypes.DEFAULT_TYPE, user_id: int | None
+        ) -> str:
+            message = update.effective_message
+            return await commands.ask(message.text or "" if message else "", user_id)
+
+        question = _guarded(commands, "pesan", ask)
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, question, block=False))

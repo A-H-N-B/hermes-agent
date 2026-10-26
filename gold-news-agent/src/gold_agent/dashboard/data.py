@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from gold_agent.analysis.llm_client import wib_day_start
+from gold_agent.assistant.chat import ChatFacts, gather_facts
 from gold_agent.core.app import AppContext
 from gold_agent.dashboard.indicators_view import (
     SUMMARY_TFS,
@@ -132,6 +133,12 @@ class DashboardData:
         (stored once a minute; parsing it costs more than the push)."""
         pushed = self._hub.context() if self._hub else None
         return pushed if pushed is not None else await self._ctx.market.latest_context()
+
+    async def chat_facts(self) -> ChatFacts:
+        """What the chat answers from, around the freshest pushed context and state."""
+        return await gather_facts(
+            self._ctx, context=await self._context(), state=await self._engine_state()
+        )
 
     async def _source(self) -> str | None:
         context = await self._context()

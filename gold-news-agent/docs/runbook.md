@@ -143,7 +143,7 @@ Untuk image produksi: pin `python:3.12-slim-bookworm` dan `ghcr.io/astral-sh/uv`
 | Disk hampir penuh | Sisa < 10 % | `docker system df`, hapus image lama (`docker image prune`), pindahkan backup ke luar VPS, cek retensi (`watchdog.tick_retention_days`) |
 | Data harga basi / pulih | Tidak ada tick > 20 dtk saat pasar buka | Cek feed utama (Binance/MT5 bridge). Fallback otomatis ke `price_feed.fallbacks`, label sumber tampil di sinyal |
 | Claude API bermasalah — mode rules-only | Circuit breaker LLM terbuka | Cek status Anthropic dan kuota. Sistem tetap jalan dengan aturan (lebih konservatif) |
-| Budget AI rutin hari ini terpakai | Biaya hari WIB ini lewat porsi rutin (`budget.llm_daily_usd` × (100 − `priority_reserve_pct`) %) | Sengaja: sampai 00:00 WIB berita biasa memakai aturan; keputusan sinyal (komite AI) dan berita dampak tinggi tetap memakai AI. Bila sering terjadi, cek `llm_usage` per rute |
+| Budget AI rutin hari ini terpakai | Biaya hari WIB ini lewat porsi rutin (`budget.llm_daily_usd` × (100 − `priority_reserve_pct`) %) | Sengaja: sampai 00:00 WIB berita biasa memakai aturan; keputusan sinyal (desk AI) dan berita dampak tinggi tetap memakai AI. Bila sering terjadi, cek `llm_usage` per rute |
 | Batas biaya AI harian tercapai | Plafon `budget.llm_daily_usd` tercapai | Sengaja: sampai 00:00 WIB semua analisis memakai aturan dan sinyal keluar dengan tanda "Tanpa review AI". Naikkan batasnya hanya bila memang perlu |
 | Lonjakan harga / Spread melebar | Harga bergerak tanpa berita yang diketahui | Informasi. Collector diminta poll ulang untuk mencari penyebabnya |
 

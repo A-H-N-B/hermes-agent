@@ -193,6 +193,47 @@ function renderImpulse(context) {
     el("small", { text: "Bukan sinyal sendiri: AI memeriksanya sebagai kandidat bila filter lolos." }));
 }
 
+// ------------------------------------------------------------------ Tanya AI
+// Questions go to /api/chat with the last few messages; the answer comes from the agent's
+// current data (assistant/chat.py). Shown as plain text (textContent), never as HTML.
+
+const chatHistory = [];
+
+function chatBubble(role, text, note) {
+  const bubble = el("div", { class: `chat-msg ${role}` }, el("p", { text }));
+  if (note) bubble.append(el("small", { class: "muted", text: note }));
+  return bubble;
+}
+
+async function sendChat(event) {
+  event.preventDefault();
+  const input = $("#chat-input");
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = "";
+  const log = $("#chat-log");
+  if (!chatHistory.length) clear(log);
+  log.append(chatBubble("user", question));
+  const waiting = chatBubble("assistant", "AI sedang menjawab…");
+  log.append(waiting);
+  log.scrollTop = log.scrollHeight;
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST", credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: question, history: chatHistory.slice(-6) }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const reply = await response.json();
+    const by = reply.model ? modelName(reply.model) : `tanpa AI${reply.note ? `: ${reply.note}` : ""}`;
+    waiting.replaceWith(chatBubble("assistant", reply.answer, by));
+    chatHistory.push({ role: "user", text: question }, { role: "assistant", text: reply.answer });
+  } catch (error) {
+    waiting.replaceWith(chatBubble("assistant", "Gagal mengirim pertanyaan. Coba lagi sebentar.", String(error)));
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
 // A proxy feed (PAXG) can be re-based onto the broker's prices (market/rebase.py).
 function renderRebase(context) {
   const box = $("#rebase");
@@ -758,7 +799,7 @@ function scoreGauge(t) {
 const TF_SOURCE = { auto: "⚙️ Timeframe otomatis", signal: "📊 Sinyal aktif di chart", opus: "🤖 Sinyal aktif di chart" };
 function timeframeLine(tf) {
   if (!tf) return null;
-  const by = tf.source === "opus" ? " · dipilih komite AI" : "";
+  const by = tf.source === "opus" ? " · dipilih AI" : "";
   return el("p", { class: `trading-line ${tf.source === "auto" ? "" : "on"}` },
     el("b", { text: `${TF_SOURCE[tf.source] || "Timeframe"}: ${tf.tf}` }), `${by}${tf.reason ? ` · ${tf.reason}` : ""}`);
 }
@@ -1656,6 +1697,7 @@ window.addEventListener("DOMContentLoaded", () => {
     sendRebase(Number($("#rebase-input").value));
   });
   $("#rebase-reset").addEventListener("click", () => sendRebase(null));
+  $("#chat-form").addEventListener("submit", sendChat);
   showAlertsButton();
   buildRing();
   // Fallback when the live push is down: the board, indicator read and forecast still refresh.
