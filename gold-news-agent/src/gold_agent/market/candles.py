@@ -75,6 +75,18 @@ def aggregate(candles: Iterable[Candle], tf: Timeframe, sessions: SessionClock) 
     return result
 
 
+def shifted(candle: Candle, delta: float) -> Candle:
+    """The same bar `delta` higher (a feed's prices re-based onto the broker's)."""
+    return candle.model_copy(
+        update={
+            "open": candle.open + delta,
+            "high": candle.high + delta,
+            "low": candle.low + delta,
+            "close": candle.close + delta,
+        }
+    )
+
+
 class CandleBuilder:
     def __init__(
         self,
@@ -95,6 +107,17 @@ class CandleBuilder:
         for tf in self.timeframes:
             self._history[tf].clear()
             self._current[tf] = None
+
+    def shift(self, delta: float) -> None:
+        """Move every bar by `delta`, so bars before and after a re-basing stay one series."""
+        for tf in self.timeframes:
+            history = self._history[tf]
+            moved = [shifted(candle, delta) for candle in history]
+            history.clear()
+            history.extend(moved)
+            current = self._current[tf]
+            if current is not None:
+                self._current[tf] = shifted(current, delta)
 
     def seed(self, tf: Timeframe, candles: Iterable[Candle]) -> None:
         """Load history. A trailing incomplete candle becomes the live candle."""

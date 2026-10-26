@@ -84,12 +84,12 @@ def test_an_opus_decision_shows_its_vote_count_and_the_dissent(settings: Setting
         votes=3,
         agree=2,
         dissent="harga sudah jauh dari EMA20",
-        models=["claude-fable-5-1", "claude-opus-5-5"],
+        models=["claude-opus-5-5"],
     )
     signal = make_signal(settings).model_copy(update={"review": review})
     lines = render_signal(signal, now=NOW, next_event=None).split("\n")
     assert lines[3] == (
-        "🤖 Diputuskan AI (Fable 5.1 + Opus 5.5) · 2/3 suara · confidence AI 74/100 · "
+        "🤖 Diputuskan AI (Opus 5.5) · 2/3 suara · confidence AI 74/100 · "
         "berita &amp; chart M15 searah"
     )
     assert lines[4] == "⚠️ Catatan AI: CPI &lt;besok&gt;"
@@ -192,3 +192,13 @@ def test_split_keeps_lines_whole_and_cuts_only_monster_lines() -> None:
     monster = split_message("<b>" + "&" * 5000 + "</b>")
     assert len(monster) == 1 and len(monster[0]) <= TELEGRAM_LIMIT
     assert "<b>" not in monster[0] and strip_tags(monster[0]).startswith("&&&")
+
+
+def test_a_momentum_signal_says_so_near_the_top(settings: Settings) -> None:
+    note = "impuls harga naik kuat: +6.00$ dalam 3 mnt (z 4.0), tembus high 30 mnt 2649.50"
+    signal = make_signal(settings).model_copy(
+        update={"impulse_note": note, "setup_type": "impulse", "trigger_summary": None}
+    )
+    lines = render_signal(signal, now=NOW, next_event=None).split("\n")
+    assert lines[2] == f"⚡ <b>Momentum</b>: {note}"
+    assert "📰 Pemicu: impuls harga (gerak cepat keluar dari range, tanpa berita)" in lines

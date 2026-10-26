@@ -25,6 +25,7 @@ from gold_agent.dashboard.auth import COOKIE, LoginLimiter, SessionSigner
 from gold_agent.dashboard.credit import credit_view, set_balance
 from gold_agent.dashboard.data import DashboardData
 from gold_agent.dashboard.live import LiveHub
+from gold_agent.market.rebase import request_calibration
 
 STATIC_DIR = Path(__file__).parent / "static"  # public assets (JS, CSS, vendored chart)
 PAGES_DIR = Path(__file__).parent / "pages"  # HTML shells, served by the routes below
@@ -188,16 +189,19 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
     async def api_credit() -> dict[str, Any]:
         return await credit_view(ctx)
 
-    @app.post("/api/credit", dependencies=guard)
-    async def api_set_credit(request: Request) -> dict[str, Any]:
-        # The only write: same-origin JSON only, so another site cannot post it from a browser
+    async def json_body(request: Request) -> Any:
+        # Writes take same-origin JSON only, so another site cannot post them from a browser
         # (a cross-site JSON POST needs a CORS preflight this app never grants).
         origin = request.headers.get("origin")
         if origin is not None and urlparse(origin).netloc != request.headers.get("host"):
             raise HTTPException(status_code=403, detail="origin lain ditolak")
         if request.headers.get("content-type", "").split(";")[0] != "application/json":
             raise HTTPException(status_code=415, detail="kirim JSON")
-        body = await request.json()
+        return await request.json()
+
+    @app.post("/api/credit", dependencies=guard)
+    async def api_set_credit(request: Request) -> dict[str, Any]:
+        body = await json_body(request)
         balance = body.get("balance_usd") if isinstance(body, dict) else None
         if isinstance(balance, bool) or not isinstance(balance, int | float):
             raise HTTPException(status_code=422, detail="balance_usd harus angka")
@@ -205,6 +209,19 @@ def create_app(ctx: AppContext, hub: LiveHub, *, password: str | None) -> FastAP
             raise HTTPException(status_code=422, detail="saldo di luar batas wajar")
         await set_balance(ctx, float(balance))
         return await credit_view(ctx)
+
+    @app.post("/api/price-offset", dependencies=guard)
+    async def api_price_offset(request: Request) -> dict[str, Any]:
+        """Re-base a proxy feed onto the broker bid the user sees (market/rebase.py);
+        {"broker_price": null} goes back to the feed's own prices."""
+        body = await json_body(request)
+        price = body.get("broker_price", 0) if isinstance(body, dict) else 0
+        if price is not None and (
+            isinstance(price, bool) or not isinstance(price, int | float) or not 0 < price < 1e6
+        ):
+            raise HTTPException(status_code=422, detail="broker_price harus harga yang wajar")
+        broker = float(price) if price is not None else None
+        return {"result": await request_calibration(ctx, broker, by="dashboard")}
 
     @app.get("/api/markers", dependencies=guard)
     async def api_markers(hours: float = Query(default=24, gt=0, le=24 * 14)) -> dict[str, Any]:

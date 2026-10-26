@@ -29,7 +29,7 @@ from gold_agent.timeutils.sessions import SESSION_LABEL_ID
 JSON = dict[str, Any]
 Accuracy = Mapping[str, Mapping[str, JSON]]  # timeframe -> session -> walk-forward tally
 KV_TIMEFRAME = "timeframe_choice"  # TfChoice.to_json(), written by the signal service
-Basis = Literal["fixed", "data", "prior", "fallback", "none", "opus"]
+Basis = Literal["fixed", "data", "prior", "fallback", "none", "opus", "impulse"]
 MIN_CALLS = 40
 HYSTERESIS = 0.02  # a challenger needs a lower bound this much higher to replace the current one
 RANK = {tf: index for index, tf in enumerate(TRADE_TIMEFRAMES)}

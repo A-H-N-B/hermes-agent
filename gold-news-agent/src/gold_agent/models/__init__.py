@@ -20,6 +20,7 @@ from gold_agent.models.fundamentals import Factor, FundamentalSnapshot
 from gold_agent.models.market import (
     Candle,
     CrossAsset,
+    Impulse,
     Level,
     MarketContext,
     Tick,
@@ -56,6 +57,7 @@ __all__ = [
     "EventType",
     "Factor",
     "FundamentalSnapshot",
+    "Impulse",
     "LatencyStage",
     "Leader",
     "Level",

@@ -23,11 +23,18 @@ probability), the stop costs 1R, the spread costs spread/risk.
 
 from __future__ import annotations
 
+import functools
 import math
 from datetime import datetime
 from typing import Any
 
-from gold_agent.market.quant import PATHS, drift_from_hit_rate, first_passage, simulate_passage
+from gold_agent.market.quant import (
+    PATHS,
+    Passage,
+    drift_from_hit_rate,
+    first_passage,
+    simulate_passage,
+)
 from gold_agent.models import TimeframeState, TradeOdds
 from gold_agent.signals.forecast_score import wilson
 from gold_agent.signals.meta import MIN_TRAIN, features, predict
@@ -82,6 +89,43 @@ def _meta(
     )
 
 
+@functools.lru_cache(maxsize=512)
+def _unit_passage(
+    up: float, down: float, mu: float, bars: int, nu: float | None, theta: float, level: float
+) -> Passage:
+    revert = (theta, level) if theta else None
+    return simulate_passage(up, down, mu, [1.0] * bars, nu=nu, revert=revert)
+
+
+def _snap(value: float, step: float) -> float:
+    return round(round(value / step) * step, 6)
+
+
+def passage(
+    reach: float,
+    risk: float,
+    mu: float,
+    sigma: float,
+    bars: int,
+    *,
+    nu: float | None,
+    revert: tuple[float, float] | None,
+) -> Passage:
+    """The Monte Carlo in units of one bar's volatility, its inputs snapped to fine steps
+    (0.02 sigma): the engine asks for the same plan every second while a candidate waits, and
+    the answer is then read from memory instead of simulated again. Deterministic."""
+    theta, level = revert if revert is not None else (0.0, 0.0)
+    return _unit_passage(
+        _snap(reach / sigma, 0.02),
+        _snap(risk / sigma, 0.02),
+        _snap(mu / sigma, 0.005),
+        bars,
+        nu,
+        _snap(theta, 0.001),
+        _snap(level / sigma, 0.05),
+    )
+
+
 def ev_r(
     tp1: float, stop: float, runner: float, *, r1: float, r2: float, fraction: float, cost_r: float
 ) -> float:
@@ -118,7 +162,7 @@ def trade_odds(
     if state and state.ou_half_life and state.ou_mean is not None:
         towards = state.ou_mean - entry if side == "BUY" else entry - state.ou_mean
         revert = (math.log(2) / state.ou_half_life, towards)
-    passage = simulate_passage(reach, risk, mu, [sigma**2] * validity_bars, nu=nu, revert=revert)
+    simulated = passage(reach, risk, mu, sigma, validity_bars, nu=nu, revert=revert)
     runner = first_passage(abs(tp2 - tp1), reach, mu, sigma)
     record = (accuracy or {}).get("setups") or {}
     seen = (int(record.get("tp1", 0)), int(record.get("sl", 0)), int(record.get("expired", 0)))
@@ -129,7 +173,7 @@ def trade_odds(
     if meta_tp1 is not None and meta.get("proven"):
         resolved = seen[0] + seen[1]
         counts = (meta_tp1 * resolved, (1 - meta_tp1) * resolved, seen[2])
-    prior = (passage.target, passage.stop, passage.neither)
+    prior = (simulated.target, simulated.stop, simulated.neither)
     blended = [
         (PRIOR_STRENGTH * m + c) / (PRIOR_STRENGTH + n) for m, c in zip(prior, counts, strict=True)
     ]
@@ -184,7 +228,7 @@ def trade_odds(
         tp2_after_tp1=round(runner, 4),
         ev_r=round(ev, 3),
         ev_r_ci95=ev_band,
-        model_tp1=round(passage.target, 4),
+        model_tp1=round(simulated.target, 4),
         setups=n,
         setups_tp1=seen[0],
         setups_stop=seen[1],

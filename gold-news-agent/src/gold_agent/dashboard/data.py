@@ -40,6 +40,9 @@ if TYPE_CHECKING:  # live.py imports this module
     from gold_agent.dashboard.live import LiveHub
 
 JSON = dict[str, Any]
+# Stored bars only change when a bar completes, at a minute boundary (the market service writes
+# it within a second or two): reads are kept for the minute, refreshed BAR_SETTLE after it turns.
+BAR_SETTLE = timedelta(seconds=3)
 
 
 def _iso(moment: datetime | None) -> str | None:
@@ -62,6 +65,8 @@ def context_view(context: MarketContext | None) -> JSON | None:
         "market_open": context.market_open,
         "session": SESSION_LABEL_ID.get(context.session, context.session),
         "notes": context.notes,
+        "impulse": context.impulse.model_dump(mode="json") if context.impulse else None,
+        "price_offset": context.price_offset,
     }
 
 
@@ -99,6 +104,18 @@ class DashboardData:
         self._hub = hub
         self.book = AccuracyBook.shared(ctx)  # the signal service learns
         self._sessions = SessionClock(ctx.settings.sessions)
+        self._bars: dict[tuple[str, int, str | None], tuple[datetime, list[Candle]]] = {}
+
+    async def _latest(self, tf: str, limit: int, source: str | None) -> list[Candle]:
+        """Stored bars, read once per minute (see BAR_SETTLE): the Live page asks every second."""
+        minute = (self._ctx.clock.now() - BAR_SETTLE).replace(second=0, microsecond=0)
+        key = (tf, limit, source)
+        hit = self._bars.get(key)
+        if hit is not None and hit[0] == minute:
+            return hit[1]
+        bars = await self._ctx.market.latest_candles(tf, limit, source=source)
+        self._bars = {k: v for k, v in self._bars.items() if v[0] == minute} | {key: (minute, bars)}
+        return bars
 
     async def _engine_state(self) -> SignalState | None:
         """The newest engine state: the one pushed every evaluation when it is newer than the
@@ -161,11 +178,9 @@ class DashboardData:
         source = await self._source()
         if tf in ("W1", "MN"):
             per = 7 if tf == "W1" else 31
-            daily = await self._ctx.market.latest_candles(
-                "D1", min(5000, limit * per), source=source
-            )
+            daily = await self._latest("D1", min(5000, limit * per), source)
             return aggregate(daily, tf)[-limit:]
-        return await self._ctx.market.latest_candles(tf, limit, source=source)
+        return await self._latest(tf, limit, source)
 
     async def forecast(self, tf: str) -> JSON:
         ctx = self._ctx
@@ -198,10 +213,7 @@ class DashboardData:
         the read of every timeframe."""
         ctx = self._ctx
         source = await self._source()
-        extras = {
-            name: momentum(await ctx.market.latest_candles(name, 120, source=source))
-            for name in SUMMARY_TFS
-        }
+        extras = {name: momentum(await self._latest(name, 120, source)) for name in SUMMARY_TFS}
         stored = await ctx.ops.kv_get(KV_FUNDAMENTALS)
         fundamentals = FundamentalSnapshot.model_validate(stored) if stored else None
         summary = indicator_summary(await self._context(), extras, fundamentals)

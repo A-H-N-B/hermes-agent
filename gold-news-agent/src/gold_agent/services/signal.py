@@ -2,10 +2,10 @@
 the hourly outlook (11.3), the Monday-open outlook (11.6) and the weekly hourly-profile rebuild.
 
 Every evaluation first picks the chart to trade on (signals/timeframe.py, fed by the measured
-accuracy in signals/accuracy.py). A candidate the engine produces then goes to the AI committee
-(Fable 5.1 leading, Opus 5.5 second opinions) for the final BUY / SELL / WAIT and timeframe
-(signals/desk.py); the review runs in the background and the next evaluation, on fresh prices,
-applies it. Without the AI the engine decides alone, labelled.
+accuracy in signals/accuracy.py). A candidate the engine produces then goes to Opus 5.5 (three
+quick independent answers, signals/desk.py) for the final BUY / SELL / WAIT and timeframe; the
+review runs in the background and the next evaluation, on fresh prices, applies it. Without the
+AI the engine decides alone, labelled.
 
 State that must survive a restart lives in kv_state: `signal_engine` (last signal, daily count,
 last release), `trading_halt` (/stop) and `paper_daily` (realised R, written by the paper tracker).
@@ -22,7 +22,7 @@ from typing import Any
 import structlog
 
 from gold_agent.analysis.drivers import DriverKB
-from gold_agent.analysis.llm_client import LlmClient, LlmFailed, LlmUnavailable, Route
+from gold_agent.analysis.llm_client import LlmClient, LlmFailed, LlmUnavailable
 from gold_agent.analysis.prompts import load_prompt
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
@@ -57,7 +57,6 @@ from gold_agent.signals.accuracy import AccuracyBook
 from gold_agent.signals.desk import (
     KEEP_REVIEWS,
     KV_DESK,
-    LEAD_WEIGHT,
     Desk,
     DeskDecision,
     Verdict,
@@ -97,7 +96,10 @@ EVENTS_REFRESH = timedelta(minutes=5)
 SLOW_REFRESH = timedelta(hours=1)  # learned reliability, event moves
 PROFILE_REFRESH = timedelta(days=7)
 TICK_SECONDS = 15.0
-SCORE_CHANGE = 0.05  # publish the state again when |S| moves this much
+SCORE_CHANGE = 0.05  # publish (and store) the state again when |S| moves this much
+# Wait reasons quote live numbers (ATR gaps, minutes to a release) that change every second:
+# a change of wording alone is stored at most this often (the bus still carries every one).
+STORE_REASONS = timedelta(seconds=60)
 WEEKEND_TRIGGER = "pembukaan Senin"
 PENDING_REVIEW = "menunggu keputusan AI ({label}) atas kandidat ini"
 CHOICE_SAVE = timedelta(seconds=60)  # the dashboard's copy of the timeframe table
@@ -143,6 +145,7 @@ class SignalService:
         self.event_moves: dict[str, float] = {}
         self._published: SignalState | None = None
         self._published_at: datetime | None = None
+        self._stored_at: datetime | None = None
         self._events: list[CalendarEvent] = []
         self._events_at: datetime | None = None
         self._learned: dict[str, float] = {}
@@ -277,6 +280,7 @@ class SignalService:
             self._prune(now)
             events = await self.events(now)
             choice = await self._choose_timeframe(now, context)
+            impulses = await self.accuracy.impulses(source=context.source)
 
             def run(timeframe: TfChoice) -> Decision:
                 return self.engine.evaluate(
@@ -288,6 +292,7 @@ class SignalService:
                     price_at=self.prices.at,
                     reliability=self.reliability if self._learned else None,
                     timeframe=timeframe,
+                    impulse_record=impulses,
                 )
 
             decision = run(choice)
@@ -436,19 +441,12 @@ class SignalService:
         await self.evaluate(force_publish=True)
 
     async def _consult(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict:
-        """The committee in parallel: the lead (route desk, its vote counting LEAD_WEIGHT) and
-        `desk_votes - 1` second opinions (route desk_second), counted by `tally`."""
+        """`llm.desk_votes` independent answers in parallel, counted by `tally`."""
         asked = self._ctx.settings.llm.desk_votes
-        routes: list[Route] = ["desk_second"] * asked
-        routes[0] = "desk"
         answers = await asyncio.gather(
-            *(self._vote(candidate, choice, brief, route) for route in routes)
+            *(self._vote(candidate, choice, brief) for _ in range(asked))
         )
-        counted = [
-            (answer, LEAD_WEIGHT if route == "desk" else 1.0)
-            for answer, route in zip(answers, routes, strict=True)
-            if isinstance(answer, Verdict)
-        ]
+        counted = [answer for answer in answers if isinstance(answer, Verdict)]
         failures = [answer for answer in answers if isinstance(answer, str)]
         now = self._ctx.clock.now()
         if not counted:
@@ -459,22 +457,13 @@ class SignalService:
                 composite=candidate.composite_score,
                 note=failures[0],
             )
-        return tally(
-            [vote for vote, _ in counted],
-            failures,
-            candidate=candidate,
-            choice=choice,
-            at=now,
-            weights=[weight for _, weight in counted],
-        )
+        return tally(counted, failures, candidate=candidate, choice=choice, at=now)
 
-    async def _vote(
-        self, candidate: Signal, choice: TfChoice, brief: str, route: Route
-    ) -> Verdict | str:
-        """One committee member's answer through the guardrails, or why there is none."""
+    async def _vote(self, candidate: Signal, choice: TfChoice, brief: str) -> Verdict | str:
+        """One answer through the guardrails, or why there is none."""
         try:
             result = await self.llm.structured(
-                route,
+                "desk",
                 system=self.desk_prompt.text,
                 user=brief,
                 schema=DeskDecision,
@@ -558,19 +547,22 @@ class SignalService:
     async def _publish_state(self, state: SignalState, now: datetime, *, force: bool) -> None:
         self.last_state = state
         previous = self._published
-        changed = (
+        decided = (
             previous is None
-            or (previous.action, previous.active_signal_id, previous.wait_reasons, previous.halted)
-            != (state.action, state.active_signal_id, state.wait_reasons, state.halted)
+            or (previous.action, previous.active_signal_id, previous.halted)
+            != (state.action, state.active_signal_id, state.halted)
             or abs(previous.composite_score - state.composite_score) >= SCORE_CHANGE
         )
+        worded = previous is not None and previous.wait_reasons != state.wait_reasons
         interval = self._ctx.settings.signal_engine.publish_state_seconds
         due = self._published_at is None or (now - self._published_at).total_seconds() >= interval
-        if not (changed or due or force):
+        if not (decided or worded or due or force):
             return
         self._published, self._published_at = state, now
         await self._ctx.bus.publish(STREAM_STATE, state)
-        if changed or force:
+        quiet = self._stored_at is not None and now - self._stored_at < STORE_REASONS
+        if decided or force or (worded and not quiet):
+            self._stored_at = now
             await self._ctx.signals.save_state(state)
 
     # ------------------------------------------------------------------ bus handlers

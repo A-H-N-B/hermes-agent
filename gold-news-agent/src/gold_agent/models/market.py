@@ -122,6 +122,21 @@ class CrossAsset(BaseModel):
     why: str
 
 
+class Impulse(BaseModel):
+    """The start of a big move, found the second it happens (market/impulse.py)."""
+
+    side: Literal["BUY", "SELL"]
+    z: float  # the move against the per-minute volatility (|z| >= 3 is rare on noise)
+    window: int  # minutes of that move
+    move: float  # $ over that window, signed
+    level: float  # the recent range high (BUY) or low (SELL) it broke
+    trigger: float  # the price at which the impulse began: the entry it is measured from
+    range_minutes: int  # how far back the broken range reaches
+    extension_atr: float | None = None  # price past the trigger, in ATR(14) of the impulse chart
+    aligned: bool | None = None  # the M15 trend points the same way (None: no M15 trend yet)
+    since: datetime  # when this impulse began
+
+
 class MarketContext(BaseModel):
     ts: datetime
     source: str | None = None
@@ -164,4 +179,8 @@ class MarketContext(BaseModel):
     fundamental_bias: float | None = None  # daily fundamentals, -1 (bearish) .. +1 (bullish)
     fundamental_as_of: str | None = None
     physics: MarketPhysics | None = None  # market-wide econophysics (market/physics.py)
+    impulse: Impulse | None = None  # a momentum burst under way (market/impulse.py)
+    # Added to every price of a proxy feed so it reads like the user's broker (the user set it
+    # from a broker quote, services/market.py); None = no re-basing.
+    price_offset: float | None = None
     notes: list[str] = Field(default_factory=list)

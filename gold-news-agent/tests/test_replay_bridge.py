@@ -116,9 +116,11 @@ async def test_replay_runs_the_recorded_window_through_the_pipeline(
     assert summary.relevant >= 1
     assert summary.releases == 1  # the CPI headline took the fast path, no LLM involved
     assert summary.notifications.get("flash") == 1  # fresh: processing took no replay time
-    assert [s.split()[0] for s in summary.signals] == ["BUY"]  # soft CPI + rally
-    (outcome,) = summary.outcomes  # the paper tracker filled it and the rally reached TP2
-    assert outcome.startswith("tp2 +")
+    # Soft CPI + rally: the news BUY, then (after the cooldown) a second BUY that the rally's
+    # impulse lets in without waiting for a pullback to EMA20.
+    assert [s.split()[0] for s in summary.signals] == ["BUY", "BUY"]
+    first = summary.outcomes[0]  # the paper tracker filled it and the rally reached TP2
+    assert first.startswith("tp2 +")
     assert not [kind for _, kind, _ in log if kind == "health"]  # no spurious stale price
     text = summary.render()
     assert text.startswith("Replay 2026-10-13 19:25 – 2026-10-13 19:45 WIB")

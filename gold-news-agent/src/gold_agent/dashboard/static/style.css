@@ -280,3 +280,14 @@ h2.sub { margin-top: 1.1rem; }
 .odds-bar .sl { background: var(--down); }
 .odds-bar .none { background: var(--muted); opacity: .45; }
 .glossary li { margin: .2rem 0; }
+
+/* A momentum impulse under way: the first seconds of a big move. */
+.impulse { border: 1px solid var(--warn); border-radius: 8px; padding: .55rem .75rem; margin: 0 0 .7rem; }
+.impulse.BUY { border-color: var(--up); background: rgba(38, 166, 154, .10); }
+.impulse.SELL { border-color: var(--down); background: rgba(239, 83, 80, .10); }
+.impulse b { margin-right: .3rem; }
+.impulse small { display: block; color: var(--muted); margin-top: .2rem; }
+
+/* Re-basing a proxy feed onto the broker's prices. */
+.rebase summary { cursor: pointer; font-weight: 600; }
+.rebase[open] summary { margin-bottom: .5rem; }

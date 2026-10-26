@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 from gold_agent.models.common import Action
 
-SetupType = Literal["news_momentum", "news_fade", "trend_continuation", "breakout", "range"]
+SetupType = Literal[
+    "news_momentum", "news_fade", "trend_continuation", "breakout", "range", "impulse"
+]
 EntryType = Literal["market", "limit", "stop"]
 
 
@@ -114,6 +116,8 @@ class Signal(BaseModel):
     review: SignalReview | None = None  # the AI committee's final say; None = engine alone
     odds: TradeOdds | None = None  # chances of TP1 / stop and the expected value
     physics_note: str | None = None  # the chart's and the market's econophysics, one line
+    impulse_note: str | None = None  # the momentum impulse behind it and how past ones ended
+    price_offset: float | None = None  # a proxy feed's re-basing onto the broker's prices
 
 
 class SignalState(BaseModel):

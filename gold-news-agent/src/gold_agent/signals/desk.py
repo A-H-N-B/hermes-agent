@@ -1,20 +1,21 @@
-"""The AI committee's final say on every signal: BUY / SELL / WAIT, and the chart to trade it on.
+"""The AI's final say on every signal: BUY / SELL / WAIT, and the chart to trade it on.
 
-The engine proposes a candidate: a direction from news + macro + technical + price, every hard
-filter passed, levels computed, its odds estimated. A committee reviews the whole picture in
-parallel: the lead (route `llm.desk`, Claude Fable 5.1) and `llm.desk_votes - 1` second
-opinions (route `llm.desk_second`, Opus 5.5). The lead's vote counts double and the weighted
-majority wins (a tie holds), so a trade needs the lead to approve and at least one other model
-to agree: one unlucky answer cannot send or block a trade alone. Guardrails keep that safe:
+The engine proposes a candidate: a direction from news + macro + technical + price (or a
+momentum impulse, signals/impulse.py), every hard filter passed, levels computed, its odds
+estimated. `llm.desk_votes` independent Opus 5.5 answers (route `llm.desk`, effort low so a
+review takes seconds) review the whole picture in parallel and a strict majority decides (a tie
+holds): one unlucky answer cannot send or block a trade alone. An answer that does not come in
+time counts for nothing. Guardrails keep that safe:
 
 * it may approve the engine's direction or WAIT, never flip it: an opposite call is held as WAIT,
   since no evidence the system computed produced that trade;
 * its timeframe must be one the selector found usable (data present, spread small next to SL);
 * prices, SL and TP stay the engine's, recomputed on the chosen chart, never the model's.
 
-A WAIT stands until something material changes (cooldown, a score move, a new side), so a held
-candidate is not re-sent every evaluation. Every decision is logged (kv `desk_reviews`) for the
-Performa page, which compares how approved and held-back candidates would have done.
+A WAIT stands until something material changes (COOLDOWN, a score move, a new side or setup),
+so a held candidate is not re-sent every evaluation. Every decision is logged (kv
+`desk_reviews`) for the Performa page, which compares how approved and held-back candidates
+would have done.
 """
 
 from __future__ import annotations
@@ -50,7 +51,6 @@ from gold_agent.signals.timeframe import RANK, TfChoice, TfOption
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
 
 JSON = dict[str, Any]
-LEAD_WEIGHT = 2.0  # the lead model's vote (llm.desk) next to each second opinion's 1
 MODEL_NAMES = {
     "claude-fable-5-1": "Fable 5.1",
     "claude-opus-5-5": "Opus 5.5",
@@ -60,7 +60,7 @@ MODEL_NAMES = {
 }
 KV_DESK = "desk_reviews"  # {"reviews": [...]}, newest last, for the Performa comparison
 KEEP_REVIEWS = 300
-COOLDOWN = timedelta(minutes=10)  # a WAIT stands this long ...
+COOLDOWN = timedelta(minutes=3)  # a WAIT stands this long ...
 RESCORE = 0.10  # ... unless the composite score moves this much
 APPROVAL_TTL = timedelta(minutes=2)  # an approval answers the candidate it was asked about
 UNAVAILABLE_TTL = timedelta(minutes=5)  # then try the AI again
@@ -74,11 +74,8 @@ def model_name(model: str | None) -> str:
 
 
 def desk_label(settings: Settings) -> str:
-    """Who decides, for people: "Fable 5.1 + Opus 5.5", or one name."""
-    names = [model_name(settings.llm.desk.model)]
-    if settings.llm.desk_votes > 1:
-        names.append(model_name(settings.llm.desk_second.model))
-    return " + ".join(dict.fromkeys(names))
+    """Who decides, for people: "Opus 5.5"."""
+    return model_name(settings.llm.desk.model)
 
 
 class DeskDecision(BaseModel):
@@ -105,7 +102,7 @@ class Verdict:
     agree: int = 1  # answers backing `decision`
     dissent: str | None = None  # an approval's strongest opposing reason
     models: tuple[str, ...] = ()  # every model that answered
-    doubled: str | None = None  # the lead whose double vote decided against the head count
+    setup: str | None = None  # the candidate's setup type (a new kind of candidate asks again)
 
     @property
     def approved(self) -> bool:
@@ -116,8 +113,7 @@ class Verdict:
         """The tally for a message, e.g. " (2/3 suara)"; empty for a single answer."""
         if self.votes <= 1:
             return ""
-        doubled = f", suara {self.doubled} dihitung 2×" if self.doubled else ""
-        return f" ({self.agree}/{self.votes} suara{doubled})"
+        return f" ({self.agree}/{self.votes} suara)"
 
     def review(self, note: str | None = None) -> SignalReview:
         decided = self.decision != "UNAVAILABLE"
@@ -179,6 +175,7 @@ def verify(
         reasons=reasons or ("tanpa alasan",),
         caution=value.caution_id,
         model=model,
+        setup=candidate.setup_type,
     )
 
 
@@ -189,24 +186,18 @@ def tally(
     candidate: Signal,
     choice: TfChoice,
     at: datetime,
-    weights: Sequence[float] | None = None,
 ) -> Verdict:
-    """The committee's answers to one candidate (each already through `verify`) as one
-    verdict. The trade goes ahead only when the approving answers carry more than half of the
-    weight counted (a tie holds); `weights` defaults to one each (the lead gets LEAD_WEIGHT).
-    The chart is the one most approving answers chose (a tie: the selector's pick if tied, else
-    the leading answer's). Reasons come from the lead when it is on the winning side, else from
-    the most confident answer there; confidence is that side's mean, and an approval carries the
-    strongest dissent. `failures` are answers that never came (timeout, budget): they count
-    for nothing."""
-    weight = list(weights) if weights is not None else [1.0] * len(votes)
+    """The answers to one candidate (each already through `verify`) as one verdict. The trade
+    goes ahead only when more than half of the answers counted approve (a tie holds). The chart
+    is the one most approving answers chose (a tie: the selector's pick if tied, else the most
+    confident answer's). Reasons come from the most confident answer on the winning side;
+    confidence is that side's mean, and an approval carries the strongest dissent. `failures`
+    are answers that never came (timeout, budget): they count for nothing."""
     approving = [vote for vote in votes if vote.approved]
     holding = [vote for vote in votes if not vote.approved]
-    approved = 2 * sum(w for w, v in zip(weight, votes, strict=True) if v.approved) > sum(weight)
+    approved = 2 * len(approving) > len(votes)
     side, other = (approving, holding) if approved else (holding, approving)
-    heaviest = max(range(len(votes)), key=lambda i: weight[i])
-    weighted_lead = votes[heaviest] in side and weight[heaviest] > min(weight)
-    lead = votes[heaviest] if weighted_lead else max(side, key=lambda vote: vote.confidence or 0)
+    lead = max(side, key=lambda vote: vote.confidence or 0)
     chosen = Counter(vote.timeframe for vote in side if vote.timeframe)
     timeframe = lead.timeframe
     if chosen:
@@ -241,7 +232,7 @@ def tally(
         agree=len(side),
         dissent=dissent,
         models=tuple(dict.fromkeys(vote.model for vote in votes if vote.model)),
-        doubled=model_name(lead.model) if weighted_lead and 2 * len(side) <= len(votes) else None,
+        setup=candidate.setup_type,
     )
 
 
@@ -260,6 +251,8 @@ class Desk:
         """The verdict that still answers this candidate, or None (time to ask again)."""
         verdict = self.last
         if verdict is None or verdict.side != candidate.action:
+            return None
+        if verdict.setup is not None and verdict.setup != candidate.setup_type:
             return None
         age = now - verdict.at
         if verdict.decision == "UNAVAILABLE":
@@ -447,6 +440,25 @@ def _fundamental_lines(snapshot: FundamentalSnapshot | None) -> list[str]:
     return lines
 
 
+def _impulse_lines(context: MarketContext, candidate: Signal) -> list[str]:
+    impulse = context.impulse
+    if impulse is None:
+        return ["<impuls>tidak ada gerakan luar biasa saat ini</impuls>"]
+    extension = (
+        f"{impulse.extension_atr:.1f} ATR"
+        if impulse.extension_atr is not None
+        else "tidak diketahui"
+    )
+    aligned = {True: "searah", False: "berlawanan", None: "belum diketahui"}[impulse.aligned]
+    record = (candidate.impulse_note or "").partition("; ")[2] or "catatan impuls tidak dipakai"
+    return [
+        f'<impuls arah="{impulse.side}" z="{impulse.z:.1f}" gerak="{impulse.move:+.2f}$ dalam '
+        f'{impulse.window} mnt" tembus="{impulse.level:.2f} (range {impulse.range_minutes} mnt)" '
+        f'titik_awal="{impulse.trigger:.2f}" sudah_lewat="{extension}" tren_M15="{aligned}" '
+        f'sejak="{fmt_wib(impulse.since)} WIB">catatan: {record}</impuls>'
+    ]
+
+
 def _odds_lines(candidate: Signal) -> list[str]:
     odds = candidate.odds
     if odds is None:
@@ -483,13 +495,15 @@ def desk_brief(
         f"<harga>mid {_num(context.mid)} ({context.source or '-'}"
         f"{', proxy bukan XAUUSD spot' if context.proxy else ''}) · spread {_num(context.spread)}"
         "</harga>",
-        f'<kandidat arah="{candidate.action}" skor="{candidate.composite_score:+.2f}" '
+        f'<kandidat arah="{candidate.action}" setup="{candidate.setup_type}" '
+        f'skor="{candidate.composite_score:+.2f}" '
         f'ambang="{settings.signal_engine.entry_threshold:.2f}" '
         f'confidence="{candidate.confidence}">',
         f"komponen: berita {c.N:+.2f} · makro {c.M:+.2f} · teknikal {c.T:+.2f} · "
         f"harga {c.P:+.2f} (faktor sesi {c.session_factor:.2f})",
         "alasan mesin: " + "; ".join(candidate.top_reasons),
         "</kandidat>",
+        *_impulse_lines(context, candidate),
         *_odds_lines(candidate),
     ]
     if active is not None:

@@ -293,6 +293,20 @@ class LevelSettings(StrictModel):
     move_sl_to_breakeven_after_tp1: bool
 
 
+class ImpulseSettings(StrictModel):
+    """Momentum impulses (market/impulse.py): the first seconds of a big move become a
+    candidate even when the slower news/macro/trend score is not there yet."""
+
+    enabled: bool
+    z: float = Field(ge=2)  # how unusual the move must be against per-minute volatility
+    range_minutes: int = Field(ge=5, le=240)  # the recent range a move must break out of
+    # No entry once price is this many ATR(M5) past the price where the impulse began.
+    max_extension_atr: float = Field(gt=0)
+    timeframe: TradeTimeframe  # the chart impulse trades are sized and timed on
+    # The slower score may lean against the impulse at most this much (|S| units).
+    max_against: float = Field(ge=0, lt=1)
+
+
 class SignalEngineSettings(StrictModel):
     weights: Weights
     entry_threshold: float = Field(gt=0, lt=1)
@@ -310,6 +324,7 @@ class SignalEngineSettings(StrictModel):
     publish_state_seconds: float = Field(gt=0)
     evaluate_seconds: float = Field(gt=0)
     levels: LevelSettings
+    impulse: ImpulseSettings
 
     @model_validator(mode="after")
     def _hysteresis(self) -> Self:
@@ -358,7 +373,7 @@ class ModelPrice(StrictModel):
     cache_read: float = Field(ge=0)
 
 
-ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk", "desk_second")
+ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk")
 
 # Models on which `thinking: {type: "disabled"}` is a 400 at every effort level: thinking is
 # always on and `effort` is the only control.
@@ -376,9 +391,8 @@ class LlmSettings(StrictModel):
     deep: LlmRoute
     outlook: LlmRoute
     brief: LlmRoute
-    desk: LlmRoute  # the lead vote on a signal's final BUY/SELL/WAIT + timeframe
-    desk_second: LlmRoute  # the other votes (independent second opinions)
-    desk_votes: int = Field(ge=1, le=5)  # 1 lead + (n - 1) second opinions, in parallel
+    desk: LlmRoute  # each vote on a signal's final BUY/SELL/WAIT + timeframe
+    desk_votes: int = Field(ge=1, le=5)  # independent answers per review, in parallel
     desk_reviews_per_day: int = Field(ge=0)
     # Server-side refusal fallback: if a safety classifier declines a request (false positives
     # happen on benign news), the API re-runs it on the model Anthropic recommends for that

@@ -32,7 +32,8 @@ class Setup:
     closed_at: datetime  # when the outcome was known
 
 
-def _outcome(side: int, stop: float, target: float, after: Sequence[Candle]) -> tuple[Outcome, int]:
+def resolve(side: int, stop: float, target: float, after: Sequence[Candle]) -> tuple[Outcome, int]:
+    """What the bars after an entry reached first, and after how many of them."""
     for offset, bar in enumerate(after, start=1):
         if (bar.low <= stop) if side > 0 else (bar.high >= stop):
             return "sl", offset
@@ -76,7 +77,7 @@ def replay_setups(
         risk = sl_atr * value
         stop = bar.close - side * risk
         target = bar.close + side * tp1_r * risk
-        outcome, used = _outcome(side, stop, target, window)
+        outcome, used = resolve(side, stop, target, window)
         found.append(Setup(i, at, side, outcome, window[used - 1].close_time))
         i += used + 1
     return found

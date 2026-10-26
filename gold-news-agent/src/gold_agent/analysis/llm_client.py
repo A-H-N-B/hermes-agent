@@ -27,7 +27,7 @@ from gold_agent.timeutils.sessions import WIB
 
 log = structlog.get_logger(__name__)
 
-Route = Literal["triage", "triage_high", "deep", "outlook", "brief", "desk", "desk_second"]
+Route = Literal["triage", "triage_high", "deep", "outlook", "brief", "desk"]
 BudgetState = Literal["ok", "reserve", "exhausted"]  # reserve: only priority calls still run
 BUDGET_RANK: dict[BudgetState, int] = {"ok": 0, "reserve": 1, "exhausted": 2}
 IN_FLIGHT = "in flight (no result recorded)"

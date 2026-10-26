@@ -179,7 +179,42 @@ function renderSignalCard(payload) {
   card.append(el("p", { class: "muted", text: "Bukan saran keuangan. Keputusan & risiko di tanganmu." }));
 }
 
+// A momentum impulse under way (market/impulse.py), from the context pushed every second.
+function renderImpulse(context) {
+  const box = $("#impulse");
+  const imp = context && context.impulse;
+  box.hidden = !imp;
+  if (!imp) return;
+  const up = imp.side === "BUY";
+  box.className = `impulse ${imp.side}`;
+  clear(box).append(
+    el("b", { text: `⚡ ${up ? "IMPULS NAIK KUAT" : "IMPULS TURUN KUAT"} sekarang` }),
+    ` · ${signed(imp.move)}$ dalam ${imp.window} mnt (z ${num(imp.z, 1)}) · tembus ${up ? "high" : "low"} ${imp.range_minutes} mnt ${num(imp.level)} · mulai ${num(imp.trigger)} pukul ${wib(imp.since)} WIB`,
+    el("small", { text: "Bukan sinyal sendiri: AI memeriksanya sebagai kandidat bila filter lolos." }));
+}
+
+// A proxy feed (PAXG) can be re-based onto the broker's prices (market/rebase.py).
+function renderRebase(context) {
+  const box = $("#rebase");
+  box.hidden = !context || !context.proxy;
+  if (box.hidden) return;
+  $("#rebase-now").textContent = context.price_offset
+    ? `· sekarang disamakan (selisih ${signed(context.price_offset)})` : "· belum disamakan";
+}
+
+async function sendRebase(price) {
+  const status = $("#rebase-status");
+  status.textContent = "Mengirim…";
+  const response = await fetch("/api/price-offset", {
+    method: "POST", credentials: "same-origin",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ broker_price: price }),
+  });
+  status.textContent = response.ok ? (await response.json()).result : "Gagal (isi harga Bid yang wajar).";
+}
+
 function renderPrice(context) {
+  renderImpulse(context);
+  renderRebase(context);
   const price = $("#price");
   if (!context || context.mid === null) {
     const why = context && (context.notes || []).find((n) => n.startsWith("sumber harga"));
@@ -1468,9 +1503,9 @@ async function liveExtras(series) {
   ]);
 }
 
-// The prediction follows the market in real time: every new context (about every 5 s) refreshes
+// The prediction follows the market in real time: every new context (every second) refreshes
 // the extras, at most once per EXTRAS_EVERY ms; the overlay lines only when a bar closes.
-const EXTRAS_EVERY = 5000;
+const EXTRAS_EVERY = 1000;
 let extrasTimer = null;
 let extrasAt = 0;
 let extrasSeries = false;
@@ -1490,6 +1525,82 @@ function refreshLiveExtras(series = false) {
   }, wait);
 }
 
+// The engine state arrives every second: the card and the SELL↔BUY gauge follow it at once;
+// only a new decision (action, active signal, kill switch) needs the full /api/state.
+function onState(state) {
+  const before = lastState && lastState.state;
+  if (currentPage !== "live" || !before || before.action !== state.action
+      || before.active_signal_id !== state.active_signal_id || before.halted !== state.halted) {
+    refreshSoon();
+    return;
+  }
+  lastState = { ...lastState, state };
+  renderSignalCard(lastState);
+  if (lastTiming && lastTiming.now && lastTiming.now.mode !== "signal") {
+    lastTiming.now.score = state.composite_score;
+    renderBoard();
+  }
+}
+
+// ------------------------------------------------------------------ signal alerts
+// A new BUY/SELL signal shows a system notification and plays a short chime, so a signal is
+// not missed while this tab is in the background. The browser asks permission once; the chime
+// needs a click first (browsers block sound until the page was used), which the button gives.
+
+const ALERTS_KEY = "gna.alerts";
+let audio = null;
+
+function alertsOn() {
+  try { return localStorage.getItem(ALERTS_KEY) === "on"; } catch { return false; }
+}
+
+function showAlertsButton() {
+  const on = alertsOn() && "Notification" in window && Notification.permission === "granted";
+  $("#alerts").textContent = on ? "🔔 Notifikasi aktif" : "🔕 Notifikasi";
+}
+
+async function toggleAlerts() {
+  const on = !alertsOn();
+  if (on && "Notification" in window && Notification.permission !== "granted") {
+    await Notification.requestPermission();
+  }
+  try { localStorage.setItem(ALERTS_KEY, on ? "on" : "off"); } catch { /* private window */ }
+  if (on) {
+    audio = audio || new AudioContext();
+    chime("BUY");
+  }
+  showAlertsButton();
+}
+
+function chime(action) {
+  if (!audio) return;
+  const notes = action === "BUY" ? [660, 880] : [880, 660];
+  notes.forEach((freq, i) => {
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    const start = audio.currentTime + i * 0.18;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(start);
+    osc.stop(start + 0.17);
+  });
+}
+
+function alertSignal(signal) {
+  if (!alertsOn() || !signal || !signal.action) return;
+  chime(signal.action);
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const body = `Entry ${num(signal.entry_low)}–${num(signal.entry_high)} · SL ${num(signal.stop_loss)} · TP1 ${num(signal.tp1)} · TP2 ${num(signal.tp2)}`
+    + (signal.impulse_note ? `\n⚡ ${signal.impulse_note}` : "");
+  const note = new Notification(`${signal.action === "BUY" ? "🟢" : "🔴"} ${signal.action} XAUUSD sekarang`, {
+    body, tag: signal.signal_id, requireInteraction: true,
+  });
+  note.onclick = () => { window.focus(); show("live"); note.close(); };
+}
+
 let refreshTimer = null;
 function refreshSoon() { // coalesce bursts of state/signal events into one fetch
   if (refreshTimer) return;
@@ -1497,6 +1608,7 @@ function refreshSoon() { // coalesce bursts of state/signal events into one fetc
     refreshTimer = null;
     if (currentPage === "live") {
       const state = await api("/api/state");
+      lastState = state;
       renderSignalCard(state);
       renderPrice(state.context);
       drawSignal(charts.live, state.active);
@@ -1521,9 +1633,13 @@ function connect(delay = 1000) {
       if (currentPage === "live") refreshLiveExtras();
     }
     else if (message.type === "news" && currentPage === "live") prependNews(message.data);
-    else if (message.type === "state" || message.type === "signal") refreshSoon();
+    else if (message.type === "state") onState(message.data);
+    else if (message.type === "signal") {
+      alertSignal(message.data);
+      if (currentPage === "tradingview") show("tradingview");
+      else refreshSoon();
+    }
     else if (message.type === "outlook" && (currentPage === "outlook" || currentPage === "tradingview")) show(currentPage);
-    else if (message.type === "signal" && currentPage === "tradingview") show("tradingview");
   });
 }
 
@@ -1534,6 +1650,13 @@ window.addEventListener("DOMContentLoaded", () => {
   restoreToggles();
   $("#ind-toggles").addEventListener("change", () => { saveToggles(); applyIndicatorToggles(charts.live); });
   $("#credit-form").addEventListener("submit", saveCredit);
+  $("#alerts").addEventListener("click", toggleAlerts);
+  $("#rebase-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    sendRebase(Number($("#rebase-input").value));
+  });
+  $("#rebase-reset").addEventListener("click", () => sendRebase(null));
+  showAlertsButton();
   buildRing();
   // Fallback when the live push is down: the board, indicator read and forecast still refresh.
   setInterval(() => { if (currentPage === "live") refreshLiveExtras(); }, 30000);

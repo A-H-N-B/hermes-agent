@@ -48,6 +48,13 @@ class MinuteSeries:
         for ts, value in merged:
             self.update(ts, value)
 
+    def shift(self, delta: float) -> None:
+        """Move every value by `delta` (the feed was re-based onto the broker's prices)."""
+        moved = [(ts, value + delta) for ts, value in self.points]
+        self.points.clear()
+        self.points.extend(moved)
+        self._key = None
+
     @property
     def latest(self) -> float | None:
         return self.points[-1][1] if self.points else None

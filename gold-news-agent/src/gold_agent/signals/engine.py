@@ -1,6 +1,10 @@
 """Signal engine (10.3–10.5): turn the composite score into BUY / SELL / WAIT with clear reasons.
 
-Pure decision logic over explicit inputs; the signal service supplies data and persists state.
+Two ways to a candidate: the composite score (news, macro, trend, price) past its threshold, or
+a momentum impulse (market/impulse.py) the slower score does not oppose, so the start of a big
+move is not missed while news and trend catch up. An impulse also replaces the EMA20 pullback
+rule on its side: it is entered near where it began, or not at all. Pure decision logic over
+explicit inputs; the signal service supplies data and persists state.
 """
 
 from __future__ import annotations
@@ -10,17 +14,27 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from gold_agent.config import CONFIG_DIR, Settings
+from gold_agent.market.impulse import describe
 from gold_agent.market.physics_read import signal_note
-from gold_agent.models import Analysis, CalendarEvent, MarketContext, Signal, SignalState, TradeOdds
+from gold_agent.models import (
+    Analysis,
+    CalendarEvent,
+    Impulse,
+    MarketContext,
+    Signal,
+    SignalState,
+    TradeOdds,
+)
 from gold_agent.models.common import Action
 from gold_agent.models.signals import SetupType
+from gold_agent.signals.impulses import record_line
 from gold_agent.signals.levels import TradeLevels, compute_levels, position_size
 from gold_agent.signals.odds import trade_odds
 from gold_agent.signals.scoring import PriceAt, ScoreBreakdown, confidence, score
-from gold_agent.signals.timeframe import MIN_CALLS, TfChoice, choose_timeframe
+from gold_agent.signals.timeframe import MIN_CALLS, TfChoice, choose_timeframe, session_key
 from gold_agent.timeutils.risky import risky_flags
 from gold_agent.timeutils.sessions import SESSION_LABEL_ID, SessionClock, fmt_wib, to_wib
 
@@ -32,6 +46,9 @@ KV_PAPER_DAILY = "paper_daily"  # {"day": WIB date, "r": realised R, "trades"}, 
 KV_EVENT_MOVES = "event_moves"  # event_key -> typical 60-min |move| $, from the event study
 KEEP_CLOSED_IDS = 200
 TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60}
+MIN_SESSION_RECORD = 20  # a session's own impulse record is used once it holds this many
+Mode = Literal["score", "impulse"]
+JSON = dict[str, Any]
 
 
 def config_hash(directory: Path = CONFIG_DIR) -> str:
@@ -132,6 +149,18 @@ def _direction_word(value: float) -> str:
     return "naik" if value > 0 else "turun"
 
 
+def _clip(value: float, bound: float = 1.0) -> float:
+    return max(-bound, min(bound, value))
+
+
+def session_record(record: JSON | None, session: str) -> JSON | None:
+    """The impulse record of this session when it holds enough setups, else all sessions'."""
+    if not record:
+        return None
+    own = (record.get("by_session") or {}).get(session_key(session))
+    return own if own and int(own.get("n") or 0) >= MIN_SESSION_RECORD else record
+
+
 class SignalEngine:
     def __init__(self, settings: Settings, sessions: SessionClock, *, config_version: str) -> None:
         self._settings = settings
@@ -211,9 +240,11 @@ class SignalEngine:
         price_at: PriceAt,
         reliability: Callable[[Analysis], float] | None = None,
         timeframe: TfChoice | None = None,
+        impulse_record: JSON | None = None,
     ) -> Decision:
         """`timeframe`: the chart to size and time a trade on (signals/timeframe.py). Without
-        one (backtest, replay) the session default for this moment applies."""
+        one (backtest, replay) the session default for this moment applies. `impulse_record`:
+        how past impulses ended (signals/impulses.py), for an impulse candidate's odds."""
         engine = self._settings.signal_engine
         weights = engine.weights
         choice = timeframe or choose_timeframe(
@@ -233,6 +264,7 @@ class SignalEngine:
             now=now, context=context, events=events, state=state, breakdown=breakdown
         )
         active = state.active(now)
+        impulse = context.impulse if engine.impulse.enabled else None
 
         def wait(extra: list[str]) -> Decision:
             return Decision(
@@ -242,7 +274,7 @@ class SignalEngine:
                     composite_score=s,
                     confidence=conf,
                     components=breakdown.components,
-                    reasons=self._reasons(breakdown, context),
+                    reasons=self._reasons(breakdown, context, impulse),
                     wait_reasons=list(dict.fromkeys([*reasons, *extra])),
                     active_signal_id=active.signal_id if active else None,
                     halted=state.halted,
@@ -254,11 +286,24 @@ class SignalEngine:
 
         if reasons:
             return wait([])
+        mode: Mode = "score"
         if abs(s) < engine.entry_threshold:
-            return wait([f"skor gabungan {s:+.2f} di bawah ambang ±{engine.entry_threshold:.2f}"])
+            if impulse is None:
+                return wait(
+                    [f"skor gabungan {s:+.2f} di bawah ambang ±{engine.entry_threshold:.2f}"]
+                )
+            blocked = self._impulse_blocked(impulse, breakdown)
+            if blocked:
+                return wait([blocked])
+            mode, side = "impulse", impulse.side
+            conf = self._impulse_confidence(impulse, breakdown, context)
+            choice = self._impulse_choice(choice)
+            tf = choice.tf
+        elif impulse is not None and impulse.side != side:
+            return wait([f"harga bergerak kuat berlawanan: {describe(impulse)}"])
         if conf < engine.min_confidence:
             return wait([f"confidence {conf} di bawah {engine.min_confidence}"])
-        if abs(breakdown.composite_confirmed_only) < engine.entry_threshold:
+        if mode == "score" and abs(breakdown.composite_confirmed_only) < engine.entry_threshold:
             return wait(["menunggu konfirmasi berita (sumber tunggal belum terverifikasi)"])
         replaced: Signal | None = None
         if active is not None:
@@ -278,19 +323,37 @@ class SignalEngine:
             since = (now - last.created_at_utc).total_seconds() / 60
             if since < engine.cooldown_minutes:
                 return wait([f"cooldown {engine.cooldown_minutes} mnt sejak sinyal terakhir"])
-        late = entry_timing(side, context, tf, engine.max_chase_atr)
+        late = self._entry_late(side, context, tf, impulse)
         if late:
             return wait([late])
         levels = compute_levels(side, context, engine.levels, tf)
         if levels is None:
             return wait([f"level SL/TP belum bisa dihitung (ATR {tf} belum tersedia)"])
-        odds = self._odds(side, context, levels, choice)
-        losing = self._losing_setup(odds, tf)
+        record = None
+        if mode == "impulse":  # judged by how past impulses ended, not by the score's record
+            record = session_record(impulse_record, choice.session) or {}
+        odds = self._odds(side, context, levels, choice, record)
+        losing = self._losing_setup(
+            odds, "impuls serupa" if mode == "impulse" else f"setup serupa di {tf}"
+        )
         if losing:
             return wait([losing])
+        lead = impulse if impulse is not None and impulse.side == side else None
+        note = None
+        if lead is not None:
+            note = describe(lead)
+            if record is not None:
+                note += f"; {record_line(record)}"
         signal = self._build_signal(
             side, now, context, breakdown, conf, levels, events, choice, odds
         )
+        update: dict[str, Any] = {
+            "impulse_note": note,
+            "top_reasons": self._reasons(breakdown, context, lead),
+        }
+        if mode == "impulse":
+            update["setup_type"] = "impulse"
+        signal = signal.model_copy(update=update)
         return Decision(
             state=SignalState(
                 ts=now,
@@ -309,10 +372,72 @@ class SignalEngine:
             replaced=replaced,
         )
 
+    def _impulse_blocked(self, impulse: Impulse, breakdown: ScoreBreakdown) -> str | None:
+        """Why an impulse cannot become a candidate: the slower score leans the other way, or
+        strong news says the opposite."""
+        engine = self._settings.signal_engine
+        sign = 1 if impulse.side == "BUY" else -1
+        word = "naik" if sign > 0 else "turun"
+        if sign * breakdown.composite < -engine.impulse.max_against:
+            return (
+                f"impuls {word} tetapi skor gabungan {breakdown.composite:+.2f} berlawanan "
+                "(berita/makro/tren)"
+            )
+        if sign * breakdown.components.N <= -engine.conflict_threshold:
+            return f"impuls {word} berlawanan dengan berita kuat"
+        return None
+
+    def _impulse_confidence(
+        self, impulse: Impulse, breakdown: ScoreBreakdown, context: MarketContext
+    ) -> int:
+        """0-100 for an impulse candidate: how far past the threshold the move is, whether the
+        slower score and the M15 trend agree, minus the proxy-feed penalty."""
+        engine = self._settings.signal_engine
+        sign = 1 if impulse.side == "BUY" else -1
+        strength = min(1.0, max(0.0, (impulse.z - engine.impulse.z) / engine.impulse.z + 0.5))
+        agree = _clip(sign * breakdown.composite / engine.entry_threshold)
+        trend = {True: 0.1, False: -0.1, None: 0.0}[impulse.aligned]
+        quality = 0.9 if context.proxy else 1.0
+        value = 100 * (0.5 + 0.35 * strength + 0.1 * agree + trend) * quality
+        return max(0, min(100, round(value)))
+
+    def _impulse_choice(self, choice: TfChoice) -> TfChoice:
+        """Impulse trades are sized on their own chart (signals/impulses.py replays them so)."""
+        tf = self._settings.signal_engine.impulse.timeframe
+        if tf == choice.tf or tf not in choice.eligible:
+            return choice
+        reason = f"impuls: dihitung di {tf} (cara catatan impuls diuji)"
+        return TfChoice(tf, "impulse", reason, choice.session, choice.options)
+
+    def _entry_late(
+        self, side: str, context: MarketContext, tf: str, impulse: Impulse | None
+    ) -> str | None:
+        """An impulse on the trade's side times the entry itself (near where it began); without
+        one, the EMA20 pullback rule applies."""
+        engine = self._settings.signal_engine
+        if impulse is None or impulse.side != side:
+            return entry_timing(side, context, tf, engine.max_chase_atr)
+        limit = engine.impulse.max_extension_atr
+        if impulse.extension_atr is not None and impulse.extension_atr > limit:
+            return (
+                f"impuls sudah lewat {impulse.extension_atr:.1f} ATR {engine.impulse.timeframe} "
+                f"dari awalnya ({impulse.trigger:.2f}); tunggu peluang berikutnya"
+            )
+        return None
+
     def _odds(
-        self, side: str, context: MarketContext, levels: TradeLevels, choice: TfChoice
+        self,
+        side: str,
+        context: MarketContext,
+        levels: TradeLevels,
+        choice: TfChoice,
+        impulse_record: JSON | None = None,
     ) -> TradeOdds | None:
+        """`impulse_record` (an impulse candidate): its record replaces the chart's."""
         option = next((o for o in choice.options if o.tf == choice.tf), None)
+        accuracy = option.accuracy if option else None
+        if impulse_record is not None:
+            accuracy = {"setups": impulse_record}
         return trade_odds(
             side=side,
             entry=(levels.entry_low + levels.entry_high) / 2,
@@ -323,13 +448,13 @@ class SignalEngine:
             state=context.timeframes.get(choice.tf),
             tf=choice.tf,
             validity_bars=self._settings.signal_engine.validity_bars,
-            accuracy=option.accuracy if option else None,
+            accuracy=accuracy,
             min_calls=MIN_CALLS,
             tp1_fraction=self._settings.paper.tp1_fraction,
             at=context.ts,
         )
 
-    def _losing_setup(self, odds: TradeOdds | None, tf: str) -> str | None:
+    def _losing_setup(self, odds: TradeOdds | None, what: str) -> str | None:
         """Why the plan waits: setups like it lost money on record, beyond doubt."""
         gate = self._settings.signal_engine.ev_gate_min_setups
         if not gate or odds is None or odds.setups < gate or odds.ev_r_ci95 is None:
@@ -338,16 +463,21 @@ class SignalEngine:
         if high >= 0:
             return None
         return (
-            f"setup serupa di {tf} historis rugi: EV {odds.ev_r:+.2f}R "
+            f"{what} historis rugi: EV {odds.ev_r:+.2f}R "
             f"(95%: {low:+.2f}…{high:+.2f}R dari {odds.setups} setup)"
         )
 
     # ------------------------------------------------------------------ signal assembly
 
-    def _reasons(self, breakdown: ScoreBreakdown, context: MarketContext) -> list[str]:
+    def _reasons(
+        self, breakdown: ScoreBreakdown, context: MarketContext, impulse: Impulse | None = None
+    ) -> list[str]:
+        """The strongest three; a momentum impulse under way leads them."""
         weights = self._settings.signal_engine.weights
         c = breakdown.components
         items: list[tuple[float, str]] = []
+        if impulse is not None:
+            items.append((float("inf"), describe(impulse).capitalize()))
         dominant = breakdown.dominant
         if dominant is not None and abs(c.N) > 0.05:
             triage = dominant.analysis.triage
@@ -521,4 +651,5 @@ class SignalEngine:
             timeframe_reason=choice.reason,
             odds=odds,
             physics_note=signal_note(context.timeframes.get(tf), context.physics),
+            price_offset=context.price_offset,
         )

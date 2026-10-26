@@ -5,7 +5,7 @@ from __future__ import annotations
 import statistics
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -13,10 +13,11 @@ from gold_agent.config import Settings
 from gold_agent.market import indicators as ind
 from gold_agent.market import quant
 from gold_agent.market.candles import CandleBuilder
+from gold_agent.market.impulse import Triggers, detect, triggers
 from gold_agent.market.levels import asia_range, compute_levels, previous_complete
 from gold_agent.market.reads import SAR, STOCH
 from gold_agent.market.usd import UsdTracker
-from gold_agent.models import Candle, MarketContext, Tick, TimeframeState
+from gold_agent.models import Candle, Impulse, MarketContext, Tick, TimeframeState
 from gold_agent.models.common import Timeframe
 from gold_agent.timeutils.sessions import SessionClock
 
@@ -57,6 +58,34 @@ class WeekendTracker:
 
 SWING_BARS = 120  # recent complete bars searched for the nearest swing high/low
 Trend = Literal["up", "down", "flat"]
+CONTEXT_TIMEFRAMES: tuple[Timeframe, ...] = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+# A chart's state is recomputed when its last complete bar changes, else at most this often
+# (seconds): the forming bar of a slow chart moves its indicators little in a few seconds, and
+# recomputing all seven every second would cost the event loop tens of milliseconds a second.
+STATE_REFRESH: dict[str, float] = {
+    "M1": 0.0,
+    "M5": 2.0,
+    "M15": 5.0,
+    "M30": 10.0,
+    "H1": 15.0,
+    "H4": 30.0,
+    "D1": 60.0,
+}
+FRESH_BAR = timedelta(minutes=2)  # impulse triggers from an older last bar are stale (a pause)
+
+
+@dataclass
+class ContextCache:
+    """What one context build reuses from the previous one (the market service keeps one per
+    feed): chart states (see STATE_REFRESH) and the impulse triggers, which only change when a
+    minute bar completes, plus when the running impulse began."""
+
+    states: dict[str, tuple[datetime, datetime | None, TimeframeState]] = field(
+        default_factory=lambda: dict[str, tuple[datetime, datetime | None, TimeframeState]]()
+    )
+    triggers: Triggers | None = None
+    triggers_at: datetime | None = None
+    impulse: Impulse | None = None
 
 
 def trend_of(close: float, ema20: float | None, ema50: float | None) -> Trend | None:
@@ -153,6 +182,68 @@ def timeframe_state(
     )
 
 
+def _last_complete(candles: Sequence[Candle]) -> Candle | None:
+    return next((c for c in reversed(candles) if c.complete), None)
+
+
+def _cached_state(
+    tf: Timeframe,
+    candles: Sequence[Candle],
+    width: int,
+    now: datetime,
+    cache: ContextCache | None,
+) -> TimeframeState:
+    done = _last_complete(candles)
+    key = done.open_time if done else None
+    if cache is not None:
+        hit = cache.states.get(tf)
+        if hit and hit[1] == key and (now - hit[0]).total_seconds() < STATE_REFRESH[tf]:
+            state, close = hit[2], candles[-1].close if candles else None
+            return state if state.close == close else state.model_copy(update={"close": close})
+    state = timeframe_state(tf, candles, width)
+    if cache is not None:
+        cache.states[tf] = (now, key, state)
+    return state
+
+
+def _impulse(
+    *,
+    now: datetime,
+    price: float,
+    m1: Sequence[Candle],
+    states: dict[str, TimeframeState],
+    settings: Settings,
+    cache: ContextCache | None,
+) -> Impulse | None:
+    """The momentum impulse at this price (market/impulse.py), triggers reused within a minute."""
+    config = settings.signal_engine.impulse
+    done = [c for c in m1 if c.complete]
+    if not config.enabled or not done or now - done[-1].close_time > FRESH_BAR:
+        return None
+    at = done[-1].close_time
+    if cache is not None and cache.triggers_at == at:
+        trig = cache.triggers
+    else:
+        trig = triggers(done, z=config.z, range_minutes=config.range_minutes)
+        if cache is not None:
+            cache.triggers, cache.triggers_at = trig, at
+    running = cache.impulse if cache is not None else None
+    m15 = states.get("M15")
+    sizing = states.get(config.timeframe)
+    found = detect(
+        trig,
+        price,
+        atr=sizing.atr14 if sizing else None,
+        aligned_trend=m15.trend if m15 else None,
+        since=now,
+    )
+    if found is not None and running is not None and running.side == found.side:
+        found = found.model_copy(update={"since": running.since})
+    if cache is not None:
+        cache.impulse = found
+    return found
+
+
 def atr_percentile(d1: Sequence[Candle], lookback: int = 90) -> float | None:
     done = [c for c in d1 if c.complete]
     if len(done) < 30:
@@ -175,6 +266,7 @@ def build_market_context(
     usd: UsdTracker | None = None,
     yields: YieldSnapshot | None = None,
     weekend: WeekendTracker | None = None,
+    cache: ContextCache | None = None,
 ) -> MarketContext:
     status = sessions.status(now)
     notes: list[str] = []
@@ -194,10 +286,16 @@ def build_market_context(
         notes.append("spread tidak tersedia dari feed ini")
     width = settings.market.swing_half_width
     states = {
-        tf: timeframe_state(tf, builder.candles(tf), width)
-        for tf in ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+        tf: _cached_state(tf, builder.candles(tf), width, now, cache) for tf in CONTEXT_TIMEFRAMES
     }
     m1 = builder.candles("M1")
+    impulse = None
+    if status.open and not stale:
+        impulse = _impulse(
+            now=now, price=tick.mid, m1=m1, states=states, settings=settings, cache=cache
+        )
+    elif cache is not None:
+        cache.impulse = None
     atr_m1 = ind.last(ind.atr([c.high for c in m1], [c.low for c in m1], [c.close for c in m1], 14))
     day_start = sessions.trading_day_start(now)
     session_bars = [c for c in m1 if c.open_time >= day_start]
@@ -263,6 +361,7 @@ def build_market_context(
             "yields_as_of": yields.as_of if yields else None,
             "weekend_drift": weekend.drift if weekend else None,
             "weekend_reference": weekend.reference if weekend else None,
+            "impulse": impulse,
             "notes": notes,
         }
     )

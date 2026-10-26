@@ -7,7 +7,8 @@ event loop. On the wall clock nobody waits for a rebuild: the last result keeps 
 new one is computed in the background (one timeframe at a time), so evaluations and the
 dashboard's forecast stay real-time. Replays and tests compute in line, so their results stay
 deterministic. One book serves every service of a process (`AccuracyBook.shared`), so the
-dashboard reads the signal service's results instead of computing them a second time.
+dashboard reads the signal service's results instead of computing them a second time. The same
+book keeps how past momentum impulses ended (signals/impulses.py, key IMPULSES).
 """
 
 from __future__ import annotations
@@ -23,9 +24,12 @@ import structlog
 from gold_agent.config import TRADE_TIMEFRAMES
 from gold_agent.core.app import AppContext
 from gold_agent.core.clock import SystemClock
+from gold_agent.market.candles import TF_MINUTES
+from gold_agent.market.impulse import VOL_MINUTES
 from gold_agent.models import CalendarEvent
 from gold_agent.signals.forecast import SPAN
 from gold_agent.signals.forecast_score import Held, forecast_accuracy
+from gold_agent.signals.impulses import RECORD_DAYS, impulse_record, replay_impulses
 from gold_agent.signals.meta import train_meta
 from gold_agent.signals.setups import replay_setups, tally
 from gold_agent.timeutils.sessions import SessionClock
@@ -36,6 +40,7 @@ REFRESH = timedelta(hours=1)
 RETRY = timedelta(minutes=5)  # after a failed background rebuild
 WARMUP_BARS = 460  # EMA200 has forgotten its seed by the first measured bar
 SCORED = (*TRADE_TIMEFRAMES, "H4", "D1")  # W1/MN have too few bars in 30 days
+IMPULSES = "impulses"  # the impulse record's key next to the timeframes
 
 
 def days_for(tf: str) -> int:
@@ -113,6 +118,14 @@ class AccuracyBook:
         (None before the first one)."""
         if tf not in SCORED:
             return None
+        return await self._get(tf, source)
+
+    async def impulses(self, *, source: str | None) -> JSON | None:
+        """How past momentum impulses ended on this feed (signals/impulses.py), refreshed like
+        the accuracy."""
+        return await self._get(IMPULSES, source)
+
+    async def _get(self, tf: str, source: str | None) -> JSON | None:
         now = self._ctx.clock.now()
         fresh = self._fresh(tf, now)
         if fresh is not None:
@@ -142,6 +155,10 @@ class AccuracyBook:
             fresh = self._fresh(tf, now)
             if fresh is not None:
                 return fresh
+            if tf == IMPULSES:
+                result = await self._impulse_record(source, now)
+                self._results[tf] = (now, result)
+                return result
             shared = await self._load_shared(now)
             start = now - timedelta(days=days_for(tf))
             bars = await self._ctx.market.candles(
@@ -182,6 +199,30 @@ class AccuracyBook:
             result["days"] = days_for(tf)
             self._results[tf] = (now, result)
             return result
+
+    async def _impulse_record(self, source: str | None, now: datetime) -> JSON:
+        settings = self._ctx.settings
+        engine = settings.signal_engine
+        config = engine.impulse
+        start = now - timedelta(days=RECORD_DAYS)
+        warmup = timedelta(minutes=max(VOL_MINUTES, config.range_minutes) + 5)
+        m1 = await self._ctx.market.candles("M1", start - warmup, now, source=source)
+        tf = config.timeframe
+        sizing = await self._ctx.market.candles(tf, start - 30 * SPAN[tf], now, source=source)
+        setups = await asyncio.to_thread(
+            replay_impulses,
+            m1=m1,
+            sizing=sizing,
+            z=config.z,
+            range_minutes=config.range_minutes,
+            max_extension_atr=config.max_extension_atr,
+            sl_atr=engine.levels.sl_atr_multiple,
+            tp1_r=engine.levels.tp_r_multiples[0],
+            validity_minutes=engine.validity_bars * TF_MINUTES[tf],
+            now=now,
+            start=start,
+        )
+        return impulse_record(setups, self._sessions.session) | {"days": RECORD_DAYS}
 
     async def table(
         self, *, source: str | None, timeframes: Sequence[str] = TRADE_TIMEFRAMES

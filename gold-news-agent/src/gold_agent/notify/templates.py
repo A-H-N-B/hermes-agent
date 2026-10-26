@@ -67,6 +67,8 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         f"{icon} <b>{signal.action} XAUUSD</b> | Confidence {signal.confidence}/100",
         f"🕐 {wib_clock(signal.created_at_utc)} WIB · Sesi {esc(signal.session)}",
     ]
+    if signal.impulse_note:
+        lines.append(f"⚡ <b>Momentum</b>: {esc(signal.impulse_note)}")
     if signal.timeframe:
         why = f" ({esc(signal.timeframe_reason)})" if signal.timeframe_reason else ""
         lines.append(f"📊 Chart {esc(signal.timeframe)}{why}")
@@ -99,6 +101,8 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
             seconds = (signal.created_at_utc - signal.first_seen_at).total_seconds()
             trigger += f" (diterima {seconds:.0f} dtk)"
         lines.append(trigger)
+    elif signal.setup_type == "impulse":
+        lines.append("📰 Pemicu: impuls harga (gerak cepat keluar dari range, tanpa berita)")
     else:
         lines.append("📰 Pemicu: makro/teknikal (tanpa berita terkonfirmasi)")
     c = signal.components
@@ -127,10 +131,15 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         lines.append(f"📦 Lot {signal.lot_size:g} (risiko {signal.risk_pct:g}% per posisi)")
     else:
         lines.append(f"📦 Lot: {esc(signal.lot_note or 'belum bisa dihitung')}")
-    if signal.proxy_price:
+    if signal.proxy_price and signal.price_offset:
+        lines.append(
+            f"ℹ️ Harga proxy ({esc(signal.price_source)}) sudah disamakan ke harga brokermu "
+            f"(selisih {signal.price_offset:+.2f}); bila sudah beda lagi, samakan ulang"
+        )
+    elif signal.proxy_price:
         lines.append(
             f"ℹ️ Harga dari proxy ({esc(signal.price_source)}), bukan XAUUSD broker: "
-            "sesuaikan level dengan harga brokermu"
+            "sesuaikan level dengan harga brokermu (atau samakan: /finex harga_bid)"
         )
     lines.append(
         f"📋 Kode TradingView (ketuk untuk salin): <code>{tradingview_code(signal)}</code>"

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, select, update
 
 from gold_agent.models import Candle, MarketContext, Tick
 from gold_agent.storage.db import Database
@@ -72,6 +72,21 @@ class MarketRepo:
         ]
         async with self._db.session() as session:
             await self._db.upsert_many(session, CandleRow, rows, ["source", "tf", "open_time"])
+
+    async def shift_candles(self, source: str, delta: float) -> None:
+        """Move every stored bar of a feed by `delta` (its prices were re-based onto the
+        broker's), so history and new bars stay one series."""
+        async with self._db.session() as session:
+            await session.execute(
+                update(CandleRow)
+                .where(CandleRow.source == source)
+                .values(
+                    open=CandleRow.open + delta,
+                    high=CandleRow.high + delta,
+                    low=CandleRow.low + delta,
+                    close=CandleRow.close + delta,
+                )
+            )
 
     async def candles(
         self,

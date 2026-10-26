@@ -14,7 +14,14 @@ import structlog
 
 from gold_agent.collectors.base import sleep_or_stop
 from gold_agent.core.app import AppContext
-from gold_agent.core.bus import STREAM_ALERTS, STREAM_CONTEXT, STREAM_TICKS
+from gold_agent.core.bus import (
+    STREAM_ALERTS,
+    STREAM_CONTEXT,
+    STREAM_EVENTS,
+    STREAM_TICKS,
+    Message,
+    consume,
+)
 from gold_agent.core.service import run_with_restart
 from gold_agent.fundamentals import snapshot as fundamentals
 from gold_agent.fundamentals.fetch import FundamentalsFetcher
@@ -22,10 +29,16 @@ from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
 from gold_agent.market.adapters.base import PriceAdapter, TickSink
 from gold_agent.market.adapters.factory import binance_adapter, build_price_adapter
 from gold_agent.market.candles import CandleBuilder, aggregate
-from gold_agent.market.context import WeekendTracker, YieldSnapshot, build_market_context
+from gold_agent.market.context import (
+    ContextCache,
+    WeekendTracker,
+    YieldSnapshot,
+    build_market_context,
+)
 from gold_agent.market.cross_assets import SPECS, CrossTracker, resolve_symbols
 from gold_agent.market.fred import fetch_series
 from gold_agent.market.physics import PhysicsInputs, build_physics
+from gold_agent.market.rebase import KV_PRICE_OFFSET, Rebase
 from gold_agent.market.usd import DXY_WEIGHTS, UsdTracker
 from gold_agent.models import (
     Alert,
@@ -36,6 +49,7 @@ from gold_agent.models import (
     Tick,
 )
 from gold_agent.models.common import Timeframe
+from gold_agent.signals.engine import KV_ENGINE, EngineState
 from gold_agent.timeutils.sessions import SessionClock
 
 log = structlog.get_logger(__name__)
@@ -79,6 +93,7 @@ class MarketService:
         self.usd: UsdTracker | None = None
         self.yields: YieldSnapshot | None = None
         self.weekend = WeekendTracker()
+        self.context_cache = ContextCache()
         self.contract_size: float | None = None
         self.volume_step: float | None = None
         self._last_store: datetime | None = None
@@ -87,10 +102,12 @@ class MarketService:
         self._pending_ticks: list[Tick] = []
         self._feed: PriceAdapter | None = adapter
         self._stale_alerted = False
+        self.rebase = Rebase()  # a proxy feed re-based onto the user's broker (market/rebase.py)
 
     # ------------------------------------------------------------------ ticks
 
     async def on_tick(self, tick: Tick) -> None:
+        tick = self.rebase.tick(tick)
         self.last_tick = tick
         self.cross.update_gold(tick.ts, tick.mid)
         market = self._ctx.settings.market
@@ -128,6 +145,7 @@ class MarketService:
         the new feed's own history."""
         log.warning("market.source_changed", old=self.builder.source, new=source)
         self.builder.reset()
+        self.context_cache = ContextCache()
         if self._feed is not None:
             await self.load_history(self._feed)
 
@@ -141,7 +159,9 @@ class MarketService:
         h1: list[Candle] = []
         for tf, count in market.history_bars.items():
             try:
-                candles = self._trading_hours_only(await adapter.history(tf, count))
+                candles = self.rebase.candles(
+                    self._trading_hours_only(await adapter.history(tf, count))
+                )
             except Exception as exc:
                 log.warning("market.history_failed", tf=tf, error=repr(exc)[:200])
                 continue
@@ -179,11 +199,17 @@ class MarketService:
             usd=self.usd,
             yields=self.yields,
             weekend=self.weekend,
+            cache=self.context_cache,
         )
         problem = getattr(self._feed, "problem", None)
         if problem and (snapshot.mid is None or snapshot.stale):
             snapshot = snapshot.model_copy(
                 update={"notes": [*snapshot.notes, f"sumber harga: {problem}"]}
+            )
+        note = self.rebase.note()
+        if note and self.rebase.applies(snapshot.source or ""):
+            snapshot = snapshot.model_copy(
+                update={"price_offset": self.rebase.offset, "notes": [*snapshot.notes, note]}
             )
         return snapshot.model_copy(
             update={
@@ -405,11 +431,12 @@ class MarketService:
 
     async def _cross_loop(self, stop: asyncio.Event) -> None:
         """The dollar and related markets from the broker's MT5 (market/cross_assets.py):
-        symbols found once, a few days of minute history, then a quote every 5 s. While MT5
-        is closed or logged out it waits and tries again every minute."""
+        symbols found once, a few days of minute history, then quotes as often as the context
+        is built. While MT5 is closed or logged out it waits and tries again every minute."""
         mt5 = self._mt5_feed()
         if mt5 is None:
             return
+        every = self._ctx.settings.infra.context_interval_seconds
         symbols: dict[str, str] | None = None
         failing = False
         while not stop.is_set():
@@ -427,8 +454,57 @@ class MarketService:
                 if not failing:
                     log.warning("market.cross_unavailable", error=repr(exc)[:200])
                 failing, symbols = True, None
-            if await sleep_or_stop(stop, 60 if failing else 5):
+            if await sleep_or_stop(stop, 60 if failing else every):
                 return
+
+    # ------------------------------------------------------------------ broker prices
+
+    async def calibrate(self, broker: float | None, at: datetime) -> str:
+        """Re-base the proxy feed onto a broker bid seen at `at` (None: back to the feed's own
+        prices, market/rebase.py). Returns what happened, in Indonesian."""
+        now = self._ctx.clock.now()
+        tick = self.last_tick
+        if tick is None:
+            return "belum ada harga dari feed: coba lagi sebentar"
+        if not tick.proxy:
+            return f"harga sudah dari broker ({tick.source}): tidak perlu disamakan"
+        stored = await self._ctx.ops.kv_get(KV_ENGINE)
+        if stored and EngineState.from_json(stored).active(now) is not None:
+            return "ada sinyal aktif: samakan harga setelah sinyal itu selesai"
+        raw = self.rebase.raw_bid_at(at)
+        if raw is None:
+            return "belum ada harga dari feed: coba lagi sebentar"
+        new = 0.0 if broker is None else round(broker - raw, 2)
+        old = self.rebase.offset if self.rebase.source == tick.source else 0.0
+        delta = round(new - old, 2)
+        if delta:
+            await self._ctx.market.shift_candles(tick.source, delta)
+            self.builder.shift(delta)
+            self.cross.gold.shift(delta)
+            self.context_cache = ContextCache()
+            self.last_tick = tick.model_copy(
+                update={"bid": tick.bid + delta, "ask": tick.ask + delta}
+            )
+        self.rebase.source, self.rebase.offset = tick.source, new
+        self.rebase.at, self.rebase.broker = now, broker
+        log.info("market.rebased", source=tick.source, offset=new, delta=delta)
+        if broker is None:
+            return f"harga kembali ke harga asli {tick.source}"
+        return f"harga {tick.source} disamakan ke broker: selisih {new:+.2f}"
+
+    async def handle_event(self, message: Message) -> None:
+        data = message.data
+        if data.get("type") != "price.calibrate":
+            return
+        broker = data.get("broker_price")
+        at = data.get("at")
+        moment = datetime.fromisoformat(at) if at else self._ctx.clock.now()
+        result = await self.calibrate(float(broker) if broker is not None else None, moment)
+        await self._ctx.ops.kv_set(
+            KV_PRICE_OFFSET,
+            self.rebase.to_json() | {"request": data.get("request"), "result": result},
+            self._ctx.clock.now(),
+        )
 
     # ------------------------------------------------------------------ run
 
@@ -464,7 +540,21 @@ class MarketService:
                     source="DXY sintetis (MT5)", history_days=ctx.settings.market.usd_history_days
                 )
 
-            tasks: list[asyncio.Task[None]] = [asyncio.create_task(self._context_loop(stop))]
+            self.rebase = Rebase.from_json(await ctx.ops.kv_get(KV_PRICE_OFFSET))
+            tasks: list[asyncio.Task[None]] = [
+                asyncio.create_task(self._context_loop(stop)),
+                asyncio.create_task(
+                    consume(
+                        ctx.bus,
+                        STREAM_EVENTS,
+                        "market-events",
+                        "market-1",
+                        self.handle_event,
+                        stop,
+                        start="latest",
+                    )
+                ),
+            ]
             if adapter is not None:
                 await self.load_history(adapter)
                 await self._seed_gold_minutes()

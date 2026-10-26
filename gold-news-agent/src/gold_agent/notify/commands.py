@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_EVENTS
 from gold_agent.evaluation.performance import summarize
+from gold_agent.market.rebase import request_calibration
 from gold_agent.models import CalendarEvent, Signal
 from gold_agent.notify import templates
 from gold_agent.notify.dispatcher import Dispatcher
@@ -32,6 +33,7 @@ HELP = "\n".join(
         "/calendar — event 48 jam ke depan",
         "/stats — performa paper trading",
         "/mute 1h — bisukan notifikasi 🟡/🔵 (🔴 tetap masuk); /mute off",
+        "/finex 4192.23 — samakan harga proxy (PAXG) dengan Bid brokermu; /finex reset",
         "/stop — kill switch: hentikan sinyal baru; /resume — lanjutkan",
     ]
 )
@@ -56,6 +58,7 @@ class BotCommands:
         "calendar",
         "stats",
         "mute",
+        "finex",
         "stop",
         "resume",
     )
@@ -81,6 +84,7 @@ class BotCommands:
             "calendar": self._calendar,
             "stats": self._stats,
             "mute": self._mute,
+            "finex": self._finex,
             "stop": self._stop,
             "resume": self._resume,
         }
@@ -176,6 +180,20 @@ class BotCommands:
             f"🔕 Notifikasi 🟡/🔵 dibisukan s/d {when} WIB. "
             "Sinyal & berita 🔴 tetap masuk; sisanya dikirim sebagai ringkasan."
         )
+
+    async def _finex(self, args: list[str], user_id: int | None) -> str:
+        word = args[0].replace(",", ".") if args else ""
+        if word.lower() in ("reset", "asli", "off"):
+            broker = None
+        else:
+            try:
+                broker = float(word)
+            except ValueError:
+                return "Format: /finex 4192.23 (harga Bid XAUUSD di brokermu), atau /finex reset"
+            if not 0 < broker < 1e6:
+                return "Harga tidak wajar. Contoh: /finex 4192.23"
+        result = await request_calibration(self._ctx, broker, by=f"telegram:{user_id}")
+        return f"💱 {esc(result)}"
 
     async def _set_halt(self, halted: bool, user_id: int | None) -> None:
         ctx = self._ctx
