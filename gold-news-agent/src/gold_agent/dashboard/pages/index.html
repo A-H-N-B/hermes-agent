@@ -50,10 +50,11 @@
       </article>
       <details id="rebase" class="card rebase" hidden>
         <summary>Harga beda dengan broker (Finex)? Samakan di sini <span id="rebase-now" class="muted"></span></summary>
-        <p class="muted">Harga di sini dari token emas PAXG (Binance), bukan dari brokermu, jadi
-          berbeda beberapa dolar. Ketik harga <b>Bid</b> XAUUSD yang tampil di Finex sekarang: semua
-          harga, candle, entry, SL dan TP di alat ini lalu digeser agar sama dengan Finex. Selisihnya
-          bisa berubah pelan-pelan; samakan lagi bila sudah beda. Tidak bisa saat ada sinyal aktif.</p>
+        <p class="muted">Harga di sini dari Binance (<span id="rebase-feed">proxy</span>), bukan dari
+          brokermu, jadi bisa berbeda sedikit. Ketik harga <b>Bid</b> XAUUSD yang tampil di Finex
+          sekarang: semua harga, candle, entry, SL dan TP di alat ini lalu digeser agar sama dengan
+          Finex. Selisihnya bisa berubah pelan-pelan; samakan lagi bila sudah beda. Tidak bisa saat
+          ada sinyal aktif. Harga yang persis sama: terminal MT5 Finex di komputer ini.</p>
         <form id="rebase-form" class="actions">
           <label for="rebase-input">Bid XAUUSD di Finex:</label>
           <input id="rebase-input" type="number" min="0" step="0.01" required placeholder="contoh 4192.23">

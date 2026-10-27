@@ -10,12 +10,13 @@ from typing import Any
 import httpx
 import pytest
 
+from gold_agent.config import Settings, SourceStatus, load_sources
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_ALERTS, STREAM_CONTEXT
 from gold_agent.core.clock import ManualClock
 from gold_agent.market.adapters.base import TickSink
 from gold_agent.market.adapters.binance import BinanceStreamParser, parse_klines
-from gold_agent.market.adapters.factory import feed_order
+from gold_agent.market.adapters.factory import build_price_adapter, feed_order
 from gold_agent.market.adapters.failover import FailoverAdapter
 from gold_agent.market.adapters.mt5 import (
     Mt5Adapter,
@@ -79,6 +80,66 @@ def test_binance_klines_mark_the_running_bar_incomplete() -> None:
     candles = parse_klines(rows, source="b", tf="M1", now=datetime.fromtimestamp(1792022500, UTC))
     assert [c.complete for c in candles] == [True, False]
     assert candles[0].ticks == 7 and candles[0].close == 1.5
+
+
+async def test_spot_gold_comes_from_the_xauusdt_perpetual_book_and_futures_klines(
+    ctx_factory: Callable[..., AppContext], settings: Settings
+) -> None:
+    """The XAUUSDT perpetual (spot gold) runs on Binance's USD-M futures hosts: its bars come
+    from /fapi/v1/klines (1500 a request), its prices from the /public bookTicker stream."""
+    registry = load_sources(local=False)
+    verified = [
+        registry.get(sid).model_copy(update={"status": SourceStatus.VERIFIED})
+        for sid in ("binance_xau_ws", "binance_xau_rest")
+    ]
+    assert verified[0].url and "/public/" in verified[0].url  # bookTicker is a /public stream
+    feed = settings.price_feed.model_copy(update={"primary": "binance_xau", "fallbacks": ()})
+    ctx = ctx_factory(verified, settings_override=settings.model_copy(update={"price_feed": feed}))
+    requests: list[httpx.Request] = []
+    start = 1792022400000
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        limit = int(request.url.params["limit"])
+        end = int(request.url.params.get("endTime", start + 2000 * 60_000))
+        rows = [
+            [t, "3999", "4000", "3998", "3999.5", "1", t + 59_999, "0", 4]
+            for t in range(end - limit * 60_000 + 1, end, 60_000)
+        ][-limit:]
+        return httpx.Response(200, json=rows)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+        adapter = build_price_adapter(ctx, client)
+        assert adapter is not None and adapter.name == "binance_xau" and adapter.proxy
+        bars = await adapter.history("M1", 2000)
+    await ctx.close()
+    assert len(bars) == 2000 and {b.source for b in bars} == {"binance_xau"}
+    assert [r.url.path for r in requests] == ["/fapi/v1/klines"] * 2
+    assert requests[0].url.host == "fapi.binance.com"
+    assert (
+        requests[0].url.params["symbol"] == "XAUUSDT" and requests[0].url.params["limit"] == "1500"
+    )
+    parser = BinanceStreamParser("binance_xau", proxy=True)
+    book = {
+        "stream": "xauusdt@bookTicker",
+        "data": {
+            "e": "bookTicker",
+            "u": 9,
+            "E": 1792024200123,
+            "T": 1792024200120,
+            "s": "XAUUSDT",
+            "b": "3999.12",
+            "B": "3",
+            "a": "3999.25",
+            "A": "2",
+        },
+    }
+    tick = parser.parse(json.dumps(book), utc("2026-10-13T12:30"))
+    assert tick is not None and (tick.bid, tick.ask, tick.source) == (
+        3999.12,
+        3999.25,
+        "binance_xau",
+    )
 
 
 # --------------------------------------------------------------------------- Twelve Data
@@ -223,9 +284,18 @@ async def test_mt5_adapter_without_a_symbol_uses_the_detected_one() -> None:
     assert selected == ["XAUUSDm"]
 
 
-def test_auto_feed_prefers_the_brokers_mt5_price_when_mt5_is_installed() -> None:
-    assert feed_order("auto", ("twelvedata",), mt5=True) == ["mt5", "binance_paxg", "twelvedata"]
-    assert feed_order("auto", ("twelvedata",), mt5=False) == ["binance_paxg", "twelvedata"]
+def test_auto_feed_prefers_the_broker_then_spot_gold_then_the_gold_token() -> None:
+    assert feed_order("auto", ("twelvedata",), mt5=True) == [
+        "mt5",
+        "binance_xau",
+        "binance_paxg",
+        "twelvedata",
+    ]
+    assert feed_order("auto", ("twelvedata",), mt5=False) == [
+        "binance_xau",
+        "binance_paxg",
+        "twelvedata",
+    ]
     assert feed_order("mt5", ("binance_paxg", "mt5"), mt5=False) == ["mt5", "binance_paxg"]
 
 
@@ -285,6 +355,70 @@ async def test_failover_moves_to_the_next_feed_after_repeated_failures() -> None
         failover_module.sleep_or_stop = original
     assert primary.runs == 2 and received and received[0].source == "backup"
     assert adapter.name == "backup"
+
+
+@pytest.fixture
+def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gold_agent.market.adapters.failover as failover_module
+
+    async def no_sleep(stop_event: asyncio.Event, seconds: float) -> bool:
+        await asyncio.sleep(0)
+        return stop_event.is_set()
+
+    monkeypatch.setattr(failover_module, "sleep_or_stop", no_sleep)
+
+
+class DroppingAdapter(FlakyAdapter):
+    async def run(self, emit: TickSink, stop: asyncio.Event) -> None:
+        self.runs += 1
+        now = datetime.now(UTC)
+        await emit(Tick(ts=now, bid=1, ask=2, source=self.name, received_at=now))
+        # ... and the server closes the stream (Binance does after 24 hours)
+
+
+@pytest.mark.usefixtures("no_backoff")
+async def test_a_stream_that_drops_after_delivering_is_reconnected_not_failed_over() -> None:
+    from gold_agent.core.clock import SystemClock
+
+    primary = DroppingAdapter("binance_xau", fail=False)
+    backup = FlakyAdapter("binance_paxg", fail=False)
+    adapter = FailoverAdapter([primary, backup], SystemClock(), max_failures=2)
+    stop = asyncio.Event()
+
+    async def emit(tick: Tick) -> None:
+        if primary.runs == 5:
+            stop.set()
+
+    await asyncio.wait_for(adapter.run(emit, stop), timeout=5)
+    assert backup.runs == 0 and adapter.name == "binance_xau"
+
+
+@pytest.mark.usefixtures("no_backoff")
+async def test_a_fallback_hands_back_to_the_primary_as_soon_as_it_delivers_again() -> None:
+    from gold_agent.core.clock import SystemClock
+
+    primary = FlakyAdapter("binance_xau", fail=True)
+    backup = FlakyAdapter("binance_paxg", fail=False)
+    adapter = FailoverAdapter(
+        [primary, backup],
+        SystemClock(),
+        max_failures=1,
+        retry_primary_seconds=0.05,
+        check_seconds=0.01,
+    )
+    sources: list[str] = []
+    stop = asyncio.Event()
+
+    async def emit(tick: Tick) -> None:
+        sources.append(tick.source)
+        if tick.source == "binance_paxg" and backup.runs == 2:
+            primary.fail = False  # the primary answers again after one retry in vain
+        if tick.source == "binance_xau":
+            stop.set()
+
+    await asyncio.wait_for(adapter.run(emit, stop), timeout=5)
+    assert sources == ["binance_paxg", "binance_paxg", "binance_xau"]
+    assert primary.runs == 3 and adapter.name == "binance_xau"
 
 
 class QuietAdapter(FlakyAdapter):

@@ -114,6 +114,15 @@ def parse_value(raw: str) -> Any:
     return raw if CLOCK_TIME.match(raw) else yaml.safe_load(raw)
 
 
+def get_value(config: Path, dotted: str) -> Any:
+    """One setting as this computer runs it: settings.yaml with local.yaml on top (None when
+    absent)."""
+    value: Any = load_merged_settings(config / SETTINGS)
+    for key in dotted.split("."):
+        value = value.get(key) if isinstance(value, Mapping) else None
+    return value
+
+
 def set_value(config: Path, dotted: str, raw: str) -> dict[str, Any]:
     """Write one key (e.g. `http.contact_email`) into local.yaml; returns the new content."""
     path = config / LOCAL_SETTINGS
@@ -248,6 +257,8 @@ def main(argv: Sequence[str] | None = None, validate: Callable[[], object] | Non
     parser = argparse.ArgumentParser(prog="gold-agent config", description=__doc__)
     parser.add_argument("--config-dir", type=Path, default=CONFIG_DIR)
     sub = parser.add_subparsers(dest="action", required=True)
+    show = sub.add_parser("get", help="tampilkan satu pengaturan yang berlaku di komputer ini")
+    show.add_argument("key", help="mis. price_feed.primary")
     put = sub.add_parser("set", help="tulis satu pengaturan ke config/local.yaml")
     put.add_argument("key", help="mis. http.contact_email")
     put.add_argument("value")
@@ -259,7 +270,11 @@ def main(argv: Sequence[str] | None = None, validate: Callable[[], object] | Non
     args = parser.parse_args(argv)
     config: Path = args.config_dir
     try:
-        if args.action == "set":
+        if args.action == "get":
+            value = get_value(config, args.key)
+            scalar = value is None or not isinstance(value, Mapping | list)
+            print(("" if value is None else value) if scalar else yaml.safe_dump(value).strip())
+        elif args.action == "set":
             _checked(config, lambda: set_value(config, args.key, args.value), validate)
             print(f"{args.key} disimpan di config/{LOCAL_SETTINGS}")
         elif args.action == "verified":

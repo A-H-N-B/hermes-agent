@@ -486,6 +486,28 @@ kedua yang diuji terhadap data acak:
   dan restart tidak mengulangnya. Tanpa AI (mati, gangguan, batas) program menjawab dengan
   ringkasannya sendiri, jadi pertanyaan selalu dijawab. ±$0,05 per pertanyaan.
 
+### ADR-029 Harga tanpa MT5 dari Binance XAUUSDT, bukan PAXG — Diterapkan
+
+- Pengguna: alat menulis 4012 saat Finex 3999. PAXG adalah token emas: harganya mengikuti emas
+  tetapi dengan premium $5–20 yang bergeser sendiri, jadi selisih yang sudah disamakan pun
+  lepas lagi. Sejak Januari 2026 Binance punya **XAUUSDT perpetual** (kontrak TradFi USD-M) yang
+  indeksnya diambil dari beberapa vendor harga XAUUSD spot setiap detik; harga kontraknya
+  mengikuti spot dalam hitungan sen sampai satu-dua dolar.
+- `price_feed.primary: auto` = MT5 (harga broker sendiri) → `binance_xau` → `binance_paxg`.
+  Data publik tanpa akun: `bookTicker` dari rute `/public` USD-M
+  (`wss://fstream.binance.com/public/stream`; rute tanpa `/public` diam untuk sebagian stream),
+  riwayat dari `/fapi/v1/klines` (1.500 bar per permintaan). Tetap berlabel *proxy*: bukan kutipan
+  broker, dan bisa disamakan persis dengan `/finex` (ADR-027).
+- Updater dan installer menguji `binance_xau_ws`/`binance_xau_rest` dari komputer pengguna;
+  komputer yang memilih `binance_paxg` ("tanpa MT5") pindah ke `binance_xau` begitu lolos
+  (`gold-agent config get` membaca pilihan yang berlaku).
+- Failover: stream yang sudah mengirim harga lalu putus (Binance menutup koneksi tiap 24 jam)
+  disambung ulang, tidak dihitung gagal; di cadangan, sumber utama dicoba lagi tiap 10 menit
+  (15 detik untuk mengirim harga, lalu cadangan lanjut). Dulu sumber utama baru dicoba setelah
+  cadangan sendiri gagal, jadi alat bisa tertahan di PAXG berjam-jam.
+- Harga yang persis sama dengan aplikasi Finex hanya dari server Finex sendiri: terminal MT5 Finex
+  di komputer yang sama (alat hanya membaca, tidak pernah login).
+
 ## Estimasi biaya LLM (untuk Q4)
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):

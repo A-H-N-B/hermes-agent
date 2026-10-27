@@ -1,5 +1,7 @@
-"""Binance market-data-only endpoints (*.binance.vision): PAXGUSDT as a gold proxy, EURUSDT
-as a USD-strength proxy. Combined stream of bookTicker (bid/ask) + aggTrade (last, volume)."""
+"""Binance public market data: XAUUSDT, the USD-M perpetual that tracks spot gold (fstream /
+fapi), PAXGUSDT as a gold-token proxy and EURUSDT as a USD-strength proxy (market-data-only
+*.binance.vision hosts). Combined streams of bookTicker (bid/ask), plus aggTrade (last, volume)
+where the stream carries it."""
 
 from __future__ import annotations
 
@@ -97,6 +99,10 @@ def parse_klines(
     return candles
 
 
+SPOT_KLINES = ("/api/v3/klines", 1000)  # path, most bars per request
+FUTURES_KLINES = ("/fapi/v1/klines", 1500)
+
+
 class BinanceAdapter:
     def __init__(
         self,
@@ -108,6 +114,7 @@ class BinanceAdapter:
         proxy: bool,
         clock: Clock,
         client: httpx.AsyncClient,
+        klines: tuple[str, int] = SPOT_KLINES,
     ) -> None:
         self.name = name
         self.proxy = proxy
@@ -115,6 +122,7 @@ class BinanceAdapter:
         self._ws_url = ws_url
         parts = urlsplit(rest_url)
         self._rest_base = f"{parts.scheme}://{parts.netloc}"
+        self._klines_path, self._klines_limit = klines
         self._clock = clock
         self._client = client
         self.parser = BinanceStreamParser(name, proxy)
@@ -146,11 +154,11 @@ class BinanceAdapter:
             params: dict[str, str | int] = {
                 "symbol": self._symbol,
                 "interval": INTERVALS[tf],
-                "limit": min(1000, count - len(candles)),
+                "limit": min(self._klines_limit, count - len(candles)),
             }
             if end_ms is not None:
                 params["endTime"] = end_ms
-            response = await self._client.get(f"{self._rest_base}/api/v3/klines", params=params)
+            response = await self._client.get(self._rest_base + self._klines_path, params=params)
             response.raise_for_status()
             rows: list[list[Any]] = response.json()
             if not rows:

@@ -24,9 +24,11 @@ function Update-GoldNewsAgent {
     # US government data behind the daily fundamentals (public domain, no key). A source that
     # does not answer from this computer stays off and is tried again on the next update.
     $Official = @('treasury_yield_curve', 'treasury_real_yield_curve', 'cftc_cot_gold')
-    # The price without MT5 (price_feed.primary binance_paxg, and the fallback with MT5): gold
-    # as PAXG and the dollar as EURUSDT from Binance's public market-data hosts.
-    $Market = @('binance_paxg_ws', 'binance_paxg_rest', 'binance_eurusdt_ws')
+    # The price without MT5 (and the fallback with MT5), from Binance's public market data:
+    # spot gold as the XAUUSDT perpetual, the PAXG gold token as a last resort, the dollar as
+    # EURUSDT.
+    $Spot = @('binance_xau_ws', 'binance_xau_rest')
+    $Market = $Spot + @('binance_paxg_ws', 'binance_paxg_rest', 'binance_eurusdt_ws')
     $Tested = $Official + $Market
 
     function Step($n, $text) { Write-Host ""; Write-Host "=== LANGKAH $n/7: $text ===" -ForegroundColor Cyan }
@@ -100,6 +102,15 @@ function Update-GoldNewsAgent {
         & $Exe config verified @passed
         if ($LASTEXITCODE -eq 0) { Ok "Aktif: $($passed -join ', ')" }
         else { Warn 'Sumber tidak bisa diaktifkan (lihat tulisan merah di atas).' }
+    }
+    # PAXG trades $5-20 above spot gold; XAUUSDT follows the broker's XAUUSD to within cents or
+    # a dollar or two. A computer told to use PAXG ("no MT5") moves to XAUUSDT once it answers.
+    if (@($Spot | Where-Object { $passed -contains $_ }).Count -eq $Spot.Count) {
+        $primary = (& $Exe config get price_feed.primary | Out-String).Trim()
+        if ($primary -eq 'binance_paxg') {
+            & $Exe config set price_feed.primary binance_xau
+            if ($LASTEXITCODE -eq 0) { Ok 'Harga emas kini dari spot XAUUSD (Binance XAUUSDT), bukan token PAXG' }
+        }
     }
     $failed = @($Tested | Where-Object { $passed -notcontains $_ })
     if ($failed.Count) { Warn "Belum terjangkau dari jaringan ini (dicoba lagi saat update berikutnya): $($failed -join ', ')" }

@@ -15,7 +15,7 @@ VPS Linux (Docker Compose)
   redis ───── bus antar-service (Redis Streams, AOF)
   migrate ─── sekali jalan: `db upgrade` sebelum service lain mulai
   collector ─ RSS/JSON + channel Telegram  → news.raw
-  market ──── harga (Binance PAXG / Twelve Data / MT5 bridge), candle, konteks pasar
+  market ──── harga (Binance XAUUSDT / PAXG / Twelve Data / MT5 bridge), candle, konteks pasar
   calendar ── kalender ekonomi, FOMC, playbook T-60/T-30
   analyzer ── prefilter, parser rilis (fast path), triage Claude, deep analysis, lonjakan harga
   signal ──── skor gabungan → sinyal BUY/SELL/WAIT, outlook 24 jam

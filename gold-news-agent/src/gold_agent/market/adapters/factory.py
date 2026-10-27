@@ -11,7 +11,7 @@ import structlog
 
 from gold_agent.core.app import AppContext
 from gold_agent.market.adapters.base import PriceAdapter
-from gold_agent.market.adapters.binance import BinanceAdapter
+from gold_agent.market.adapters.binance import FUTURES_KLINES, SPOT_KLINES, BinanceAdapter
 from gold_agent.market.adapters.bridge import BridgeTickAdapter
 from gold_agent.market.adapters.failover import FailoverAdapter
 from gold_agent.market.adapters.twelvedata import TwelveDataAdapter
@@ -39,6 +39,7 @@ def binance_adapter(
     name: str,
     symbol: str,
     proxy: bool,
+    klines: tuple[str, int] = SPOT_KLINES,
 ) -> BinanceAdapter | None:
     ids = [ws_id] + ([rest_id] if rest_id else [])
     if not _verified(ctx, *ids):
@@ -56,11 +57,23 @@ def binance_adapter(
         proxy=proxy,
         clock=ctx.clock,
         client=client,
+        klines=klines,
     )
 
 
 def _make(ctx: AppContext, client: httpx.AsyncClient, feed: str) -> PriceAdapter | None:
     settings = ctx.settings
+    if feed == "binance_xau":  # the perpetual that tracks XAUUSD spot
+        return binance_adapter(
+            ctx,
+            client,
+            ws_id="binance_xau_ws",
+            rest_id="binance_xau_rest",
+            name="binance_xau",
+            symbol="XAUUSDT",
+            proxy=True,
+            klines=FUTURES_KLINES,
+        )
     if feed == "binance_paxg":
         return binance_adapter(
             ctx,
@@ -98,14 +111,16 @@ def mt5_installed() -> bool:
     return sys.platform == "win32" and importlib.util.find_spec("MetaTrader5") is not None
 
 
+AUTO = ("binance_xau", "binance_paxg")  # without MT5: spot gold first, the gold token last
+
+
 def feed_order(primary: str, fallbacks: tuple[str, ...], *, mt5: bool) -> list[str]:
-    """`auto`: the broker's own MT5 price when this computer runs MT5, else Binance PAXG (the
-    failover returns to MT5 once its terminal is up). Duplicates are dropped."""
+    """`auto`: the broker's own MT5 price when this computer runs MT5, else Binance's XAUUSDT
+    (spot gold), else PAXG (the failover tries the first one again every few minutes).
+    Duplicates are dropped."""
     expanded: list[str] = []
     for feed in (primary, *fallbacks):
-        expanded += (
-            (["mt5", "binance_paxg"] if mt5 else ["binance_paxg"]) if feed == "auto" else [feed]
-        )
+        expanded += [*(("mt5",) if mt5 else ()), *AUTO] if feed == "auto" else [feed]
     return list(dict.fromkeys(expanded))
 
 

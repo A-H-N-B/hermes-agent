@@ -218,7 +218,7 @@ Data FRED harian (bukan real-time). Sistem memakainya untuk konteks yield 10 tah
    Market Watch didahulukan). Bila yang terpilih salah, tetapkan sendiri:
    `uv run gold-agent config set price_feed.mt5_symbol XAUUSDm`.
 4. Dependensinya (`uv sync --extra mt5`) sudah dipasang installer Windows. Biarkan terminal MT5
-   tetap terbuka dan login selama sistem jalan; bila MT5 ditutup, harga sementara memakai PAXG.
+   tetap terbuka dan login selama sistem jalan; bila MT5 ditutup, harga sementara memakai spot XAUUSDT dari Binance.
 
 ---
 

@@ -218,7 +218,7 @@ class TradingSettings(StrictModel):
     timeframe: TimeframeSettings
 
 
-PriceFeedName = Literal["auto", "mt5", "mt5_bridge", "twelvedata", "binance_paxg"]
+PriceFeedName = Literal["auto", "mt5", "mt5_bridge", "twelvedata", "binance_xau", "binance_paxg"]
 
 
 class PriceFeedSettings(StrictModel):

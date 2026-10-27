@@ -39,7 +39,7 @@ tambahan hasil review Fase 0).
 - Lot hanya dihitung jika `risk.account_equity` dan contract size broker diketahui. Tidak pernah
   ditebak.
 - Outlook 24 jam dibuat tiap jam (dan saat berita penting); jam > 4 jam ke depan ditulis bersyarat.
-  Minggu 16:00 WIB ada "outlook pembukaan Senin" dengan estimasi gap dari PAXG.
+  Minggu 16:00 WIB ada "outlook pembukaan Senin" dengan estimasi gap dari harga emas 24/7 Binance.
 - Makro M membaca pasar penggerak emas langsung dari MT5 (dolar dari pasangan FX broker, yield AS,
   USDJPY, perak, minyak, S&P 500, VIX), masing-masing dibobot menurut korelasinya dengan emas yang
   terukur, ditambah bias fundamental harian (yield riil & 2 th Treasury AS, breakeven, posisi
@@ -54,8 +54,9 @@ tambahan hasil review Fase 0).
   kandidat BUY/SELL tanpa menunggu berita. Akurasinya diukur ulang dari impuls 7 hari terakhir.
 - Semua diperbarui tiap detik (harga, konteks, mesin sinyal, dashboard). Sinyal baru langsung ke
   Telegram, dan dashboard bisa memberi notifikasi + bunyi (tombol "Notifikasi").
-- Tanpa MT5, harga PAXG bisa disamakan ke harga brokermu (Finex): ketik bid broker di halaman Live
-  ("Samakan") atau `/finex 2662.4`; semua level ikut bergeser.
+- Tanpa MT5, harga emas spot dari Binance XAUUSDT (selisih ke broker biasanya di bawah $1–2;
+  PAXG hanya cadangan) dan bisa disamakan persis ke harga brokermu (Finex): ketik bid broker di
+  halaman Live ("Samakan") atau `/finex 2662.4`; semua level ikut bergeser.
 - Tanya AI: tanya "kapan aku harus buy?" di dashboard atau Telegram (`/tanya` atau pesan biasa);
   Opus 5.5 menjawab dari data alat ini saat itu.
 - Ekonofisika (dihitung program, lalu ditimbang desk AI): ekor distribusi, entropi permutasi,
@@ -223,7 +224,7 @@ src/gold_agent/
   analysis/        triage LLM, aturan fallback, verifikasi silang, lonjakan harga
   econ_calendar/   kalender (FF + FOMC), parser rilis (fast path), playbook, kalibrasi surprise
   fundamentals/    bias harian: yield Treasury, CFTC COT, GLD, kejutan data AS, geopolitik
-  market/          adapter harga (Binance PAXG, Twelve Data, MT5), candle, indikator, level,
+  market/          adapter harga (Binance XAUUSDT/PAXG, Twelve Data, MT5), candle, indikator, level,
                    pasar penggerak dari MT5, statistik (GARCH, Hurst, Kalman, rezim),
                    ekonofisika (econophysics.py, physics.py)
   timeutils/       sesi pasar & DST, jam rawan

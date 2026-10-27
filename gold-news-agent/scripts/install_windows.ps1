@@ -19,7 +19,8 @@ function Install-GoldNewsAgent {
     $Base = 'C:\hermes-agent'
     $Root = Join-Path $Base 'gold-news-agent'
     $Sources = @(
-        'binance_paxg_ws', 'binance_paxg_rest', 'binance_eurusdt_ws', 'ff_calendar_week',
+        'binance_xau_ws', 'binance_xau_rest', 'binance_paxg_ws', 'binance_paxg_rest',
+        'binance_eurusdt_ws', 'ff_calendar_week',
         'fed_press_all', 'fed_press_monetary', 'fed_speeches', 'bls_latest', 'bea_releases',
         'ecb_press', 'boj_whatsnew', 'google_news_gold', 'google_news_fed', 'cnbc_economy',
         'gdelt_gold', 'cftc_cot_gold', 'bls_schedule_ics', 'treasury_auctions_upcoming',
@@ -173,7 +174,8 @@ function Install-GoldNewsAgent {
         if ($LASTEXITCODE -ne 0) { Fail 'Sumber tidak bisa diaktifkan (lihat tulisan merah di atas).'; return }
     }
     Ok "Diaktifkan $($passed.Count) sumber: $($passed -join ', ')"
-    if ($passed -notcontains 'binance_paxg_ws' -and $passed -notcontains 'binance_paxg_rest') {
+    $gold = @('binance_xau_ws', 'binance_xau_rest', 'binance_paxg_ws', 'binance_paxg_rest')
+    if (-not @($gold | Where-Object { $passed -contains $_ }).Count) {
         Warn 'Sumber harga Binance gagal dari jaringan ini: harga akan "tidak tersedia".'
     }
 

@@ -235,10 +235,17 @@ async function sendChat(event) {
 }
 
 // A proxy feed (PAXG) can be re-based onto the broker's prices (market/rebase.py).
+// Where the price comes from, in words (context.source).
+const FEED_LABEL = {
+  mt5: "broker (MT5)", mt5_bridge: "broker (MT5)", binance_xau: "spot emas XAUUSDT",
+  binance_paxg: "token emas PAXG", twelvedata: "Twelve Data",
+};
+
 function renderRebase(context) {
   const box = $("#rebase");
   box.hidden = !context || !context.proxy;
   if (box.hidden) return;
+  $("#rebase-feed").textContent = FEED_LABEL[context.source] || context.source || "proxy";
   $("#rebase-now").textContent = context.price_offset
     ? `· sekarang disamakan (selisih ${signed(context.price_offset)})` : "· belum disamakan";
 }
@@ -263,8 +270,11 @@ function renderPrice(context) {
     price.classList.add("stale");
     return;
   }
-  const proxy = context.proxy ? " (proxy)" : "";
-  price.textContent = `${num(context.mid)} · ${context.session}${proxy}${context.stale ? " · BASI" : ""}`;
+  // Bid and ask, as the broker app shows them, and where they come from.
+  const feed = FEED_LABEL[context.source] || context.source || "-";
+  const matched = context.proxy && context.price_offset ? `, disamakan ${signed(context.price_offset)}` : "";
+  price.textContent = `Bid ${num(context.bid)} · Ask ${num(context.ask)} · ${context.session} · ` +
+    `${feed}${matched}${context.stale ? " · BASI" : ""}`;
   price.classList.toggle("stale", Boolean(context.stale));
 }
 

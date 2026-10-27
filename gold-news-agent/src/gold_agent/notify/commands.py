@@ -37,7 +37,7 @@ HELP = "\n".join(
         "/calendar — event 48 jam ke depan",
         "/stats — performa paper trading",
         "/mute 1h — bisukan notifikasi 🟡/🔵 (🔴 tetap masuk); /mute off",
-        "/finex 4192.23 — samakan harga proxy (PAXG) dengan Bid brokermu; /finex reset",
+        "/finex 4192.23 — samakan harga Binance dengan Bid brokermu; /finex reset",
         "/stop — kill switch: hentikan sinyal baru; /resume — lanjutkan",
     ]
 )

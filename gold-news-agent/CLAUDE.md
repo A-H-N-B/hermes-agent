@@ -205,8 +205,9 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   --extra mt5`, config check, restart. `gold-agent config set|verified|migrate` (validated,
   rolled back on a bad value); the installer writes through it; tests load with `local=False`.
   `price_feed.primary: auto` (default) = MT5 when the MetaTrader5 package is installed (Windows)
-  then Binance PAXG; `mt5_symbol: null` detects the broker's spot-gold symbol
-  (`pick_gold_symbol`: Market Watch first, XAUUSD before GOLD, other quote currencies excluded).
+  then Binance XAUUSDT perpetual (`binance_xau`, since 27 Oct; ADR-029) then Binance PAXG;
+  `mt5_symbol: null` detects the broker's spot-gold symbol (`pick_gold_symbol`: Market Watch
+  first, XAUUSD before GOLD, other quote currencies excluded).
   A feed switch (PAXG <-> MT5) resets the candle builder and reloads history from the feed now
   producing ticks (`FailoverAdapter.history` asks the active feed first), so two instruments'
   bars are never mixed.
@@ -298,5 +299,14 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   `llm.chat_per_day` (60) counted in `llm_usage` (shared by dashboard and Telegram); without AI
   the program's own summary answers. Pages and static files are sent `Cache-Control: no-cache`
   so an update shows without a hard refresh.
+  Spot gold without MT5 (27 Oct, ADR-029): the user saw 4012 on PAXG vs 3999 at Finex. Feed
+  `binance_xau` = Binance's USD-M XAUUSDT perpetual (index from XAUUSD spot vendors): bookTicker
+  on the `/public` route of fstream (unrouted connections stay silent for /market streams), klines
+  from `/fapi/v1/klines` (1500/request, `BinanceAdapter(klines=FUTURES_KLINES)`); still proxy,
+  re-base still works. Updater/installer verify its two sources; a computer on `binance_paxg`
+  moves to `binance_xau` (`gold-agent config get`). `FailoverAdapter`: a run that delivered ticks
+  and then dropped is a reconnect, not a strike; on a fallback the primary is retried every
+  `retry_primary_seconds` (600) with 15 s to deliver, else the fallback resumes at once. The
+  Live price line shows Bid · Ask · session · feed in words.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

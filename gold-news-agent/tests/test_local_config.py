@@ -102,6 +102,18 @@ def test_before_an_update_the_users_edits_move_to_the_local_files(
     assert main(["--config-dir", str(config), "migrate"]) == 0  # nothing left to move
 
 
+def test_the_updater_reads_the_setting_this_computer_runs_with(
+    config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["--config-dir", str(config), "get", "price_feed.primary"]) == 0
+    assert capsys.readouterr().out.strip() == "auto"  # shipped default
+    (config / "local.yaml").write_text("price_feed:\n  primary: binance_paxg\n", encoding="utf-8")
+    assert main(["--config-dir", str(config), "get", "price_feed.primary"]) == 0
+    assert capsys.readouterr().out.strip() == "binance_paxg"  # this computer's choice wins
+    assert main(["--config-dir", str(config), "get", "price_feed.nothing"]) == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
 def test_after_an_update_settings_the_version_dropped_are_removed(
     config: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

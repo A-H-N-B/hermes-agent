@@ -134,11 +134,15 @@ hanya dibuka di komputer ini. `.env` tidak pernah masuk git.
 Untuk MT5 tidak ada isian: login di terminal MT5 seperti biasa. Agent hanya membaca akun yang
 sedang terbuka dan tidak pernah login sendiri, jadi akunmu tidak pernah diganti atau dikeluarkan.
 
-Tanpa MT5 sama sekali (harga emas dari Binance PAXG, dolar dari EURUSDT): jalankan sekali
-`.venv\Scripts\gold-agent.exe config set price_feed.primary binance_paxg`, lalu klik
-"Perbarui" (langkah 6 menguji sumber harga Binance dari komputer ini). PAXG adalah token emas,
-bukan XAUUSD spot: harganya selisih beberapa dolar dari chart broker, dan pasar terkait (perak,
-minyak, yield dari broker) tidak tersedia. Kembali ke MT5: `config set price_feed.primary auto`.
+Tanpa MT5 sama sekali (harga emas spot dari Binance XAUUSDT, dolar dari EURUSDT): jalankan
+sekali `.venv\Scripts\gold-agent.exe config set price_feed.primary binance_xau`, lalu klik
+"Perbarui" (langkah 6 menguji sumber harga Binance dari komputer ini; komputer yang sebelumnya
+memakai `binance_paxg` dipindah ke `binance_xau` otomatis begitu sumbernya lolos). XAUUSDT
+adalah kontrak perpetual Binance yang mengikuti XAUUSD spot tiap detik, jadi harganya biasanya
+hanya selisih beberapa sen sampai satu-dua dolar dari broker; sisanya bisa disamakan dengan
+`/finex` (lihat langkah 9). PAXG (token emas, $5–20 di atas spot) hanya dipakai bila XAUUSDT
+tidak terjangkau. Pasar terkait (perak, minyak, yield dari broker) hanya ada dengan MT5.
+Kembali ke MT5: `config set price_feed.primary auto`.
 
 ## Langkah 5 — Sesuaikan config
 
@@ -161,8 +165,8 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
    - **Windows + MT5** (paling akurat, harga broker-mu sendiri): cukup buka terminal MT5 dan
      login. `auto` memakai MT5 bila terminalnya jalan dan mencari sendiri simbol emas broker
      (`XAUUSD`, `XAUUSDm`, `XAUUSD.r`, `GOLD`, ...; yang ada di Market Watch didahulukan).
-     Bila MT5 ditutup, program pindah ke PAXG dan kembali ke MT5 paling lambat 15 menit setelah
-     MT5 dibuka lagi; riwayat candle dimuat ulang dari feed baru supaya dua harga tidak tercampur.
+     Bila MT5 ditutup, program pindah ke spot XAUUSDT (Binance) dan kembali ke MT5 paling lambat
+     10 menit setelah MT5 dibuka lagi; riwayat candle dimuat ulang dari feed baru supaya dua harga tidak tercampur.
      Di MT5, tombol **Algo Trading** harus hijau dan terminal tetap terbuka serta login; tanpa itu
      harga di dashboard "tidak tersedia". Dari terminal yang sama program juga membaca **pasar
      penggerak emas**: indeks dolar dari pasangan FX broker (EURUSD wajib; USDJPY, GBPUSD,
@@ -172,8 +176,9 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      mis. `uv run gold-agent config set market.mt5_symbols "{US500: SPX500.cash}"`
      (kunci: `DXY`, `US10Y`, `USDJPY`, `XAGUSD`, `WTI`, `US500`, `VIX`, atau pasangan FX seperti
      `EURUSD`).
-   - **Tanpa MT5:** `auto` memakai Binance PAXG, token emas 24/7 yang harganya berselisih
-     beberapa dolar dari XAUUSD spot dan diberi label *proxy* di setiap sinyal.
+   - **Tanpa MT5:** `auto` memakai Binance XAUUSDT (kontrak yang mengikuti XAUUSD spot, selisih
+     ke broker biasanya di bawah $1–2), lalu token PAXG bila XAUUSDT tidak terjangkau. Keduanya
+     diberi label *proxy* di setiap sinyal dan bisa disamakan ke harga brokermu.
 4. **[Windows]** Agar log tersimpan saat berjalan otomatis (langkah 10), isi `logging.file`
    dengan `data/logs/gold-agent.log` (dirotasi otomatis 10 MB × 5).
 5. Timeframe (`trading.timeframe`, bawaan `auto`). Sinyal jalan sepanjang hari, dan chart yang
@@ -256,7 +261,8 @@ Idealnya putaran 2 jam mencakup rilis data AS (19:30 atau 20:30 WIB). Hasilnya a
 2. Bila boleh dipakai: `uv run gold-agent config verified <id_sumber>` (bisa beberapa id
    sekaligus). Tandanya disimpan di `config\sources.local.yaml`, jadi aman saat update.
 
-Sumber harga Binance (`binance_paxg_ws`, `binance_paxg_rest`) juga harus verified bila dipakai.
+Sumber harga Binance (`binance_xau_ws`, `binance_xau_rest`, cadangannya `binance_paxg_ws`,
+`binance_paxg_rest`) juga harus verified bila dipakai.
 MT5 tidak perlu, karena terminalnya ada di komputermu sendiri.
 
 ## Langkah 8 — (Opsional) Login untuk membaca channel Telegram
@@ -295,8 +301,9 @@ Yang baru di halaman Live dan bot:
 - **Notifikasi.** Sinyal BUY/SELL baru otomatis masuk Telegram. Di dashboard klik tombol
   "🔕 Notifikasi" di atas sekali dan izinkan di browser: setiap sinyal baru muncul sebagai
   notifikasi Windows dengan bunyi, selama tab dashboard terbuka.
-- **Harga beda dengan Finex.** Tanpa MT5, harga diambil dari token emas PAXG (Binance) yang
-  beda beberapa dolar dari brokermu. Lihat harga **Bid** XAUUSD di aplikasi Finex, lalu ketik
+- **Harga beda dengan Finex.** Tanpa MT5, harga diambil dari Binance XAUUSDT (spot emas) yang
+  biasanya hanya selisih beberapa sen sampai satu-dua dolar dari brokermu (PAXG, cadangannya,
+  bisa $5–20). Lihat harga **Bid** XAUUSD di aplikasi Finex, lalu ketik
   di halaman Live bagian "Harga beda dengan broker (Finex)? Samakan di sini", atau kirim
   `/finex 2662.40` ke bot. Semua harga, candle, entry, SL dan TP di alat ini ikut bergeser ke
   harga Finex. Samakan ulang sesekali (selisihnya bisa bergeser pelan); kembali ke harga asli:
