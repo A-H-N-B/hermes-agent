@@ -502,9 +502,12 @@ kedua yang diuji terhadap data acak:
   komputer yang memilih `binance_paxg` ("tanpa MT5") pindah ke `binance_xau` begitu lolos
   (`gold-agent config get` membaca pilihan yang berlaku).
 - Failover: stream yang sudah mengirim harga lalu putus (Binance menutup koneksi tiap 24 jam)
-  disambung ulang, tidak dihitung gagal; di cadangan, sumber utama dicoba lagi tiap 10 menit
-  (15 detik untuk mengirim harga, lalu cadangan lanjut). Dulu sumber utama baru dicoba setelah
-  cadangan sendiri gagal, jadi alat bisa tertahan di PAXG berjam-jam.
+  disambung ulang, tidak dihitung gagal; di cadangan, sumber utama dicoba tiap 10 menit **di
+  samping** sumber yang sedang dipakai (paling lama 20 detik), dan cadangan baru berhenti setelah
+  sumber utama terbukti mengirim harga. Versi 27 Oct pagi menghentikan cadangan selama percobaan:
+  pengguna melihat candle tersendat ("tidak real time"). MT5 hanya disambung bila terminalnya
+  sudah terbuka (`tasklist`): `initialize()` akan membuka terminal sendiri, menunggu sampai
+  ±60 detik, dan terminal yang tidak dibuka pengguna hanya meminta login.
 - Harga yang persis sama dengan aplikasi Finex hanya dari server Finex sendiri: terminal MT5 Finex
   di komputer yang sama (alat hanya membaca, tidak pernah login).
 

@@ -168,7 +168,7 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      Bila MT5 ditutup, program pindah ke spot XAUUSDT (Binance) dan kembali ke MT5 paling lambat
      10 menit setelah MT5 dibuka lagi; riwayat candle dimuat ulang dari feed baru supaya dua harga tidak tercampur.
      Di MT5, tombol **Algo Trading** harus hijau dan terminal tetap terbuka serta login; tanpa itu
-     harga di dashboard "tidak tersedia". Dari terminal yang sama program juga membaca **pasar
+     harga diambil dari sumber berikutnya. Program tidak pernah membuka MT5 sendiri. Dari terminal yang sama program juga membaca **pasar
      penggerak emas**: indeks dolar dari pasangan FX broker (EURUSD wajib; USDJPY, GBPUSD,
      USDCAD, USDSEK, USDCHF bila ada), perak (XAGUSD), minyak (XTIUSD/USOIL), dan bila broker
      menyediakannya: yield/obligasi AS 10 tahun, S&P 500, dan VIX. Nama simbol dicari sendiri

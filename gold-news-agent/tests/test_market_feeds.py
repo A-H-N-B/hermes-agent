@@ -192,8 +192,10 @@ class FakeMt5:
         self.quote_epoch = clock.now().timestamp() + self.server_offset
         self.account = account
         self.logins: list[tuple[int, str | None]] = []
+        self.initializations = 0
 
     def initialize(self, **_: Any) -> bool:
+        self.initializations += 1
         return True
 
     def account_info(self) -> Any:
@@ -393,32 +395,43 @@ async def test_a_stream_that_drops_after_delivering_is_reconnected_not_failed_ov
     assert backup.runs == 0 and adapter.name == "binance_xau"
 
 
+class RecoveringAdapter(FlakyAdapter):
+    """Down for its first `down_runs` runs, then delivering."""
+
+    def __init__(self, name: str, down_runs: int) -> None:
+        super().__init__(name, fail=True)
+        self.down_runs = down_runs
+
+    async def run(self, emit: TickSink, stop: asyncio.Event) -> None:
+        self.fail = self.runs < self.down_runs
+        await super().run(emit, stop)
+
+
 @pytest.mark.usefixtures("no_backoff")
-async def test_a_fallback_hands_back_to_the_primary_as_soon_as_it_delivers_again() -> None:
+async def test_the_feed_in_use_never_stops_while_the_primary_is_tried_again() -> None:
     from gold_agent.core.clock import SystemClock
 
-    primary = FlakyAdapter("binance_xau", fail=True)
+    primary = RecoveringAdapter("binance_xau", down_runs=2)
     backup = FlakyAdapter("binance_paxg", fail=False)
     adapter = FailoverAdapter(
         [primary, backup],
         SystemClock(),
         max_failures=1,
         retry_primary_seconds=0.05,
-        check_seconds=0.01,
+        probe_seconds=0.5,
     )
     sources: list[str] = []
     stop = asyncio.Event()
 
     async def emit(tick: Tick) -> None:
         sources.append(tick.source)
-        if tick.source == "binance_paxg" and backup.runs == 2:
-            primary.fail = False  # the primary answers again after one retry in vain
         if tick.source == "binance_xau":
             stop.set()
 
     await asyncio.wait_for(adapter.run(emit, stop), timeout=5)
-    assert sources == ["binance_paxg", "binance_paxg", "binance_xau"]
-    assert primary.runs == 3 and adapter.name == "binance_xau"
+    assert sources == ["binance_paxg", "binance_xau"]  # a try's ticks are never emitted
+    assert backup.runs == 1  # the try that failed did not interrupt it
+    assert primary.runs == 4  # down, tried in vain, tried and up, then used
 
 
 class QuietAdapter(FlakyAdapter):
@@ -450,6 +463,43 @@ async def test_silent_feed_fails_over_only_while_the_market_is_open() -> None:
         stop.set()
         await asyncio.wait_for(task, timeout=5)
         assert adapter.name == expected
+
+
+class StreamingAdapter(FlakyAdapter):
+    async def run(self, emit: TickSink, stop: asyncio.Event) -> None:
+        self.runs += 1
+        while not stop.is_set():
+            now = datetime.now(UTC)
+            await emit(Tick(ts=now, bid=1, ask=2, source=self.name, received_at=now))
+            await asyncio.sleep(0.01)
+
+
+@pytest.mark.usefixtures("no_backoff")
+async def test_a_primary_that_hangs_is_given_up_on_while_the_feed_in_use_runs_on() -> None:
+    from gold_agent.core.clock import SystemClock
+
+    quiet = QuietAdapter("mt5", fail=False)  # connects, never sends a price
+    backup = StreamingAdapter("binance_xau", fail=False)
+    adapter = FailoverAdapter(
+        [quiet, backup],
+        SystemClock(),
+        max_failures=1,
+        silence_seconds=0.05,
+        check_seconds=0.01,
+        retry_primary_seconds=0.05,
+        probe_seconds=0.05,
+    )
+    stop = asyncio.Event()
+
+    async def emit(tick: Tick) -> None:
+        pass
+
+    task = asyncio.create_task(adapter.run(emit, stop))
+    await asyncio.sleep(0.6)
+    stop.set()
+    await asyncio.wait_for(task, timeout=5)
+    assert adapter.name == "binance_xau" and backup.runs == 1
+    assert quiet.runs >= 3  # silent at first, then tried several times beside the backup
 
 
 # --------------------------------------------------------------------------- market service
@@ -625,6 +675,19 @@ def test_mt5_reads_the_logged_in_account_and_never_logs_in_itself() -> None:
     logged_out.quote_epoch += 1.5
     assert adapter.read_tick() is not None
     assert logged_out.logins == [] and logged_out.account == 777
+
+
+def test_mt5_is_only_attached_to_never_started_by_the_agent() -> None:
+    clock = ManualClock(utc("2026-10-13T12:30"))
+    fake = FakeMt5(clock)
+    terminal = SimpleNamespace(open=False)
+    adapter = Mt5Adapter(symbol="XAUUSD", clock=clock, module=fake, running=lambda: terminal.open)
+    with pytest.raises(ConnectionError, match="tidak terbuka"):
+        adapter.read_tick()
+    assert fake.initializations == 0  # initialize() would have started the terminal itself
+    terminal.open = True  # the user opens MT5
+    adapter.read_tick()
+    assert fake.initializations == 1 and fake.logins == []
 
 
 async def test_every_feed_down_goes_back_to_the_primary_and_says_why() -> None:

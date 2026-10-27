@@ -305,8 +305,12 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   from `/fapi/v1/klines` (1500/request, `BinanceAdapter(klines=FUTURES_KLINES)`); still proxy,
   re-base still works. Updater/installer verify its two sources; a computer on `binance_paxg`
   moves to `binance_xau` (`gold-agent config get`). `FailoverAdapter`: a run that delivered ticks
-  and then dropped is a reconnect, not a strike; on a fallback the primary is retried every
-  `retry_primary_seconds` (600) with 15 s to deliver, else the fallback resumes at once. The
-  Live price line shows Bid · Ask · session · feed in words.
+  and then dropped is a reconnect, not a strike; on a fallback the primary is probed every
+  `retry_primary_seconds` (600) BESIDE the running feed (`_probe`, `probe_seconds` 20, its ticks
+  never emitted) and the fallback stops only after the primary delivered: the first version
+  stopped the fallback for each try and the user saw candles stall. `Mt5Adapter` attaches only
+  when `terminal64.exe` runs (`terminal_running`, injectable `running`): `initialize()` would
+  start the terminal itself (up to ~60 s, then a login prompt). The Live price line shows
+  Bid · Ask · session · feed in words.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

@@ -9,8 +9,11 @@ US DST). The offset is detected from a fresh tick, or set in settings (mt5_serve
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+import os
+import subprocess
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -49,6 +52,23 @@ def pick_gold_symbol(symbols: Iterable[Any]) -> str | None:
     return ranked[0][-1] if ranked else None
 
 
+def terminal_running() -> bool:
+    """Whether a MetaTrader 5 terminal is open on this computer. `initialize()` would otherwise
+    start one itself, and a terminal the user did not open just asks for a login."""
+    tasklist = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "tasklist.exe"
+    try:
+        listed = subprocess.run(  # noqa: S603 - a fixed Windows command, no outside input
+            [str(tasklist), "/FI", "IMAGENAME eq terminal64.exe", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return True  # cannot tell: let initialize() answer
+    return "terminal64.exe" in listed.lower()
+
+
 def detect_offset_hours(server_epoch: float, utc_now: datetime) -> int | None:
     """Whole-hour offset between broker server clock and UTC from a *fresh* tick."""
     hours = round((server_epoch - utc_now.timestamp()) / 3600)
@@ -71,10 +91,13 @@ class Mt5Adapter:
         poll_ms: int = 100,
         offset_hours: int | None = None,
         module: Any = None,
+        running: Callable[[], bool] = terminal_running,
     ) -> None:
+        """`module` and `running` stand in for MetaTrader5 and the process check in tests."""
         if module is None:
             import MetaTrader5 as module  # type: ignore[import-not-found,no-redef]
         self._mt5 = module
+        self._running = running
         self._symbol = symbol or ""  # empty: detected from the broker's list on first connect
         self._clock = clock
         self._poll = poll_ms / 1000
@@ -86,9 +109,11 @@ class Mt5Adapter:
     def _ensure(self) -> None:
         if self._initialised:
             return
-        # Attach to the running terminal as it is and never log in from here: a login from a
-        # second place switches or drops the account the user is logged into. Until the user
-        # logs in in MT5 itself this keeps failing with a reason the dashboard shows.
+        # Attach to the running terminal as it is: never start it and never log in from here (a
+        # login from a second place switches or drops the account the user is logged into).
+        # Until the user opens MT5 and logs in, this fails with a reason the dashboard shows.
+        if not self._running():
+            raise ConnectionError("MT5 tidak terbuka (alat tidak membukanya sendiri)")
         if not self._mt5.initialize():
             raise ConnectionError(f"MT5 tidak tersambung: {self._mt5.last_error()}")
         if self._mt5.account_info() is None:
