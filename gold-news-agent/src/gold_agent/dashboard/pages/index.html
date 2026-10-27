@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gold News Agent · XAUUSD</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">XAUUSD <span class="muted">Gold News Agent</span></div>
+    <div id="price" class="price">–</div>
+    <a id="credit" class="credit" href="#kesehatan" title="saldo API Claude (perkiraan)">Claude: –</a>
+    <div id="clock" class="clock" title="jam real-time WIB (Asia/Jakarta)">--:--:-- WIB</div>
+    <div id="conn" class="conn off" title="koneksi live">● live</div>
+    <button id="alerts" type="button" class="link" title="notifikasi + suara saat ada sinyal BUY/SELL">🔕 Notifikasi</button>
+    <form method="post" action="/logout"><button type="submit" class="link">Keluar</button></form>
+  </header>
+  <nav>
+    <a href="#live" data-page="live">Live</a>
+    <a href="#outlook" data-page="outlook">Outlook 24 jam</a>
+    <a href="#kalender" data-page="kalender">Kalender</a>
+    <a href="#performa" data-page="performa">Performa</a>
+    <a href="#kesehatan" data-page="kesehatan">Kesehatan</a>
+    <a href="#tradingview" data-page="tradingview" hidden>TradingView</a>
+  </nav>
+  <main>
+    <section id="page-live" class="page">
+      <article class="card">
+        <h2>Kapan klik BUY / SELL <span class="muted">(prediksi alat berita, jam WIB)</span></h2>
+        <div id="impulse" class="impulse" role="status" hidden></div>
+        <div id="timing"><p class="muted">Memuat…</p></div>
+        <details class="more"><summary>Lihat detail (alasan, semua jadwal, skenario)</summary>
+          <div id="timing-details"></div></details>
+      </article>
+      <article class="card chat">
+        <h2>Tanya AI <span class="muted">(Opus 5.5 · dijawab dari data alat ini saat ini)</span></h2>
+        <div id="chat-log" class="chat-log" aria-live="polite">
+          <p class="muted">Contoh: "kapan aku harus buy?", "sekarang sell atau tunggu?", "kenapa belum
+            ada sinyal?"</p>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" type="text" maxlength="1000" autocomplete="off" required
+            placeholder="Tulis pertanyaan lalu tekan Enter">
+          <button type="submit" class="button">Kirim</button>
+        </form>
+      </article>
+      <details id="rebase" class="card rebase" hidden>
+        <summary>Harga beda dengan broker (Finex)? Samakan di sini <span id="rebase-now" class="muted"></span></summary>
+        <p class="muted">Harga di sini dari Binance (<span id="rebase-feed">proxy</span>), bukan dari
+          brokermu, jadi bisa berbeda sedikit. Ketik harga <b>Bid</b> XAUUSD yang tampil di Finex
+          sekarang: semua harga, candle, entry, SL dan TP di alat ini lalu digeser agar sama dengan
+          Finex. Selisihnya bisa berubah pelan-pelan; samakan lagi bila sudah beda. Tidak bisa saat
+          ada sinyal aktif. Harga yang persis sama: terminal MT5 Finex di komputer ini.</p>
+        <form id="rebase-form" class="actions">
+          <label for="rebase-input">Bid XAUUSD di Finex:</label>
+          <input id="rebase-input" type="number" min="0" step="0.01" required placeholder="contoh 4192.23">
+          <button type="submit" class="button">Samakan</button>
+          <button id="rebase-reset" type="button" class="link">Kembalikan ke harga asli</button>
+          <span id="rebase-status" class="muted" role="status"></span>
+        </form>
+      </details>
+      <div class="grid">
+        <article id="signal-card" class="card"><p class="muted">Memuat…</p></article>
+        <article class="card chart-card chart-stack">
+          <div id="ind-toggles" class="toggles" title="centang indikator yang ingin ditampilkan">
+            <label><input type="checkbox" data-ind="ema"> EMA 20/50/200</label>
+            <label><input type="checkbox" data-ind="bb"> Bollinger</label>
+            <label><input type="checkbox" data-ind="vwap"> VWAP</label>
+            <label><input type="checkbox" data-ind="levels"> Support/Resistance</label>
+            <label><input type="checkbox" data-ind="sar"> Parabolic SAR (0.02, 0.20)</label>
+            <label><input type="checkbox" data-ind="rsi"> RSI 14</label>
+            <label><input type="checkbox" data-ind="stoch"> Stoch (5, 3, 3)</label>
+          </div>
+          <div id="tf-forecast" class="tf-forecast"><p class="muted">Memuat prediksi…</p></div>
+          <div class="chart-wrap">
+            <div id="chart"></div>
+            <button id="tf-button" type="button" class="tf-button" title="pilih timeframe">M5</button>
+            <div id="tf-ring" class="tf-ring" hidden>
+              <button id="tf-close" type="button" class="tf-close" title="tutup">✕</button>
+            </div>
+          </div>
+        </article>
+      </div>
+      <article class="card">
+        <h2>Ringkasan indikator <span id="ind-overall" class="badge"></span></h2>
+        <p id="ind-chips" class="chips"></p>
+        <div id="ind-detail" class="tf-grid"></div>
+        <details class="more"><summary>Arti tiap indikator</summary>
+          <ul class="notes glossary">
+            <li><b>Tren (EMA)</b>: harga dan EMA20 di atas EMA50 = naik, di bawah = turun.</li>
+            <li><b>RSI</b>: di atas 55 kuat, di atas 70 jenuh beli (rawan koreksi); di bawah 45
+              lemah, di bawah 30 jenuh jual.</li>
+            <li><b>MACD</b>: garis di atas sinyalnya = momentum naik, di bawah = turun.</li>
+            <li><b>Stochastic &amp; SAR</b>: arah momentum jangka pendek.</li>
+            <li><b>ADX</b>: kekuatan tren tanpa arah; di atas 25 tren kuat, di bawah 20 lemah.</li>
+            <li><b>Tren Kalman</b>: kemiringan harga yang disaring derau; |t| ≥ 2 artinya tren itu
+              jelas secara statistik (di pasar acak hanya 5% kemungkinannya).</li>
+            <li><b>Volatilitas</b>: gerak wajar per candle menurut model GARCH; persentil tinggi =
+              pasar lebih ramai dari biasanya, SL mudah tersentuh.</li>
+            <li><b>Kondisi pasar</b>: tren kuat / sideways / sangat volatil / normal, dari
+              efficiency ratio, eksponen Hurst, dan ADX (ambangnya diuji pada pasar acak).</li>
+            <li><b>Ekor (α)</b>: seberapa sering lonjakan ekstrem terjadi (ekonofisika: kebanyakan
+              pasar α ≈ 3). Makin kecil α, makin sering SL tersapu satu lonjakan. ν = ekor yang
+              dipakai simulasi peluang.</li>
+            <li><b>Keteraturan</b>: entropi permutasi; 1 = seacak lempar koin. "Ada pola berulang"
+              hanya muncul bila hampir mustahil terjadi pada data acak.</li>
+            <li><b>Multifraktal (Δh)</b>: dari MF-DFA; besar = gerak kecil dan besar berperilaku
+              berbeda, pasar bergejolak dan rawan lonjakan.</li>
+            <li><b>Mean reversion</b>: persamaan Langevin / Ornstein-Uhlenbeck; "nyata" bila lolos
+              uji Dickey-Fuller (salah alarm 5% di pasar acak). Half-life = berapa candle untuk
+              kembali separuh jalan ke level itu.</li>
+          </ul>
+        </details>
+        <details class="more"><summary>Lihat tabel lengkap</summary>
+        <div class="table-wrap">
+          <table id="ind-table" class="stack">
+            <thead><tr><th>Timeframe</th><th>Kesimpulan</th><th class="num">Harga</th>
+              <th class="num">EMA20</th><th class="num">EMA50</th><th class="num">EMA200</th>
+              <th class="num">RSI14</th><th class="num">ATR14</th><th class="num">Stoch K/D</th>
+              <th class="num">SAR</th><th class="num">MACD</th><th class="num">ADX</th>
+              <th class="num">Kalman t</th><th>Kondisi</th><th>Alasan</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        </details>
+        <p id="ind-extra" class="muted"></p>
+        <p class="muted">Ringkasan indikator teknikal hanya membaca grafik. Angka BUY/SELL yang
+          dipakai tetap dari sinyal alat berita (berita + makro + teknikal + konfirmasi harga).</p>
+      </article>
+      <article class="card">
+        <h2>Pasar penggerak emas <span id="macro-badge" class="badge"></span></h2>
+        <p class="muted">Langsung dari broker Anda (MT5). Tarikan ke emas: + mendukung naik,
+          − menekan. Bobot = seberapa kuat hubungannya dengan emas beberapa hari terakhir.</p>
+        <div class="table-wrap">
+          <table id="cross-table" class="stack">
+            <thead><tr><th>Pasar</th><th class="num">Harga</th><th class="num">15 mnt</th>
+              <th class="num">1 jam</th><th class="num">1 hari</th><th class="num">Korelasi</th>
+              <th class="num">Bobot</th><th>Tarikan ke emas</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="macro-parts" class="muted"></p>
+        <h2 class="sub">Fundamental harian <span id="fund-badge" class="badge"></span></h2>
+        <p id="fund-summary"></p>
+        <div class="table-wrap">
+          <table id="fund-table" class="stack">
+            <thead><tr><th>Faktor</th><th>Nilai</th><th>Perubahan</th><th>Dampak ke emas</th>
+              <th>Artinya</th><th>Data</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="fund-missing" class="muted"></p>
+      </article>
+      <article class="card">
+        <h2>Ekonofisika pasar</h2>
+        <p class="muted">Fisika statistik atas data menit emas dan pasar terkait, dihitung ulang
+          tiap menit. Setiap ukuran sudah diuji pada data acak supaya tidak "melihat pola" di
+          derau. Bahan pertimbangan AI, bukan sinyal sendiri.</p>
+        <div id="physics-rows" class="read-list"></div>
+        <details class="more"><summary>Arti tiap ukuran</summary>
+          <ul class="notes glossary">
+            <li><b>Badai susulan (Hawkes)</b>: seperti gempa susulan, satu gerak besar memicu gerak
+              besar berikutnya. Intensitas ≥ 2× rata-rata = sedang berlangsung.</li>
+            <li><b>Endogenitas</b>: bagian gerak besar yang dipicu pasar sendiri, bukan berita
+              baru (rasio percabangan proses Hawkes).</li>
+            <li><b>Pemimpin emas</b>: pasar yang geraknya terbukti mendahului emas ±1 menit
+              (transfer entropy, diuji terhadap data yang diacak). Arah tersirat = ke mana emas
+              cenderung menyusul.</li>
+            <li><b>Faktor bersama (RMT)</b>: teori matriks acak; faktor di atas batas
+              Marchenko-Pastur adalah gerak bersama yang nyata, sisanya derau.</li>
+            <li><b>Risiko gelembung (LPPLS)</b>: model Sornette untuk kenaikan yang makin cepat
+              sebelum koreksi; persentase jendela waktu yang menunjukkan pola itu. Harian dan
+              eksperimental: peringatan, bukan sinyal.</li>
+            <li><b>Pembelajaran mesin</b>: model meta-labeling belajar dari setup masa lalu di
+              chart yang sama; baru dipakai bila terbukti lebih baik dari tebakan dasar
+              (uji walk-forward).</li>
+          </ul>
+        </details>
+      </article>
+      <article class="card">
+        <h2>Berita terbaru</h2>
+        <ul id="news" class="feed"></ul>
+      </article>
+    </section>
+
+    <section id="page-outlook" class="page" hidden>
+      <article class="card">
+        <h2>Outlook 24 jam <span id="outlook-meta" class="muted"></span></h2>
+        <p id="countdown" class="countdown"></p>
+        <div class="table-wrap">
+          <table id="outlook-table" class="stack">
+            <thead><tr><th>Jam (WIB)</th><th>Sesi</th><th>Event</th><th>Volatilitas</th>
+              <th>Bias</th><th>Skenario</th><th>Conf.</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="outlook-narrative" class="narrative"></p>
+        <ul id="outlook-notes" class="notes"></ul>
+      </article>
+    </section>
+
+    <section id="page-kalender" class="page" hidden>
+      <article class="card">
+        <h2>Kalender ekonomi (7 hari)</h2>
+        <div class="table-wrap">
+          <table id="calendar-table" class="stack">
+            <thead><tr><th>Waktu (WIB) · Event</th><th>Impact</th>
+              <th class="num">Forecast</th><th class="num">Previous</th><th class="num">Actual</th>
+              <th>Playbook</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="page-performa" class="page" hidden>
+      <article class="card">
+        <h2>Performa paper trading (90 hari)</h2>
+        <div id="perf-tiles" class="tiles"></div>
+        <ul id="perf-notes" class="notes warn"></ul>
+      </article>
+      <article class="card">
+        <h2>Keputusan AI (Opus 5.5)</h2>
+        <div id="perf-desk" class="tiles"></div>
+        <p class="muted">Kandidat yang ditahan AI tidak dikirim; di sini dihitung seolah diambil (TP1 atau SL
+          duluan di candle M1), dengan cara yang sama seperti yang disetujui. Bila yang ditahan sering
+          mencapai TP1, filter AI terlalu ketat; bila yang disetujui jauh lebih baik, AI membantu.</p>
+      </article>
+      <div id="perf-groups" class="grid"></div>
+    </section>
+
+    <section id="page-tradingview" class="page" hidden>
+      <article class="card">
+        <h2>Rencana trading dari alat berita</h2>
+        <div id="gna-plan"><p class="muted">Memuat…</p></div>
+      </article>
+      <article class="card">
+        <h2>Indikator Gold News Agent</h2>
+        <p class="muted">Indikator yang sama dengan script TradingView, digambar langsung dari alat
+          ini: zona entry, SL, TP1–TP3 sinyal aktif, warna sesi (biru London, ungu New York,
+          oranye overlap, abu-abu jeda harian), tanda <b>Data AS</b> 08:30 New York, serta penanda
+          berita dan sinyal. Harga dari feed alat ini (PAXG bila belum memakai MT5), jadi level
+          sinyal pas tanpa digeser.</p>
+        <p class="muted"><b>Proyeksi 24 jam</b> (kanan candle terakhir, garis putus-putus + pita):
+          ramalan alat berita, bukan harga. Arah tiap jam dari bias Outlook (hijau naik, merah
+          turun, abu-abu netral/TUNGGU DATA) dikali confidence; lebar pita = perkiraan rentang gerak
+          jam itu; saat ada sinyal aktif, garis menuju TP1 sampai sinyal kedaluwarsa. Titik oranye
+          = jadwal rilis data. Pita pudar = jam bersyarat (&gt; 4 jam ke depan).</p>
+        <div id="gna-chart"></div>
+      </article>
+      <article class="card">
+        <h2>TradingView <span id="tv-symbol" class="muted"></span></h2>
+        <p class="muted">Grafik dari TradingView (harga spot, bukan proxy PAXG). Indikator dan
+          layout akun Anda ada di tombol di bawah.</p>
+        <p class="actions">
+          <a id="tv-open" class="button" rel="noopener noreferrer" target="_blank">Buka di akun
+            TradingView saya</a>
+          <button id="tv-copy-script" type="button" class="button">Salin script indikator</button>
+          <a href="/static/gold_news_agent.pine" target="_blank" rel="noopener">lihat script</a>
+          <span id="tv-copy-status" class="muted" role="status"></span>
+        </p>
+        <details>
+          <summary>Cara memasang indikator "Gold News Agent" di TradingView</summary>
+          <ol class="notes">
+            <li>Klik <b>Salin script indikator</b> di atas.</li>
+            <li>Di TradingView buka <b>Pine Editor</b> (tab di bawah grafik), pilih
+              <b>Open &rarr; New indicator</b>, hapus isinya, tempel (Ctrl+V).</li>
+            <li>Klik <b>Save</b> (beri nama Gold News Agent), lalu <b>Add to chart</b>.</li>
+            <li>Saat ada sinyal, salin <b>Kode TradingView</b> dari Telegram atau menu Live,
+              lalu di grafik: ikon roda gigi indikator &rarr; <b>Kode sinyal</b> &rarr; tempel &rarr; OK.</li>
+          </ol>
+        </details>
+        <div id="tv-widget" class="tradingview-widget-container tv-frame">
+          <div class="tradingview-widget-container__widget"></div>
+        </div>
+      </article>
+    </section>
+    <section id="page-kesehatan" class="page" hidden>
+      <article class="card">
+        <h2>Saldo API Claude</h2>
+        <div id="credit-info"><p class="muted">Memuat…</p></div>
+        <form id="credit-form" class="actions">
+          <label for="credit-input">Saldo di console.anthropic.com (USD):</label>
+          <input id="credit-input" type="number" min="0" step="0.01" required placeholder="contoh 9.85">
+          <button type="submit" class="button">Simpan saldo</button>
+          <span id="credit-status" class="muted" role="status"></span>
+        </form>
+        <p class="muted">Anthropic tidak menyediakan pembacaan saldo lewat API key, jadi isi saldo
+          yang tertera di console.anthropic.com &rarr; Billing sekali (dan setiap habis top-up). Sisa
+          dihitung dari biaya setiap panggilan Claude yang dicatat alat ini.</p>
+      </article>
+      <div id="health-tiles" class="tiles"></div>
+      <article class="card">
+        <h2>Sumber berita</h2>
+        <div class="table-wrap">
+          <table id="sources-table" class="stack">
+            <thead><tr><th>Sumber</th><th>Status</th><th>Sukses terakhir</th><th>Item terakhir</th>
+              <th class="num">Error beruntun</th><th class="num">Lag p50</th><th class="num">Lag p95</th>
+              <th>Error terakhir</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </article>
+      <div class="grid">
+        <article class="card"><h2>Latensi pipeline (24 jam)</h2><div class="table-wrap">
+          <table id="stages-table"><thead><tr><th>Tahap</th><th>Sumber</th><th>n</th>
+            <th>p50 (dtk)</th><th>p95 (dtk)</th></tr></thead><tbody></tbody></table></div></article>
+        <article class="card"><h2>Service</h2><ul id="heartbeats" class="feed compact"></ul></article>
+      </div>
+      <div class="grid">
+        <article class="card"><h2>Alert terbaru</h2><ul id="alerts" class="feed compact"></ul></article>
+        <article class="card"><h2>Notifikasi</h2><ul id="notifications" class="feed compact"></ul></article>
+      </div>
+    </section>
+  </main>
+  <footer>
+    Bukan saran keuangan. Keputusan &amp; risiko di tanganmu.<br>
+    Grafik: TradingView Lightweight Charts™ · Copyright (c) 2026 TradingView, Inc. ·
+    <a href="https://www.tradingview.com/" rel="noopener noreferrer" target="_blank">tradingview.com</a>
+  </footer>
+</body>
+</html>

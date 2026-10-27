@@ -1,0 +1,172 @@
+# Scheduled US data releases the fast path understands (section 7.5 / 11.4).
+#
+# higher_is: hawkish -> an actual ABOVE forecast is bearish for gold (tighter Fed expectations)
+#            dovish  -> an actual ABOVE forecast is bullish for gold (e.g. unemployment, claims)
+# surprise_std: PRIOR estimate of a typical (1 s.d.) consensus miss, in `unit`. These are starting
+#   points, not data: z-scores computed with them are labelled "z_basis: prior" and are replaced by
+#   the measured standard deviation once >= 12 releases of the event are recorded (Phase 6).
+# aliases: lowercase phrases matched in headlines; `exclude` words veto a match (core vs headline).
+# ff_titles: Forex Factory calendar titles for the same event (country USD).
+
+events:
+  - key: us_cpi_mom
+    name: CPI m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["cpi m/m", "cpi mom", "cpi (mom)", "cpi month over month", "cpi month-over-month", "consumer price index m/m", "consumer price index (mom)"]
+    exclude: ["core", "ex food", "supercore"]
+    ff_titles: ["CPI m/m"]
+
+  - key: us_core_cpi_mom
+    name: Core CPI m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["core cpi m/m", "core cpi mom", "core cpi (mom)", "cpi ex food and energy m/m", "core consumer price index m/m"]
+    exclude: []
+    ff_titles: ["Core CPI m/m"]
+
+  - key: us_cpi_yoy
+    name: CPI y/y
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["cpi y/y", "cpi yoy", "cpi (yoy)", "cpi year over year", "consumer price index y/y"]
+    exclude: ["core", "ex food"]
+    ff_titles: ["CPI y/y"]
+
+  - key: us_core_cpi_yoy
+    name: Core CPI y/y
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["core cpi y/y", "core cpi yoy", "core cpi (yoy)"]
+    exclude: []
+    ff_titles: ["Core CPI y/y"]
+
+  - key: us_ppi_mom
+    name: PPI m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.2
+    aliases: ["ppi m/m", "ppi mom", "ppi (mom)", "ppi final demand m/m", "producer price index m/m"]
+    exclude: ["core", "ex food"]
+    ff_titles: ["PPI m/m"]
+
+  - key: us_core_pce_mom
+    name: Core PCE Price Index m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["core pce price index m/m", "core pce m/m", "core pce mom", "core pce (mom)", "core pce prices m/m"]
+    exclude: []
+    ff_titles: ["Core PCE Price Index m/m"]
+
+  - key: us_pce_mom
+    name: PCE Price Index m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["pce price index m/m", "pce m/m", "pce mom", "pce (mom)", "pce prices m/m"]
+    exclude: ["core"]
+    ff_titles: ["PCE Price Index m/m"]
+
+  - key: us_nfp
+    name: Non-Farm Payrolls
+    unit: K
+    higher_is: hawkish
+    surprise_std: 75
+    aliases: ["non-farm payrolls", "nonfarm payrolls", "non farm payrolls", "non-farm employment change", "nonfarm employment change", "nfp"]
+    exclude: ["adp", "private", "manufacturing", "government"]
+    ff_titles: ["Non-Farm Employment Change"]
+
+  - key: us_adp
+    name: ADP Non-Farm Employment Change
+    unit: K
+    higher_is: hawkish
+    surprise_std: 40
+    aliases: ["adp non-farm employment change", "adp nonfarm employment change", "adp employment change", "adp private payrolls", "adp employment"]
+    exclude: []
+    ff_titles: ["ADP Non-Farm Employment Change"]
+
+  - key: us_unemployment_rate
+    name: Unemployment Rate
+    unit: "%"
+    higher_is: dovish
+    surprise_std: 0.1
+    aliases: ["unemployment rate"]
+    exclude: ["u6", "u-6"]
+    ff_titles: ["Unemployment Rate"]
+
+  - key: us_avg_hourly_earnings_mom
+    name: Average Hourly Earnings m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.1
+    aliases: ["average hourly earnings m/m", "avg hourly earnings m/m", "average hourly earnings mom", "average earnings m/m", "average hourly earnings (mom)"]
+    exclude: []
+    ff_titles: ["Average Hourly Earnings m/m"]
+
+  - key: us_jobless_claims
+    name: Initial Jobless Claims
+    unit: K
+    higher_is: dovish
+    surprise_std: 12
+    aliases: ["initial jobless claims", "jobless claims", "initial claims", "unemployment claims"]
+    exclude: ["continuing", "4-week", "4 week"]
+    ff_titles: ["Unemployment Claims"]
+
+  - key: us_retail_sales_mom
+    name: Retail Sales m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.4
+    aliases: ["retail sales m/m", "retail sales mom", "retail sales (mom)", "advance retail sales"]
+    exclude: ["core", "ex autos", "ex-autos", "control"]
+    ff_titles: ["Retail Sales m/m"]
+
+  - key: us_core_retail_sales_mom
+    name: Core Retail Sales m/m
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.4
+    aliases: ["core retail sales m/m", "retail sales ex autos m/m", "retail sales ex-autos m/m", "retail sales ex autos"]
+    exclude: []
+    ff_titles: ["Core Retail Sales m/m"]
+
+  - key: us_ism_manufacturing
+    name: ISM Manufacturing PMI
+    unit: ""
+    higher_is: hawkish
+    surprise_std: 1.5
+    aliases: ["ism manufacturing pmi", "ism manufacturing"]
+    exclude: ["prices", "employment", "new orders"]
+    ff_titles: ["ISM Manufacturing PMI"]
+
+  - key: us_ism_services
+    name: ISM Services PMI
+    unit: ""
+    higher_is: hawkish
+    surprise_std: 1.7
+    aliases: ["ism services pmi", "ism services", "ism non-manufacturing pmi", "ism non-manufacturing"]
+    exclude: ["prices", "employment", "new orders"]
+    ff_titles: ["ISM Services PMI"]
+
+  - key: us_gdp_qoq
+    name: GDP q/q
+    unit: "%"
+    higher_is: hawkish
+    surprise_std: 0.5
+    aliases: ["gdp q/q", "gdp qoq", "gdp (qoq)", "gdp annualized", "advance gdp", "prelim gdp", "final gdp", "gdp growth rate", "gdp"]
+    exclude: ["price index", "deflator", "sales", "nowcast", "gdpnow", "tracker"]
+    ff_titles: ["Advance GDP q/q", "Prelim GDP q/q", "Final GDP q/q"]
+
+  - key: us_jolts
+    name: JOLTS Job Openings
+    unit: M
+    higher_is: hawkish
+    surprise_std: 0.35
+    aliases: ["jolts job openings", "jolts", "job openings"]
+    exclude: []
+    ff_titles: ["JOLTS Job Openings"]

@@ -1,0 +1,338 @@
+# Gold News Agent — behaviour settings (non-secret). Secrets live in .env only.
+# Every value tagged "Qn" waits on the Phase 0 question n (PROMPT section 3 + section C).
+# Values are the prompt's starting points; Phase 6 calibrates them from recorded data.
+
+version: 1
+
+mode: SIGNAL_ONLY # SIGNAL_ONLY | PAPER. EXECUTION exists only after Phase 8 approval.
+execution_enabled: false
+
+time:
+  storage_tz: UTC
+  display_tz: Asia/Jakarta
+
+infra:
+  bus: memory # memory = all services in one process; redis = one container per service
+  context_interval_seconds: 1
+
+logging:
+  level: INFO
+  format: json # json | console
+  # Native runs without a log collector (Windows Task Scheduler, launchd): also write here,
+  # rotated at 10 MB x 5, e.g. data/logs/gold-agent.log. Docker and systemd keep stdout.
+  file: null
+
+http:
+  # Some official sources (BLS) reject requests without a contact address in the UA.
+  user_agent: "gold-news-agent/0.0.1 (personal research bot)"
+  contact_email: null # Q12: fill before production so BLS/SEC-style hosts accept us
+  timeout_seconds: 15
+  min_poll_seconds: 10 # hard floor for any poller, regardless of sources.yaml
+
+collectors:
+  max_item_age_minutes: 60 # older items are archived as backfill, never used as triggers
+  seen_capacity: 5000
+  health_flush_seconds: 15
+  backoff_base_seconds: 2
+  backoff_max_seconds: 300
+
+trading:
+  symbol: XAUUSD
+  news_trading: false # Q8: false = never trade into a release; wait for price confirmation
+  post_release_confirm_seconds: 60 # 30–120; FLASH alerts still go out immediately
+  # The chart a trade is sized (entry/SL/TP, validity) and timed on. `auto` chooses it at every
+  # evaluation: of the timeframes whose spread stays small next to the stop, the one with the best
+  # measured accuracy in the current session (walk-forward, 30 days; the lower end of its 95%
+  # interval must beat a coin flip); without that evidence, the session default below. The AI
+  # committee makes the final pick when it reviews a signal. A fixed M1 | M5 | M15 | M30 | H1 also works.
+  timeframe:
+    select: auto
+    # Sessions follow London/New York DST: London opens 14:00 WIB in summer, 15:00 in winter;
+    # the overlap starts at the New York open (19:00 / 20:00 WIB).
+    session_prior: { asia: M5, london: M5, overlap: M15, new_york: M15 }
+    max_cost_ratio: 0.15 # spread / stop distance (1.2 ATR of that timeframe) above this: skip it
+
+price_feed:
+  # auto = your broker's own XAUUSD from MT5 when this computer runs MT5 (terminal open and
+  # logged in), otherwise spot gold from Binance's XAUUSDT perpetual (follows XAUUSD spot to
+  # within cents to a dollar or two), and Binance PAXG last (a gold token: its premium puts it
+  # $5-20 above spot and drifts).
+  primary: auto # Q2: auto | mt5 | mt5_bridge | binance_xau | binance_paxg | twelvedata
+  fallbacks: [binance_xau, binance_paxg, twelvedata]
+  mt5_symbol: null # null = found automatically (XAUUSD, XAUUSDm, XAUUSD.r, GOLD, ...)
+  mt5_server_utc_offset: auto # MT5 bar times are broker-server time, not UTC (section C)
+  stale_tick_seconds: 20 # no tick for this long while the market is open -> WAIT + alert
+
+market:
+  candle_buffer: 600 # bars kept in memory per timeframe
+  # H4/D1 are built from H1; 7000 H1 bars (~300 trading days) give D1 enough depth for LPPLS.
+  history_bars: { M1: 1500, M5: 1500, M15: 1000, M30: 600, H1: 7000 }
+  tick_store_min_interval_ms: 1000 # archive at most one tick per second
+  tick_publish_min_interval_ms: 250 # bus/dashboard tick rate cap
+  context_store_seconds: 60
+  spread_window_minutes: 30
+  round_levels: [10, 50]
+  swing_half_width: 3 # fractal width on H1 for swing highs/lows
+  # auto = the dollar index from your broker's own FX pairs when MT5 runs on this computer
+  # (with silver, oil, US yields, S&P 500 and VIX when the broker lists them), else EURUSDT.
+  usd_source: auto # auto | binance_eurusdt (proxy) | mt5_synthetic (MT5 FX pairs) | none
+  usd_history_days: 5
+  fred_refresh_minutes: 60
+  # Daily fundamentals (Treasury yields, CFTC positioning, GLD flows, US data surprises,
+  # geopolitical news): the bias is rebuilt this often; each source keeps its own pace.
+  fundamentals_refresh_minutes: 60
+  twelvedata_symbol: XAU/USD
+  twelvedata_poll_seconds: 60 # free plan: ~8 credits/min, 800/day
+  mt5_poll_ms: 100
+  mt5_symbols: {} # e.g. { US500: SPX500.cash } when a broker name is not found automatically
+
+risk:
+  account_equity: null # Q3: required before lot sizing is shown
+  account_currency: USD # Q3
+  risk_per_trade_pct: 0.5 # Q3: 0.5–1
+  max_daily_loss_pct: 3.0 # Q3
+  max_open_positions: 1
+  max_signals_per_day: 6
+  max_spread_usd: 0.50 # Q2/Q9: tune to the broker's normal XAUUSD spread
+  contract_size: null # ounces per lot at YOUR broker (MT5 reports it); never assumed
+  volume_step: 0.01
+
+budget:
+  # Hard ceiling on Claude API spend per WIB day: no call starts once it would pass it (each
+  # call reserves its worst case while it runs, so calls running together cannot overshoot).
+  llm_daily_usd: 20.0
+  # Routine calls (ordinary headlines, the hourly outlook narrative, reports) stop at
+  # (100 - this)% of the ceiling; the rest is kept for the signal decision (AI committee) and
+  # high-impact news (a release or impact >= 4).
+  priority_reserve_pct: 25
+  paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
+
+notifications:
+  quiet_hours_wib: # Q7
+    start: "00:00"
+    end: "05:00"
+    allow_priorities: [high]
+  digest_interval_minutes: 60
+  max_messages_per_minute: 6 # beyond this, normal messages are merged into one summary
+  dedupe_minutes: 30 # same flash/alert key inside this window is sent once
+  news_min_impact: 3 # relevant news at/above this goes to Telegram (normal)
+  news_high_impact: 4 # ...and at/above this it is 🔴 and passes quiet hours
+  # Outlook triggers sent to Telegram (prefix match); the plain hourly rebuild stays on the dashboard.
+  outlook_triggers: ["pembukaan sesi", "pembukaan Senin", "berita"]
+  max_age_minutes: { flash: 10, news: 60, alert: 30, outlook: 60 } # older items are not sent late
+
+deployment:
+  host: linux_vps # Q6: linux_vps | windows_vps | home_pc
+
+signal_engine:
+  weights:
+    news: 0.35
+    macro: 0.20
+    technical: 0.25
+    price_confirmation: 0.20
+  entry_threshold: 0.35 # |S| needed for BUY/SELL
+  min_confidence: 60
+  reversal_threshold: 0.50 # hysteresis: flipping direction needs this much
+  reversal_min_minutes: 15
+  cooldown_minutes: 10
+  event_blackout_minutes: 15
+  conflict_threshold: 0.5 # news and price both beyond this but opposite -> WAIT
+  # A signal is valid for this many candles of its timeframe (M5 30 min, M15 90 min), about the
+  # time a 2R target needs at normal volatility.
+  validity_bars: 6
+  max_chase_atr: 2.0 # price this many ATR past the EMA20 of the signal's timeframe: wait for a pullback
+  # Past setups like this one lost money (expected value < 0 across its 95% band, with at
+  # least this many setups on record): wait. 0 = off.
+  ev_gate_min_setups: 30
+  publish_state_seconds: 1 # every evaluation reaches the dashboard (stored only on change)
+  evaluate_seconds: 1
+  levels:
+    sl_atr_multiple: 1.2
+    tp_r_multiples: [1.0, 2.0] # TP3 = next structure level
+    move_sl_to_breakeven_after_tp1: true
+  # A big move starts as a burst: price covers in minutes what it usually covers in an hour and
+  # leaves its recent range. Such an impulse is a candidate the moment it starts (checked every
+  # second), sized on its own chart, entered near where it began, and judged by how past
+  # impulses on this feed ended (walk-forward, last 7 days); the AI still has the final say.
+  impulse:
+    enabled: true
+    z: 3.0 # move / (per-minute volatility x sqrt(minutes)); on pure noise |z| >= 3 is rare
+    range_minutes: 30 # it must break the high (BUY) or low (SELL) of the last 30 minutes
+    max_extension_atr: 1.5 # later than this many ATR(M5) past its start: missed, wait
+    timeframe: M5
+    max_against: 0.15 # the news/macro/trend score may lean the other way at most this much
+
+news:
+  dedup:
+    fuzzy_ratio: 90
+    window_minutes: 30
+    embedding_model: sentence-transformers/all-MiniLM-L6-v2
+    embedding_cosine: 0.90
+  unconfirmed_weight: 0.3 # weight multiplier while needs_confirmation is true
+
+price_led:
+  atr_multiple_k: 3.0
+  news_lookback_minutes: 5
+
+analysis:
+  triage_max_age_minutes: 30 # older stories (by first_seen) are archived, not triaged as new
+  # Single unofficial source + one of these categories -> needs_confirmation (weight reduced).
+  big_claim_categories: [geopolitics, central_bank_gold, trade_tariff, fiscal_debt]
+  deep_on_scheduled_release: true
+  release_calendar_window_minutes: 30 # a release headline must sit within ±30 min of its calendar slot
+  max_body_chars: 1500 # text sent to the LLM per item
+  volatility_cooldown_minutes: 10
+  spread_spike_multiple: 3.0 # spread > 3x its 30-min median = spike
+  targeted_search_sources: [google_news_gold] # polled immediately after an unexplained price spike
+
+llm:
+  provider: anthropic
+  enabled: true # false = rules-only mode
+  deep_min_impact: 3
+  # Every route on Claude Opus 5.5. Thinking is always on (thinking: disabled is a 400), so
+  # `effort` is the control for depth, latency and cost; max_tokens leaves room for the
+  # thinking, which counts toward it.
+  triage:
+    model: claude-opus-5-5
+    effort: low # every ordinary headline: keeps thinking short so triage stays fast
+    timeout_seconds: 20
+    max_tokens: 4096
+  triage_high:
+    model: claude-opus-5-5
+    effort: medium # a release or rules impact >= 4: the reading the news score leans on most
+    timeout_seconds: 40
+    max_tokens: 8192
+  deep:
+    model: claude-opus-5-5
+    effort: high # impact >= deep_min_impact: worth the extra thought
+    timeout_seconds: 90
+    max_tokens: 16000
+  outlook:
+    model: claude-opus-5-5
+    effort: low # the narrative only: it never edits the table, so the budget goes to accuracy
+    timeout_seconds: 120
+    max_tokens: 16000
+  brief:
+    model: claude-opus-5-5 # daily brief + weekly review
+    effort: high
+    timeout_seconds: 300
+    max_tokens: 16000
+  # The final BUY / SELL / WAIT and timeframe of every signal: independent Opus 5.5 answers in
+  # parallel, a strict majority approves (a tie holds). Effort low keeps a review to seconds, so
+  # a move is not over before the answer comes; an answer slower than timeout_seconds counts
+  # for nothing and the others decide.
+  desk:
+    model: claude-opus-5-5
+    effort: low
+    timeout_seconds: 25
+    max_tokens: 4096
+  desk_votes: 3 # answers per review, run in parallel
+  # A review costs about $0.15 (three short Opus answers): 60 a day stays under $10 even on the
+  # busiest day; beyond it the engine decides alone (labelled "tanpa review AI").
+  desk_reviews_per_day: 60
+  # Questions you ask (dashboard "Tanya AI", Telegram /tanya or a plain message): answered from
+  # everything the agent knows right now. A routine call (it stops at the routine share of the
+  # budget); beyond chat_per_day the agent answers from its own numbers without AI.
+  chat:
+    model: claude-opus-5-5
+    effort: low # an answer in seconds; the facts come from the program
+    timeout_seconds: 60
+    max_tokens: 6000
+  chat_per_day: 60
+  fallbacks: default # a refused request is retried server-side on the recommended model
+  circuit_breaker:
+    failures: 5
+    cooldown_seconds: 120
+  # USD per million tokens (Claude API list prices checked 2026-10-06; update when they change).
+  # cache_write = 5-minute cache writes (1.25x input), cache_read = cached prefix reads.
+  pricing_per_mtok:
+    claude-haiku-5-5: { input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01 }
+    claude-sonnet-5-5: { input: 2.00, output: 10.00, cache_write: 2.50, cache_read: 0.20 }
+    claude-opus-5-5: { input: 4.00, output: 20.00, cache_write: 5.00, cache_read: 0.20 }
+    # Possible server-side refusal fallbacks (billed at their own rates when they serve).
+    claude-opus-5: { input: 5.00, output: 25.00, cache_write: 6.25, cache_read: 0.50 }
+    claude-opus-4-8: { input: 5.00, output: 25.00, cache_write: 6.25, cache_read: 0.50 }
+
+sessions:
+  # Local wall-clock times; converted to UTC/WIB per date with zoneinfo (never fixed offsets).
+  moments:
+    - { id: tokyo_open, zone: Asia/Tokyo, local: "09:00" }
+    - { id: sge_open, zone: Asia/Shanghai, local: "09:00" }
+    - { id: london_open, zone: Europe/London, local: "08:00" }
+    - { id: lbma_am, zone: Europe/London, local: "10:30" }
+    - { id: ny_open, zone: America/New_York, local: "08:00" }
+    - { id: us_data, zone: America/New_York, local: "08:30" }
+    - { id: lbma_pm, zone: Europe/London, local: "15:00" }
+    - { id: london_close, zone: Europe/London, local: "16:00" }
+    - { id: fomc_statement, zone: America/New_York, local: "14:00" }
+    - { id: daily_close, zone: America/New_York, local: "17:00" }
+  # Most brokers halt XAUUSD for ~1h after the NY close (CME metals daily break).
+  daily_break: { zone: America/New_York, start: "17:00", end: "18:00" }
+  weekly_open: { zone: America/New_York, weekday: sunday, local: "18:00" }
+  weekly_close: { zone: America/New_York, weekday: friday, local: "17:00" }
+  # Session liquidity multipliers for the composite score (calibrated in Phase 6).
+  liquidity: { asia: 0.8, london: 1.0, overlap: 1.0, new_york: 0.95 }
+  holiday_factor: 0.7 # US or UK holiday: thin liquidity
+
+outlook:
+  conditional_beyond_hours: 4 # rows further out are written as scenarios (11.3)
+  refresh_minute: 0
+  refresh_on_moments: [tokyo_open, london_open, ny_open] # session opens also rebuild it
+  refresh_debounce_minutes: 5 # high-impact news bursts rebuild at most this often
+  use_llm: true # narrative by the outlook model; the table itself is always rule-based
+  weekend_outlook: { zone: Asia/Jakarta, weekday: sunday, local: "16:00" } # "outlook pembukaan Senin"
+  near_confidence_decay_per_hour: 0.15 # hour h ahead shows confidence x (1 - 0.15 h)
+  conditional_confidence_cap: 40
+  # Initial guess for a high-impact hour's range vs a normal one; the event study (Phase 6)
+  # replaces it with measured moves per event once enough releases are recorded.
+  event_range_multiplier: 1.8
+  profile_min_samples: 20 # hourly_profile buckets with fewer bars are ignored
+  profile_days: 365 # H1 history used to rebuild hourly_profile (weekly)
+  playbook_build_minutes: 60 # 11.4: build the scenario table at T-60
+  playbook_send_minutes: 30 # and send it at T-30
+
+paper:
+  # Paper trading (section 17): every signal is evaluated tick by tick, realistically.
+  slippage_usd: 0.05 # added against us on every market fill (entry, stop, expiry)
+  tp1_fraction: 0.5 # closed at TP1; the rest runs to TP2 with the stop at breakeven
+  max_hold_hours: 24 # a runner still open after this is closed at market
+  news_spread_multiplier: 2.5 # backtest: spread around high-impact releases ...
+  news_window_minutes: 5 # ... within this many minutes of the release
+
+reports:
+  daily: { zone: Asia/Jakarta, local: "05:30" } # report on the previous WIB day
+  weekly: { zone: Asia/Jakarta, weekday: saturday, local: "08:00" }
+  use_llm: true # short narrative by the brief model on top of the numbers (never edits them)
+  event_study_days: 90
+  min_event_samples: 5 # per group before a typical move is published to the outlook
+  reliability_prior_weight: 20 # pseudo-observations: learned reliability moves slowly
+  reliability_min_samples: 10
+
+dashboard:
+  # Bind to localhost and reach it through Tailscale / Cloudflare Tunnel / an SSH tunnel (C2.4).
+  # Any other bind address refuses to start unless DASHBOARD_PASSWORD is set.
+  host: 127.0.0.1
+  port: 8787
+  session_hours: 12
+  login_attempts_per_window: 5 # failed logins per client before HTTP 429
+  login_window_minutes: 5
+  news_limit: 60
+  chart_timeframe: M5
+  chart_bars: 300
+  tick_push_per_second: 2 # live price updates pushed to each browser
+
+watchdog:
+  default_source_silence_minutes: 30 # no successful poll for this long = collector problem
+  tick_stale_alert_seconds: 60
+  queue_backlog_alert: 500 # unread messages in a consumer group
+  check_seconds: 30
+  heartbeat_stale_seconds: 180 # a service that stopped reporting
+  clock_offset_alert_ms: 100 # C4.1: |chrony offset| above this raises an alert
+  # Docker: a host timer writes the chrony offset (seconds) here (scripts/clock_offset.sh);
+  # natively the watchdog asks `chronyc` itself, and without chrony (Windows, macOS) it sends
+  # one SNTP query to ntp_server per check. null = never ask an NTP server.
+  clock_offset_file: /run/gold/clock_offset
+  ntp_server: pool.ntp.org
+  disk_free_min_pct: 10
+  tick_retention_days: 30 # older archived ticks are deleted nightly (~9 MB/day at 1 tick/s)
+  context_retention_days: 180
