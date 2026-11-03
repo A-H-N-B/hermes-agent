@@ -1,27 +1,27 @@
 <roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
   <External>null</External>
   <External>nil</External>
-  <Item class="Workspace" referent="RBXD3E107BD97754300BF93829E6F839378">
+  <Item class="Workspace" referent="RBX84FCE68161324AEEB6AF802EFDF70DC1">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="StreamingEnabled">false</bool>
     </Properties>
   </Item>
-  <Item class="Players" referent="RBX8915A383E25F440AB2CE1B72A49DACD5">
+  <Item class="Players" referent="RBX23B575180B3649D08DDE9236B2A9E092">
     <Properties>
       <string name="Name">Players</string>
       <bool name="CharacterAutoLoads">false</bool>
     </Properties>
   </Item>
-  <Item class="ReplicatedStorage" referent="RBX12B06A9D20254C0B8DA91A2C97D61D09">
+  <Item class="ReplicatedStorage" referent="RBXF862CFEC61584E1D8B45D73BCF99FF5E">
     <Properties>
       <string name="Name">ReplicatedStorage</string>
     </Properties>
-    <Item class="Folder" referent="RBXD971105BCAE04F8BB1F658D245D41622">
+    <Item class="Folder" referent="RBX347810D53B5441218F6CEE58F5F5E49D">
       <Properties>
         <string name="Name">Shared</string>
       </Properties>
-      <Item class="ModuleScript" referent="RBXEF8B037FE15047CC8136C3B7082E8443">
+      <Item class="ModuleScript" referent="RBX003167060E1843A08AF58B46A290C253">
         <Properties>
           <string name="Name">Config</string>
           <ProtectedString name="Source"><![CDATA[--[[
@@ -248,7 +248,7 @@ return Config
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX2E76635AE8C1474FBC3FF9E17420AC19">
+      <Item class="ModuleScript" referent="RBXB232FC109F7F436DB54D0E4B95A43876">
         <Properties>
           <string name="Name">Economy</string>
           <ProtectedString name="Source"><![CDATA[-- Pure economy formulas (no Roblox services) so server and client agree and the
@@ -417,7 +417,7 @@ return Economy
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXB589441E3A3940D4BF0C4D3BB919B3BB">
+      <Item class="ModuleScript" referent="RBX9ED557FED5CC4160A3F1F2A8637CEDF2">
         <Properties>
           <string name="Name">Format</string>
           <ProtectedString name="Source"><![CDATA[-- Number / time formatting shared by server billboards and client UI.
@@ -505,7 +505,7 @@ return Format
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX2969C31DCADA469EA30E80666D286E79">
+      <Item class="ModuleScript" referent="RBX753BFAAFDB1348CA8DF732CD63108B7B">
         <Properties>
           <string name="Name">Mutations</string>
           <ProtectedString name="Source"><![CDATA[-- Mutations are rolled when a slime spawns. `chance` is the base probability;
@@ -536,7 +536,7 @@ return Mutations
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXC9E0AEDD1053480080F3CA43CF088233">
+      <Item class="ModuleScript" referent="RBX4DBFF9E9234F4506B9CA810D96EC2787">
         <Properties>
           <string name="Name">New</string>
           <ProtectedString name="Source"><![CDATA[-- Tiny declarative instance builder used by server and client:
@@ -572,7 +572,7 @@ return New
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXE9A5269C3121424C8BE9F9A6BA4FEE07">
+      <Item class="ModuleScript" referent="RBX9C11739627454A9B83E646759ABDFEEC">
         <Properties>
           <string name="Name">Rarities</string>
           <ProtectedString name="Source"><![CDATA[-- Rarity tiers in ascending order. `weight` is the base spawn weight (sum = 10000,
@@ -601,7 +601,7 @@ return Rarities
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX4F229EA77B4448018FC78B70AE74B686">
+      <Item class="ModuleScript" referent="RBXE8010C596CE5479D89EE54E8F758949D">
         <Properties>
           <string name="Name">Remotes</string>
           <ProtectedString name="Source"><![CDATA[-- Remote definitions. The server creates them on boot; clients wait for them.
@@ -671,7 +671,7 @@ return Remotes
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX7D70D97B97924B0D98FBABB42B85ED0A">
+      <Item class="ModuleScript" referent="RBX0BF21FAC8E72402C9CA684B406329F22">
         <Properties>
           <string name="Name">RewardDefs</string>
           <ProtectedString name="Source"><![CDATA[-- Free reward tables shared by the server (grants) and client (UI previews).
@@ -721,7 +721,7 @@ return RewardDefs
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXC6A1ED5B52AE45B0A1B6D431D57D9824">
+      <Item class="ModuleScript" referent="RBX4B4A6255532D4CA190BB5938A8D9D9D2">
         <Properties>
           <string name="Name">SlimeModel</string>
           <ProtectedString name="Source"><![CDATA[-- Procedural slime models (no uploaded assets needed). A slime is an anchored
@@ -1023,7 +1023,7 @@ return SlimeModel
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX16E165E9CD4B46D2BA0F825269959367">
+      <Item class="ModuleScript" referent="RBX195B3D75380B43EC95DA77232D366759">
         <Properties>
           <string name="Name">Slimes</string>
           <ProtectedString name="Source"><![CDATA[-- Slime catalog (original characters). Within a rarity, `weight` picks which
@@ -1112,11 +1112,11 @@ return Slimes
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="RBX18AE08B9B93C4C6CA8EDA2F3868B4443">
+  <Item class="ServerScriptService" referent="RBX12312DDF4C8546C78441A82190893C1D">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="RBX049EEEC8673C42BA82CA8B174AA9817F">
+    <Item class="Script" referent="RBX559E077805AE4862A4659C1863E74478">
       <Properties>
         <string name="Name">Main</string>
         <ProtectedString name="Source"><![CDATA[-- Server bootstrap: loads every service, wires them together (dependency
@@ -1163,11 +1163,11 @@ print(string.format("[SlimeSnatchers] server ready (%d services)", #ORDER))
 ]]></ProtectedString>
       </Properties>
     </Item>
-    <Item class="Folder" referent="RBXE3A0EDC69D104BC9B9B2B0F1EEC12D06">
+    <Item class="Folder" referent="RBX198B9566115349AD984BA93F1D3501B6">
       <Properties>
         <string name="Name">Services</string>
       </Properties>
-      <Item class="ModuleScript" referent="RBXA885B8A698224792A2C6A7ADECD6BF1E">
+      <Item class="ModuleScript" referent="RBXC482694199E84BE7B5B9B08F62BEAC5B">
         <Properties>
           <string name="Name">AdminService</string>
           <ProtectedString name="Source"><![CDATA[-- Owner/admin tools for live "admin events" (huge for CCU in steal games):
@@ -1302,7 +1302,7 @@ return AdminService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXB339E0F082DA4E8B99A46A2B4AF8CBAD">
+      <Item class="ModuleScript" referent="RBX40D3765EBB79487D801210DF652545CD">
         <Properties>
           <string name="Name">Analytics</string>
           <ProtectedString name="Source"><![CDATA[-- Thin wrapper over AnalyticsService (Creator Hub > Analytics). Every call is
@@ -1365,7 +1365,7 @@ return Analytics
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXE0699C7B724644ABAF5E01A370A7DF4F">
+      <Item class="ModuleScript" referent="RBXACE1FB0FED97437DA09B3A4866DC9E80">
         <Properties>
           <string name="Name">CarryService</string>
           <ProtectedString name="Source"><![CDATA[-- Stealing: a thief picks up a slime from an unprotected base, carries it over
@@ -1608,7 +1608,7 @@ return CarryService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX932DB822F5184EAB80888E879FD53CB1">
+      <Item class="ModuleScript" referent="RBX669776E6D90C4711838D484AEEF28043">
         <Properties>
           <string name="Name">DataService</string>
           <ProtectedString name="Source"><![CDATA[--[[
@@ -1995,7 +1995,7 @@ return DataService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX7DCF89E7A3D04069956D79FC5480577E">
+      <Item class="ModuleScript" referent="RBX91264AD1834E4D328328EB9851594737">
         <Properties>
           <string name="Name">EconomyService</string>
           <ProtectedString name="Source"><![CDATA[-- Cash, multipliers, per-second income, slime growth, boosts, offline earnings
@@ -2382,7 +2382,7 @@ return EconomyService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXA238774B53DF46C0BD7CD19568383E91">
+      <Item class="ModuleScript" referent="RBX0E02CED7792B4F6383E917654AA67267">
         <Properties>
           <string name="Name">EventService</string>
           <ProtectedString name="Source"><![CDATA[-- Server-wide boosts and timed events. State is mirrored as attributes on
@@ -2580,7 +2580,7 @@ return EventService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX684A14AED34B4513976F15C19F65F59A">
+      <Item class="ModuleScript" referent="RBX09A165C2598E41F7B83587CAE4C43B5F">
         <Properties>
           <string name="Name">LeaderboardService</string>
           <ProtectedString name="Source"><![CDATA[-- Global leaderboards (OrderedDataStore) rendered on the two plaza boards.
@@ -2778,7 +2778,7 @@ return LeaderboardService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXCE887383C0A24954805F745FEBDCD386">
+      <Item class="ModuleScript" referent="RBXAE6C7514F5094058A0DFB1F53867CFEC">
         <Properties>
           <string name="Name">MonetizationService</string>
           <ProtectedString name="Source"><![CDATA[--[[
@@ -3407,7 +3407,7 @@ return MonetizationService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXEF4A5CDD5B0A4734A52F480F7182F116">
+      <Item class="ModuleScript" referent="RBX8A3F0D640F2C4E87A60EC4EAA005BA96">
         <Properties>
           <string name="Name">PlayerService</string>
           <ProtectedString name="Source"><![CDATA[-- Player lifecycle hub: loads data, runs every service's ready/leave hooks in
@@ -3874,7 +3874,7 @@ return PlayerService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXFC98FAB7512541F3A3EB75DC24AE66A0">
+      <Item class="ModuleScript" referent="RBX790A3620A42C4712ABBBFFFFF2634B48">
         <Properties>
           <string name="Name">PlotService</string>
           <ProtectedString name="Source"><![CDATA[-- Base ownership, locks/shields, pads and cash collect plates.
@@ -4191,7 +4191,7 @@ return PlotService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX3D47F0816E1043A3B199E20DFD8B3B8B">
+      <Item class="ModuleScript" referent="RBX6348A1C627304B549C1F0404549B4326">
         <Properties>
           <string name="Name">RewardService</string>
           <ProtectedString name="Source"><![CDATA[-- Retention systems: 7-day login streak, session playtime gifts, 3 daily
@@ -4503,7 +4503,7 @@ return RewardService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBXA5DE50865E904E629FAB9D5D0CDE27BC">
+      <Item class="ModuleScript" referent="RBX0A698193ADD04CBD9ADB603A85759049">
         <Properties>
           <string name="Name">SlimeService</string>
           <ProtectedString name="Source"><![CDATA[-- Conveyor spawning, buying (cash or Robux instant-buy of the visible slime),
@@ -5112,7 +5112,7 @@ return SlimeService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX35FF3B0D84104B1B8460AEE65C724EB4">
+      <Item class="ModuleScript" referent="RBX56ACB4FFEBEE457A890C06C90AECA471">
         <Properties>
           <string name="Name">ToolService</string>
           <ProtectedString name="Source"><![CDATA[-- The Bonk Hammer: everyone gets one. Bonking a thief makes them drop the
@@ -5242,7 +5242,7 @@ return ToolService
 ]]></ProtectedString>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="RBX76B0CDD9262742F88E28534BC393B564">
+      <Item class="ModuleScript" referent="RBX0C22A5D4C44345C8AD4ECA5A4E373ABC">
         <Properties>
           <string name="Name">WorldBuilder</string>
           <ProtectedString name="Source"><![CDATA[-- Builds the whole map from code at server start, so the game works from a
@@ -5724,15 +5724,15 @@ return WorldBuilder
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="RBX9DF9ADBF245F49BE83A1684F41354535">
+  <Item class="StarterPlayer" referent="RBXE4FF2D501515431FB66734762D20A28B">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="RBX396065BC709E4EE69CAF8BE76D40F8A3">
+    <Item class="StarterPlayerScripts" referent="RBXEB972AF2F9C34ECAA184A1DC5A1770A2">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="RBX44B6A626CA034C76AA18D707AC531B44">
+      <Item class="LocalScript" referent="RBX12B89DC323B94F0DB773619983868264">
         <Properties>
           <string name="Name">Client</string>
           <ProtectedString name="Source"><![CDATA[-- Client entry point: builds the UI, connects remotes, then asks the server
@@ -5797,7 +5797,7 @@ task.spawn(function()
 end)
 ]]></ProtectedString>
         </Properties>
-        <Item class="ModuleScript" referent="RBX99A507CB530E4AC3BD65BE155841DBF6">
+        <Item class="ModuleScript" referent="RBXEA2489205486465DA52DA9E4792EBD0D">
           <Properties>
             <string name="Name">ChatTags</string>
             <ProtectedString name="Source"><![CDATA[-- Chat tags ([DEV], [VIP], [Club]) via TextChatService. Visible status is a
@@ -5842,7 +5842,7 @@ return ChatTags
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBXD36AFCA0C7EC4805A2F82C155B2B60E1">
+        <Item class="ModuleScript" referent="RBXD72AE5F0B75B48AF96E6F3F19319C9C8">
           <Properties>
             <string name="Name">Effects</string>
             <ProtectedString name="Source"><![CDATA[-- Client-side juice: floating cash text, confetti, particle bursts, screen
@@ -6178,7 +6178,7 @@ return Effects
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBXC6557184448943F4BBD7450571AA3F4E">
+        <Item class="ModuleScript" referent="RBXAC2FEF0735154BAFB97FB0D2A630FA6F">
           <Properties>
             <string name="Name">HUD</string>
             <ProtectedString name="Source"><![CDATA[-- Main HUD: cash counter, menu buttons (left), offers (right), event/boost
@@ -6585,7 +6585,7 @@ return HUD
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBX0CDD81DA886C4394A12BD0F176833C2B">
+        <Item class="ModuleScript" referent="RBX8B1D29302C3C4843A8F457E7B23C2797">
           <Properties>
             <string name="Name">Net</string>
             <ProtectedString name="Source"><![CDATA[-- Client -> server requests through the single Action remote.
@@ -6615,7 +6615,7 @@ return Net
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBX91E40804FE8242D99DE5A1E5529C40B3">
+        <Item class="ModuleScript" referent="RBXFAE82998BCD04065BE7DC45A561EB53A">
           <Properties>
             <string name="Name">Notify</string>
             <ProtectedString name="Source"><![CDATA[-- Toast notifications (top centre), colour-coded by kind.
@@ -6713,11 +6713,11 @@ return Notify
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="Folder" referent="RBXB0DB3035EF9045D5A0A006E5262D0272">
+        <Item class="Folder" referent="RBX262863798A274D4B84D2AF94E5352F68">
           <Properties>
             <string name="Name">Panels</string>
           </Properties>
-          <Item class="ModuleScript" referent="RBX379E7A5F62D8461294236EA9C2ADEAF8">
+          <Item class="ModuleScript" referent="RBX8112D3CE3F1F42C4A7645509457808DF">
             <Properties>
               <string name="Name">Collection</string>
               <ProtectedString name="Source"><![CDATA[-- "Slimes" (your base: sell / fuse) and "Index" (collection book) panels.
@@ -6927,7 +6927,7 @@ return Collection
 ]]></ProtectedString>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="RBX8D69A9C5086144EC843468BAF4102009">
+          <Item class="ModuleScript" referent="RBX0F64D732BDC14066A9C3FCDA0EDF37E6">
             <Properties>
               <string name="Name">Misc</string>
               <ProtectedString name="Source"><![CDATA[-- Smaller panels: Codes (+ group join / invites), Settings, the offline
@@ -7220,7 +7220,7 @@ return Misc
 ]]></ProtectedString>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="RBX31750AB3E4F7460D83652D6C7DD0841E">
+          <Item class="ModuleScript" referent="RBXD57F36ABFEA0474A8940B97305BB510D">
             <Properties>
               <string name="Name">Progress</string>
               <ProtectedString name="Source"><![CDATA[-- Rebirth panel and the Odds panel (every chance shown as a percentage,
@@ -7399,7 +7399,7 @@ return Progress
 ]]></ProtectedString>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="RBXFDF10A61104D4F978912E3E4900A0F85">
+          <Item class="ModuleScript" referent="RBX04E3392C298D4D1F867D8773FCDC783E">
             <Properties>
               <string name="Name">Rewards</string>
               <ProtectedString name="Source"><![CDATA[-- Rewards: 7-day login streak, session playtime gifts and daily quests.
@@ -7644,7 +7644,7 @@ return Rewards
 ]]></ProtectedString>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="RBX35B31F00207349F381FFF296A16911FB">
+          <Item class="ModuleScript" referent="RBX4E9BDDF207734E2EADBEE20D19920C0C">
             <Properties>
               <string name="Name">Shop</string>
               <ProtectedString name="Source"><![CDATA[-- Shop: passes, scaled cash packs (exact amount shown before buying), boosts
@@ -7906,7 +7906,7 @@ return Shop
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="RBX8C6D23FB3F064F12B0BB0789F9B6E813">
+        <Item class="ModuleScript" referent="RBX6E0F1167546F41C39FE9E77667FCB321">
           <Properties>
             <string name="Name">Sounds</string>
             <ProtectedString name="Source"><![CDATA[-- UI/world sounds from Config.Sounds, respecting the player's settings.
@@ -7976,7 +7976,7 @@ return Sounds
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBX7121005EC02844C1AD865DEB0CCA219D">
+        <Item class="ModuleScript" referent="RBX3B0F74649D164AA88B3FBDC48A12F60B">
           <Properties>
             <string name="Name">State</string>
             <ProtectedString name="Source"><![CDATA[-- Client-side mirror of the player's state. The server pushes partial tables
@@ -8050,7 +8050,7 @@ return State
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBXA5D44BA9AE994031827C7790933D1FFB">
+        <Item class="ModuleScript" referent="RBX9CA61BAAE1694317BF5269B68EFC0A1D">
           <Properties>
             <string name="Name">Theme</string>
             <ProtectedString name="Source"><![CDATA[-- Visual language: bubbly, high-contrast, readable on small phones.
@@ -8084,7 +8084,7 @@ return Theme
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBXEBD2AC4E48754D73AE8227D550C3D5D0">
+        <Item class="ModuleScript" referent="RBX06FC529E9D8848CC8F6E8308A629DFDB">
           <Properties>
             <string name="Name">Tutorial</string>
             <ProtectedString name="Source"><![CDATA[-- First-time guide: a hint bar plus a glowing guide line from the player to
@@ -8241,7 +8241,7 @@ return Tutorial
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBX8AD928153BC047CD89F6E4F1C1925B70">
+        <Item class="ModuleScript" referent="RBX523C034B43994AF6AB2407567E010463">
           <Properties>
             <string name="Name">UIKit</string>
             <ProtectedString name="Source"><![CDATA[-- Small UI toolkit: styled labels/buttons, modal panels with one-at-a-time
@@ -8675,7 +8675,7 @@ return UIKit
 ]]></ProtectedString>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="RBX2C5CCA52BEDC4BCF98AA28669490B3BA">
+        <Item class="ModuleScript" referent="RBXF76C48EC741445C6830E0A1E3D51CF27">
           <Properties>
             <string name="Name">World</string>
             <ProtectedString name="Source"><![CDATA[-- Local world tweaks: only show prompts that make sense for this player

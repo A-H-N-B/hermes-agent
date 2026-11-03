@@ -1,0 +1,384 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body><title>Perencana Pendapatan Slime Snatchers</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fredoka:wght@500;600;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: calculator-first planner. Answer + controls on top, money flow drawn to scale, research tables below. */
+:root {
+  --paper: #f3f7f3;
+  --surface: #ffffff;
+  --ink: #23173a;
+  --ink-soft: #5b5070;
+  --line: #d8e2d9;
+  --goo: #6b3fd1;
+  --goo-soft: #ece6fa;
+  --slime: #1d8f4e;
+  --slime-soft: #dcf3e4;
+  --warn: #b4410c;
+  --font-display: "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #15111f; --surface: #1e1830; --ink: #f1edf8; --ink-soft: #b9aecf; --line: #352b4c;
+    --goo: #a98bff; --goo-soft: #2b2244; --slime: #4ade80; --slime-soft: #183a27; --warn: #fb923c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #15111f; --surface: #1e1830; --ink: #f1edf8; --ink-soft: #b9aecf; --line: #352b4c;
+  --goo: #a98bff; --goo-soft: #2b2244; --slime: #4ade80; --slime-soft: #183a27; --warn: #fb923c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+.wrap { max-width: 1060px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 5vw, 3.1rem); font-weight: 700; }
+h2 { font-size: 1.55rem; font-weight: 600; }
+h3 { font-size: 1.1rem; font-weight: 600; }
+p { margin: 0; }
+.eyebrow { font-family: var(--font-mono); font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--goo); }
+.lede { max-width: 64ch; font-size: 1.08rem; color: var(--ink-soft); }
+.lede strong { color: var(--ink); }
+header { display: grid; gap: 14px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.planner { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 820px) { .planner { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; display: grid; gap: 18px; min-width: 0; }
+
+.scenarios { display: flex; flex-wrap: wrap; gap: 8px; }
+.scenarios button {
+  font: 600 .95rem var(--font-display); border: 1.5px solid var(--goo); background: transparent; color: var(--goo);
+  padding: 7px 14px; border-radius: 999px; cursor: pointer;
+}
+.scenarios button[aria-pressed="true"] { background: var(--goo); color: var(--surface); }
+.scenarios button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--goo); outline-offset: 2px; }
+
+.field { display: grid; gap: 6px; }
+.field-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.field label { font-weight: 700; }
+.field output { font-family: var(--font-mono); font-size: .95rem; color: var(--goo); white-space: nowrap; }
+.field small { color: var(--ink-soft); font-size: .86rem; }
+input[type="range"] { width: 100%; accent-color: var(--goo); }
+.toggles { display: grid; gap: 10px; border-top: 1px dashed var(--line); padding-top: 14px; }
+.toggle { display: flex; gap: 10px; align-items: flex-start; }
+.toggle input { margin-top: 4px; accent-color: var(--goo); width: 18px; height: 18px; flex: none; }
+.toggle span { font-size: .92rem; color: var(--ink-soft); }
+.toggle strong { color: var(--ink); }
+
+.result { background: var(--slime-soft); border-color: transparent; }
+.big { font-family: var(--font-display); font-weight: 700; font-size: clamp(2.6rem, 7vw, 3.6rem); color: var(--slime); line-height: 1; }
+.big-label { font-weight: 700; }
+.meter { height: 14px; border-radius: 999px; background: var(--surface); overflow: hidden; border: 1px solid var(--line); }
+.meter > div { height: 100%; width: 0; background: var(--slime); transition: width .25s ease; }
+@media (prefers-reduced-motion: reduce) { .meter > div { transition: none; } }
+.meter-caption { font-size: .9rem; color: var(--ink-soft); }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.stat { background: var(--surface); border-radius: 10px; padding: 12px; display: grid; gap: 2px; }
+.stat b { font-family: var(--font-mono); font-size: 1.05rem; font-weight: 500; }
+.stat span { font-size: .82rem; color: var(--ink-soft); }
+.need { font-size: .98rem; }
+.need b { font-family: var(--font-mono); font-weight: 500; color: var(--goo); }
+.breakdown { display: grid; gap: 4px; font-size: .9rem; }
+.breakdown div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dotted var(--line); padding-block: 3px; }
+.breakdown div span:last-child { font-family: var(--font-mono); }
+
+.flow { display: grid; gap: 14px; }
+.flow-row { display: grid; grid-template-columns: minmax(120px, 210px) minmax(0, 1fr); gap: 12px; align-items: center; }
+@media (max-width: 560px) { .flow-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.flow-label { font-size: .92rem; }
+.flow-label b { display: block; font-family: var(--font-mono); font-weight: 500; }
+.bar { height: 30px; border-radius: 8px; min-width: 4px; transition: width .25s ease; }
+.bar.pay { background: var(--goo); }
+.bar.fee { background: var(--line); }
+.bar.you { background: var(--slime); }
+.flow-note { font-size: .9rem; color: var(--ink-soft); max-width: 70ch; }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .93rem; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.genre { display: inline-block; font-size: .78rem; padding: 2px 8px; border-radius: 999px; background: var(--goo-soft); color: var(--goo); white-space: nowrap; }
+.genre.steal { background: var(--slime-soft); color: var(--slime); font-weight: 700; }
+section { display: grid; gap: 14px; }
+.section-intro { color: var(--ink-soft); max-width: 70ch; }
+.formula { font-family: var(--font-mono); font-size: .88rem; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; white-space: pre; }
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+@media (max-width: 820px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+ul.plain { margin: 0; padding-left: 1.1rem; display: grid; gap: 6px; }
+.sources { font-size: .86rem; color: var(--ink-soft); }
+.sources a { color: var(--goo); word-break: break-word; }
+.caveat { border-left: 4px solid var(--warn); padding: 10px 14px; background: var(--surface); border-radius: 0 10px 10px 0; max-width: 75ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Slime Snatchers · Rencana pendapatan · data per 3 Nov 2026</p>
+    <h1>Butuh berapa pemain untuk $1.000 per bulan?</h1>
+    <p class="lede">Dengan asumsi realistis (<strong>2% pemain membeli</strong> setiap hari, rata-rata <strong>150 Robux</strong> per pembeli), jawabannya sekitar <strong>4.200 pemain harian</strong>, atau kira-kira <strong>90 pemain online bersamaan</strong>. Geser angka di bawah untuk mencoba skenario lain.</p>
+  </header>
+
+  <div class="planner">
+    <div class="panel" aria-label="Asumsi">
+      <div class="scenarios" role="group" aria-label="Skenario">
+        <button type="button" id="sc-low" data-sc="low">Konservatif</button>
+        <button type="button" id="sc-mid" data-sc="mid" aria-pressed="true">Realistis</button>
+        <button type="button" id="sc-high" data-sc="high">Bagus</button>
+      </div>
+      <div class="field">
+        <div class="field-top"><label for="dau">Pemain harian (DAU)</label><output id="dau-out" for="dau"></output></div>
+        <input type="range" id="dau" min="250" max="20000" step="50" value="4200">
+        <small>Jumlah pemain unik per hari. Lihat di Creator Hub › Analytics.</small>
+      </div>
+      <div class="field">
+        <div class="field-top"><label for="minutes">Menit bermain per pemain per hari</label><output id="minutes-out" for="minutes"></output></div>
+        <input type="range" id="minutes" min="5" max="90" step="1" value="30">
+        <small>Dipakai untuk mengubah DAU menjadi CCU (pemain online bersamaan).</small>
+      </div>
+      <div class="field">
+        <div class="field-top"><label for="conv">Pemain yang membeli per hari</label><output id="conv-out" for="conv"></output></div>
+        <input type="range" id="conv" min="0.2" max="6" step="0.1" value="2">
+        <small>Rata-rata platform sekitar 1,3%. Game simulator/tycoon yang rapi biasanya 1,5–3%.</small>
+      </div>
+      <div class="field">
+        <div class="field-top"><label for="arppu">Robux rata-rata per pembeli per hari</label><output id="arppu-out" for="arppu"></output></div>
+        <input type="range" id="arppu" min="20" max="600" step="5" value="150">
+        <small>Contoh: satu 2x Cash (399) ditambah satu Cash Bag (99) = 498 R$.</small>
+      </div>
+      <div class="field">
+        <div class="field-top"><label for="adult">Belanja dari pemain AS 18+ terverifikasi</label><output id="adult-out" for="adult"></output></div>
+        <input type="range" id="adult" min="0" max="40" step="1" value="0">
+        <small>Bagian ini dicairkan dengan kurs DevEx lebih tinggi ($0,0054 per Robux) di game R15.</small>
+      </div>
+      <div class="toggles">
+        <label class="toggle" for="cr"><input type="checkbox" id="cr"><span><strong>Hitung Creator Rewards</strong> (5 R$ per hari untuk tiap pembelanja aktif yang memainkan game ini di 3 game pertamanya hari itu, minimal 10 menit). Asumsi: 25% DAU pembelanja aktif, 50% memenuhi syarat.</span></label>
+        <label class="toggle" for="ads"><input type="checkbox" id="ads"><span><strong>Hitung iklan video berhadiah</strong> (+3% dari penjualan, perkiraan awal dari Roblox).</span></label>
+      </div>
+    </div>
+
+    <div class="panel result" aria-live="polite">
+      <div>
+        <p class="big-label">Perkiraan pemasukanmu per bulan</p>
+        <p class="big num" id="usd">$0</p>
+      </div>
+      <div class="meter" role="img" aria-label="Kemajuan menuju target $1.000"><div id="meter"></div></div>
+      <p class="meter-caption" id="meter-cap"></p>
+      <div class="stats">
+        <div class="stat"><b class="num" id="gross"></b><span>Robux dibelanjakan pemain / bulan</span></div>
+        <div class="stat"><b class="num" id="earned"></b><span>Robux bersih untukmu (70%)</span></div>
+        <div class="stat"><b class="num" id="ccu"></b><span>CCU rata-rata</span></div>
+        <div class="stat"><b class="num" id="peak"></b><span>CCU jam ramai (±2×)</span></div>
+      </div>
+      <p class="need">Untuk tepat $1.000/bulan dengan asumsi ini: <b id="need-dau"></b> pemain harian (<b id="need-ccu"></b> CCU rata-rata).</p>
+      <div class="breakdown" id="breakdown"></div>
+    </div>
+  </div>
+
+  <section aria-labelledby="flow-h">
+    <h2 id="flow-h">Dari dompet pemain ke rekeningmu</h2>
+    <p class="section-intro">Batang di bawah digambar dengan skala yang sama (USD per bulan) untuk skenario yang sedang dipilih. Pemain membeli Robux sekitar $0,0125 per Robux, Roblox mengambil 30% dari setiap penjualan di game, lalu Robux bersihmu dicairkan lewat DevEx.</p>
+    <div class="flow" id="flow"></div>
+    <p class="flow-note">Artinya, dari setiap $1 yang dibayar pemain, sekitar $0,21 sampai $0,30 sampai ke kamu. Selisihnya mencakup biaya toko aplikasi, server, moderasi dan bagian Roblox.</p>
+  </section>
+
+  <section aria-labelledby="top-h">
+    <h2 id="top-h">Top 10 game Roblox saat ini</h2>
+    <p class="section-intro">Pemain bersamaan menurut RoWatcher, 1 November 2026 pukul 15.05 UTC (17,6 juta pemain online di seluruh Roblox). Dua dari sepuluh teratas adalah genre steal, genre yang dipakai Slime Snatchers.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Game</th><th>CCU</th><th>Genre</th><th>Sumber Robux utama</th></tr></thead>
+        <tbody>
+          <tr><td class="n">1</td><td>Steal An Egg</td><td class="n">1,1 jt</td><td><span class="genre steal">steal-tycoon</span></td><td>Pass 2x pertumbuhan telur (±467 R$) dan 2x uang (±399 R$), skip timer, iklan video untuk speed</td></tr>
+          <tr><td class="n">2</td><td>Blox Fruits</td><td class="n">698 rb</td><td><span class="genre">action RPG</span></td><td>Buah permanen, pass 2x uang/mastery</td></tr>
+          <tr><td class="n">3</td><td>Brookhaven RP</td><td class="n">628 rb</td><td><span class="genre">roleplay</span></td><td>Pass rumah dan kendaraan, iklan video berhadiah</td></tr>
+          <tr><td class="n">4</td><td>Break and Steal an Egg</td><td class="n">480 rb</td><td><span class="genre steal">steal-tycoon</span></td><td>Pola yang sama dengan nomor 1</td></tr>
+          <tr><td class="n">5</td><td>Murder Mystery 2</td><td class="n">430 rb</td><td><span class="genre">social deduction</span></td><td>Skin senjata, event musiman Halloween</td></tr>
+          <tr><td class="n">6</td><td>Adopt Me!</td><td class="n">280 rb</td><td><span class="genre">pet & roleplay</span></td><td>Bucks, telur, potion, pass Fly/Ride Pet (±195 R$)</td></tr>
+          <tr><td class="n">7</td><td>Rivals</td><td class="n">273 rb</td><td><span class="genre">FPS</span></td><td>Skin dan wrap senjata; estimasi pihak ketiga $1,7–4,3 jt/bulan</td></tr>
+          <tr><td class="n">8</td><td>99 Nights in the Forest</td><td class="n">270 rb</td><td><span class="genre">survival co-op</span></td><td>Kelas, mata uang premium, revive</td></tr>
+          <tr><td class="n">9</td><td>DONT SPLASH</td><td class="n">154 rb</td><td><span class="genre">horror obby</span></td><td>Pack event (Halloween Pack 79 R$)</td></tr>
+          <tr><td class="n">10</td><td>Jujutsu Shenanigans</td><td class="n">146 rb</td><td><span class="genre">battlegrounds</span></td><td>Kosmetik, emote, server privat</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="sell-h">
+    <h2 id="sell-h">Apa yang dijual di Slime Snatchers</h2>
+    <p class="section-intro">Setiap item meniru pemicu belanja yang terbukti di game teratas. Tidak ada item acak berbayar: pemain selalu melihat apa yang ia beli, dan peluang spawn ditampilkan di menu Odds.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Tipe</th><th>Harga</th><th>Pemicu belanja</th></tr></thead>
+        <tbody>
+          <tr><td>2x Cash</td><td>Game pass</td><td class="n">399 R$</td><td>Pengali permanen, item terlaris di genre simulator</td></tr>
+          <tr><td>VIP</td><td>Game pass</td><td class="n">299 R$</td><td>Status: tag emas di chat dan di atas kepala, +50% cash</td></tr>
+          <tr><td>+6 Slime Pads · Master Thief · Auto Collect · Mega Lock · Turbo Shoes</td><td>Game pass</td><td class="n">99–249 R$</td><td>Kapasitas, kecepatan mencuri, kenyamanan, proteksi</td></tr>
+          <tr><td>Cash Pouch / Bag / Vault / Mountain</td><td>Developer product</td><td class="n">25–799 R$</td><td>Jumlah mengikuti income pemain, jadi tetap berharga di akhir game</td></tr>
+          <tr><td>2x Server Luck · Slime Rain</td><td>Developer product</td><td class="n">99 · 79 R$</td><td>Belanja sosial: menguntungkan seluruh server, nama pembeli diumumkan</td></tr>
+          <tr><td>Instant Buy (Epic s/d Secret)</td><td>Developer product</td><td class="n">49–799 R$</td><td>Ambil slime langka yang sedang terlihat di conveyor sebelum orang lain</td></tr>
+          <tr><td>Starter Pack</td><td>Developer product</td><td class="n">99 R$</td><td>Nilai tinggi sekali per akun, ditawarkan setelah pemain mencoba game</td></tr>
+          <tr><td>Base Shield · 2x Cash Potion · 2x Offline Cash</td><td>Developer product</td><td class="n">19–49 R$</td><td>Pembelian impuls kecil di momen yang tepat</td></tr>
+          <tr><td>Gift 2x Cash / VIP / Auto Collect</td><td>Developer product</td><td class="n">149–399 R$</td><td>Hadiah untuk teman, diterima walau penerima sedang offline</td></tr>
+          <tr><td>Video berhadiah · Roblox Plus · Slime Club</td><td>Iklan / langganan</td><td class="n">–</td><td>Pemasukan tambahan dari pemain yang tidak membeli langsung</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="math-h">
+    <h2 id="math-h">Rumus yang dipakai kalkulator</h2>
+    <div class="formula">Robux kotor / hari   = DAU × % pembeli × Robux per pembeli
+Robux bersih / hari  = Robux kotor × 70%
+Kurs DevEx           = $0,0038 × (1 − porsi 18+) + $0,0054 × porsi 18+
+USD / bulan          = Robux bersih / hari × 30 × kurs DevEx
+CCU rata-rata        = DAU × menit bermain ÷ 1.440</div>
+    <div class="cols">
+      <div class="panel">
+        <h3>Angka platform yang dipakai</h3>
+        <ul class="plain">
+          <li>Bagian developer dari game pass dan developer product: 70%.</li>
+          <li>Kurs DevEx standar $0,0038 per Robux sejak 5 September 2025.</li>
+          <li>Kurs ±$0,0054 untuk belanja pemain AS 18+ terverifikasi di game R15, berlaku 8 Juni 2026.</li>
+          <li>Harga Robux untuk pemain: 400 R$ = $4,99 sampai 10.000 R$ = $99,99.</li>
+          <li>Creator Rewards: 5 R$ per pembelanja aktif per hari, ditahan 60 hari.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Yang menentukan hasil</h3>
+        <ul class="plain">
+          <li>Trafik: ikon dan thumbnail yang diklik, iklan Sponsored, video pendek.</li>
+          <li>Retensi: target hari-1 di atas 20% dan sesi di atas 15 menit.</li>
+          <li>Update tiap 1–2 minggu dan admin event mingguan.</li>
+          <li>Harga yang diuji dengan Price Optimization setelah ada data.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="caveat">Kalkulator ini memperkirakan, bukan menjanjikan. Kode game menyediakan semua sistem monetisasi, tetapi pendapatan nyata bergantung pada berapa banyak pemain yang datang dan bertahan. Pantau angkamu sendiri di Creator Hub, lalu masukkan ke kalkulator ini.</p>
+  </section>
+
+  <section aria-labelledby="src-h" class="sources">
+    <h3 id="src-h">Sumber</h3>
+    <ul class="plain">
+      <li><a href="https://rowatcher.com/charts" target="_blank" rel="noopener">RoWatcher live charts</a> dan <a href="https://rowatcher.com/roblox-player-count" target="_blank" rel="noopener">player count</a></li>
+      <li><a href="https://allthings.how/steal-an-egg-how-to-get-gamepasses-in-roblox/" target="_blank" rel="noopener">Steal An Egg gamepasses</a></li>
+      <li><a href="https://axeetech.com/roblox-devex-rates/" target="_blank" rel="noopener">Roblox DevEx rates 2026</a></li>
+      <li><a href="https://create.roblox.com/docs/creator-rewards" target="_blank" rel="noopener">Roblox Creator Rewards</a></li>
+      <li><a href="https://devforum.roblox.com/t/more-creators-can-now-use-rewarded-video-ads/3838678" target="_blank" rel="noopener">Rewarded Video Ads (DevForum)</a></li>
+      <li><a href="https://create.roblox.com/docs/production/monetization/paid-random-items" target="_blank" rel="noopener">Paid random items policy</a></li>
+      <li><a href="https://rowatcher.com/news/robux-prices-bundles-2026-guide" target="_blank" rel="noopener">Harga Robux 2026</a></li>
+      <li><a href="https://profitable.app/roblox/games/rivals" target="_blank" rel="noopener">Estimasi pendapatan Rivals</a></li>
+      <li><a href="https://www.sec.gov/Archives/edgar/data/1315098/000131509823000077/filename1.htm" target="_blank" rel="noopener">Roblox SEC filing (pembayar harian vs DAU)</a></li>
+    </ul>
+  </section>
+</div>
+
+<script>
+(function () {
+  var SHARE = 0.70, DEVEX = 0.0038, DEVEX_ADULT = 0.0054, ROBUX_USD = 4.99 / 400;
+  var CR_ACTIVE = 0.25, CR_FIRST3 = 0.5, CR_ROBUX = 5, ADS = 0.03, TARGET = 1000;
+  var SCENARIOS = { low: { conv: 1, arppu: 120 }, mid: { conv: 2, arppu: 150 }, high: { conv: 3, arppu: 200 } };
+  var $ = function (id) { return document.getElementById(id); };
+  var nf = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
+  var nf1 = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 });
+  var usd = function (v) { return "$" + nf.format(Math.round(v)); };
+  var inputs = ["dau", "minutes", "conv", "arppu", "adult"].map($);
+
+  function model(v) {
+    var devex = DEVEX * (1 - v.adult) + DEVEX_ADULT * v.adult;
+    var grossDay = v.dau * v.conv * v.arppu;
+    var earnedMonth = grossDay * SHARE * 30;
+    var sales = earnedMonth * devex;
+    var creator = v.cr ? v.dau * CR_ACTIVE * CR_FIRST3 * CR_ROBUX * 30 * DEVEX : 0;
+    var ads = v.ads ? sales * ADS : 0;
+    var total = sales + creator + ads;
+    var perDau = v.dau > 0 ? total / v.dau : 0;
+    return {
+      grossMonth: grossDay * 30, earnedMonth: earnedMonth, sales: sales, creator: creator, ads: ads, total: total,
+      playerPays: grossDay * 30 * ROBUX_USD, ccu: v.dau * v.minutes / 1440,
+      needDau: perDau > 0 ? TARGET / perDau : Infinity
+    };
+  }
+
+  function read() {
+    return {
+      dau: +$("dau").value, minutes: +$("minutes").value, conv: +$("conv").value / 100,
+      arppu: +$("arppu").value, adult: +$("adult").value / 100, cr: $("cr").checked, ads: $("ads").checked
+    };
+  }
+
+  function flowRow(label, value, cls, max) {
+    var pct = max > 0 ? Math.max(0.6, value / max * 100) : 0;
+    return '<div class="flow-row"><div class="flow-label">' + label + '<b class="num">' + usd(value) +
+      '</b></div><div><div class="bar ' + cls + '" style="width:' + pct.toFixed(2) + '%"></div></div></div>';
+  }
+
+  function render() {
+    var v = read();
+    var m = model(v);
+    $("dau-out").textContent = nf.format(v.dau);
+    $("minutes-out").textContent = v.minutes + " menit";
+    $("conv-out").textContent = nf1.format(v.conv * 100) + "%";
+    $("arppu-out").textContent = nf.format(v.arppu) + " R$";
+    $("adult-out").textContent = nf.format(v.adult * 100) + "%";
+    $("usd").textContent = usd(m.total);
+    $("meter").style.width = Math.min(100, m.total / TARGET * 100).toFixed(1) + "%";
+    $("meter-cap").textContent = m.total >= TARGET
+      ? "Target $1.000 tercapai (" + nf.format(m.total / TARGET * 100) + "% dari target)."
+      : "Baru " + nf.format(m.total / TARGET * 100) + "% dari target $1.000.";
+    $("gross").textContent = nf.format(m.grossMonth) + " R$";
+    $("earned").textContent = nf.format(m.earnedMonth) + " R$";
+    $("ccu").textContent = nf.format(m.ccu);
+    $("peak").textContent = "±" + nf.format(m.ccu * 2);
+    $("need-dau").textContent = isFinite(m.needDau) ? nf.format(Math.ceil(m.needDau)) : "–";
+    $("need-ccu").textContent = isFinite(m.needDau) ? nf.format(Math.ceil(m.needDau * v.minutes / 1440)) : "–";
+    var rows = [["Penjualan pass & produk", m.sales]];
+    if (v.cr) rows.push(["Creator Rewards (perkiraan)", m.creator]);
+    if (v.ads) rows.push(["Iklan video berhadiah (perkiraan)", m.ads]);
+    $("breakdown").innerHTML = rows.map(function (r) {
+      return "<div><span>" + r[0] + '</span><span class="num">' + usd(r[1]) + "</span></div>";
+    }).join("");
+    var max = m.playerPays;
+    $("flow").innerHTML =
+      flowRow("Pemain membayar (uang asli)", m.playerPays, "pay", max) +
+      flowRow("Potongan Roblox 30% dan selisih kurs", m.playerPays - m.sales, "fee", max) +
+      flowRow("Kamu terima dari penjualan", m.sales, "you", max);
+  }
+
+  function setScenario(key) {
+    var s = SCENARIOS[key];
+    $("conv").value = s.conv;
+    $("arppu").value = s.arppu;
+    document.querySelectorAll(".scenarios button").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-sc") === key ? "true" : "false");
+    });
+    render();
+  }
+
+  inputs.forEach(function (el) {
+    el.addEventListener("input", function () {
+      if (el.id === "conv" || el.id === "arppu") {
+        document.querySelectorAll(".scenarios button").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+      }
+      render();
+    });
+  });
+  $("cr").addEventListener("change", render);
+  $("ads").addEventListener("change", render);
+  document.querySelectorAll(".scenarios button").forEach(function (b) {
+    b.addEventListener("click", function () { setScenario(b.getAttribute("data-sc")); });
+  });
+  render();
+})();
+</script>
+</body></html>

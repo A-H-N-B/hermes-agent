@@ -52,6 +52,7 @@ slime-snatchers/
 
 ## Dokumen
 - [Riset top 10 & kalkulasi $1.000/bulan](docs/RISET-DAN-KALKULASI.md)
+- [Kalkulator pendapatan interaktif (buka di browser)](docs/kalkulator-pendapatan.html)
 - [Panduan setup langkah demi langkah](docs/PANDUAN-SETUP.md)
 - [Launch & marketing 30 hari](docs/LAUNCH-DAN-MARKETING.md)
 - [Tools verifikasi](tools/README.md)
