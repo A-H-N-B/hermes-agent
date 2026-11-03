@@ -25,9 +25,7 @@ local beltCounter = 0
 local models: { [Player]: { [string]: Model } } = {}
 local pendingInstant: { [Player]: any } = {}
 
-local GUARANTEE_SECONDS = 150 -- an Epic-or-better slime spawns at least this often
 local INSTANT_RESERVE_SECONDS = 25
-SlimeService.GuaranteeSeconds = GUARANTEE_SECONDS
 
 local function profileOf(player: Player)
 	return S.DataService.get(player)
@@ -581,7 +579,7 @@ function SlimeService.start()
 		task.wait(Tuning.SpawnInterval / S.EventService.spawnRateMult())
 		if beltCount < 45 and #S.PlayerService.readyPlayers() > 0 then
 			local minRank = nil
-			if os.clock() - lastGuarantee >= GUARANTEE_SECONDS then
+			if os.clock() - lastGuarantee >= Tuning.GuaranteeEpicSeconds then
 				minRank = Rarities.ByKey.Epic.rank
 			end
 			local id, mut = Economy.rollSpawn(rng, S.EventService.luck(), S.EventService.mutationMult(), minRank)

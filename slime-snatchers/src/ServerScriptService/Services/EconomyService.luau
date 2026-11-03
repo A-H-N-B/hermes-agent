@@ -312,6 +312,7 @@ local function tickPlayer(player: Player, profile)
 	S.PlayerService.sync(player, {
 		cash = data.cash,
 		income = total,
+		baseIncome = EconomyService.baseIncomePerSecond(player),
 		mult = mult,
 		boosts = data.boosts,
 	})

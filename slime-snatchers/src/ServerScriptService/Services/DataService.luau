@@ -30,6 +30,8 @@ DataService.Template = {
 	nextUid = 1,
 	slimes = {},
 	giftedPasses = {},
+	giftCredits = {},
+	giftsReceived = {},
 	boosts = {},
 	index = {},
 	daily = { streak = 0, lastDay = 0 },

@@ -171,6 +171,7 @@ Config.Tuning = {
 	ExtraPadsPass = 6,
 
 	SpawnInterval = 2.3, -- detik antar slime di conveyor
+	GuaranteeEpicSeconds = 150, -- minimal 1 slime Epic+ muncul tiap X detik (ditampilkan di panel Odds)
 	BeltTravelTime = 42, -- detik dari pipa ke ujung
 	PurchaseWalkTime = 1.6,
 
