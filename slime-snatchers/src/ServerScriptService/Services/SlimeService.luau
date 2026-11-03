@@ -324,6 +324,12 @@ function SlimeService.buyFromBelt(player: Player, uid: string)
 	if not entry or not S.PlayerService.isReady(player) then
 		return
 	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local body = entry.model.PrimaryPart
+	if not root or not root:IsA("BasePart") or not body or (root.Position - body.Position).Magnitude > 22 then
+		return
+	end
 	if entry.reservedBy and entry.reservedBy ~= player and entry.reservedUntil > os.clock() then
 		S.PlayerService.notify(player, "Someone is buying this slime right now!", "warning")
 		return

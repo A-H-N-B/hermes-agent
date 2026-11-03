@@ -243,11 +243,18 @@ local function hookPlot(plot)
 			S.EconomyService.collectPad(player, i)
 		end)
 	end
+	local lastLockTouch = 0
 	plot.lockButton.Touched:Connect(function(hit)
 		local player = playerFromHit(hit)
-		if player and player == plot.owner and plot.lockedUntil <= now() then
-			PlotService.lock(player)
+		if not player or player ~= plot.owner or plot.lockedUntil > now() then
+			return
 		end
+		-- Touched fires many times while standing on the button
+		if os.clock() - lastLockTouch < 2 then
+			return
+		end
+		lastLockTouch = os.clock()
+		PlotService.lock(player)
 	end)
 end
 

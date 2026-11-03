@@ -361,7 +361,8 @@ function DataService.start()
 	end
 end
 
-game:BindToClose(function()
+-- Saves and unlocks every remaining profile (server shutdown).
+function DataService.releaseAll(timeout: number)
 	local pending = 0
 	for player, profile in profiles do
 		pending += 1
@@ -371,10 +372,10 @@ game:BindToClose(function()
 			pending -= 1
 		end)
 	end
-	local deadline = os.clock() + 25
+	local deadline = os.clock() + timeout
 	while pending > 0 and os.clock() < deadline do
 		task.wait(0.2)
 	end
-end)
+end
 
 return DataService

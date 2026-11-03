@@ -358,6 +358,8 @@ end
 
 function PlayerService.init(services)
 	S = services
+	-- characters spawn only after the player's base is assigned
+	Players.CharacterAutoLoads = false
 	Remotes.init()
 	Remotes.get("Action").OnServerInvoke = function(player: Player, name: any, payload: any)
 		if type(name) ~= "string" then
@@ -424,6 +426,23 @@ end
 function PlayerService.start()
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	-- On shutdown run the normal leave flow (collect pad cash, cancel steals,
+	-- save) for everyone, then release any profile that never became ready.
+	game:BindToClose(function()
+		local pending = 0
+		for player in ready do
+			pending += 1
+			task.spawn(function()
+				onPlayerRemoving(player)
+				pending -= 1
+			end)
+		end
+		local deadline = os.clock() + 20
+		while pending > 0 and os.clock() < deadline do
+			task.wait(0.2)
+		end
+		S.DataService.releaseAll(math.max(1, deadline + 5 - os.clock()))
+	end)
 	for _, player in Players:GetPlayers() do
 		task.spawn(onPlayerAdded, player)
 	end

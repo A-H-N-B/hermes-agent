@@ -26,7 +26,8 @@ function Notify.init(gui: ScreenGui)
 	container = New("Frame", {
 		Name = "Toasts",
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 104),
+		-- below the cash pill at every UI scale (offsets are not scaled by UIScale)
+		Position = UDim2.new(0.5, 0, 0.17, 0),
 		Size = UDim2.fromOffset(560, 300),
 		BackgroundTransparency = 1,
 		ZIndex = 30,

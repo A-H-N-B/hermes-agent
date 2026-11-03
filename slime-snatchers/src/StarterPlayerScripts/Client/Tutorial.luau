@@ -75,7 +75,8 @@ function Tutorial.init(gui: ScreenGui)
 	local hint = New("Frame", {
 		Name = "Hint",
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -168),
+		-- above the bottom HUD group at every UI scale
+		Position = UDim2.new(0.5, 0, 0.72, 0),
 		Size = UDim2.fromOffset(640, 52),
 		BackgroundColor3 = C.Panel,
 		Visible = false,

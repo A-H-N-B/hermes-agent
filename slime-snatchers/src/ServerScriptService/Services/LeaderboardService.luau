@@ -66,9 +66,14 @@ function LeaderboardService.submit(player: Player)
 	if not profile then
 		return
 	end
+	-- read values up front: the profile may be released while SetAsync yields
+	local values = {}
+	for _, board in BOARDS do
+		values[board.name] = board.encode(profile.data[board.field])
+	end
 	for _, board in BOARDS do
 		local store = getStore(board)
-		local value = board.encode(profile.data[board.field])
+		local value = values[board.name]
 		if store and value > 0 then
 			pcall(function()
 				store:SetAsync(tostring(player.UserId), value)
@@ -163,7 +168,7 @@ function LeaderboardService.init(services)
 		end
 	end
 	S.PlayerService.onLeaving(function(player)
-		LeaderboardService.submit(player)
+		task.spawn(LeaderboardService.submit, player)
 	end)
 end
 
