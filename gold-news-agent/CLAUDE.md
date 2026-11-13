@@ -327,5 +327,22 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   at now − N×24 h (M15 ≤ 7 days, H1 beyond, ≤ 60). `/api/moves?days=N`; the Live card "Naik /
   turun (%)" re-computes every percent from each tick; `#candle-pct` shows the newest or hovered
   candle's move (crosshair). Telegram `/status` line and the chat brief's `<pergerakan>`.
+  AI only when needed (13 Nov, ADR-032): `TriageEngine.easy()` skips the AI for a release with a
+  parsed forecast, a rules impact < `llm.triage_min_impact` (3), or impact 3 with a clear keyword
+  direction and no confirmation needed (rules result final, "(Dibaca mesin)"); deep only for
+  impact >= 4 and never on scheduled releases; outlook/report narratives off; `desk_votes` 1;
+  `chat_per_day` 20; `budget.llm_monthly_usd` 2.5 (so $5 lasts two months). Tests that exercise
+  the AI path opt in with the `ai_everywhere` fixture.
+  Fixed signals (13 Nov, ADR-033): `signals/progress.py` follows the given signal every
+  evaluation (`SignalProgress` in `EngineState.progress`: BUY on the bid, SELL on the ask, zone
+  on the mid; entered/tp1/tp2/tp3 ends/sl = INVALID ends/expired; after TP1 it runs to created +
+  `paper.max_hold_hours`); `EngineState.active` uses `still_running`. `SignalService._announce`
+  sends one `signal_update` per step (`render_progress`); the paper service is silent.
+  `Signal.strength` (LEMAH/SEDANG/KUAT/SANGAT KUAT from confidence 65/75/85) in Telegram and on
+  the Live card (steps with ✓, SL "tertembus = INVALID", an ended signal shown 2 h).
+  Auto-update (13 Nov, ADR-034): scheduled task "Gold News Agent - Perbarui otomatis" daily
+  05:00 (the daily close/reopen in both seasons), registered by the installer and every
+  Perbarui run; `perbarui.cmd otomatis` logs to `data\logs\perbarui.log`, does nothing without a
+  new commit, never pauses or opens the browser, and leaves a stopped agent stopped.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

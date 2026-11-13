@@ -550,11 +550,77 @@ kedua yang diuji terhadap data acak:
   (terbaru atau yang disorot kursor) dihitung di halaman dari bar grafik.
 - Kata-kata yang sama (`move_line`) di Telegram `/status` dan brief Tanya AI (`<pergerakan>`).
 
+### ADR-032 AI hanya bila perlu, $2,5 per bulan — Diterapkan
+
+- Pengguna (13 Nov 2026): "haiku kalau bisa tidak usah pakai kecuali kalau dibutuhkan; 5 dollar
+  kalau bisa untuk 2 bulan atau lebih; berita mudah tidak usah pakai AI". Program sudah punya
+  pembaca tanpa AI untuk semua berita (parser rilis + aturan kata kunci); AI kini hanya membaca
+  yang aturan tidak bisa putuskan sendiri.
+- Gerbang `TriageEngine.easy()` (tanpa panggilan AI, hasil aturan menjadi hasil akhir, catatan
+  "dibaca mesin tanpa AI (hemat AI)", ringkasan diawali "(Dibaca mesin)"): rilis data yang
+  angka dan forecast-nya terbaca parser; berita yang dinilai aturan di bawah
+  `llm.triage_min_impact` (3); berita bernilai tepat 3 yang arahnya jelas dari kata kunci dan
+  tidak perlu konfirmasi. AI tetap membaca: dampak ≥ 4, dampak 3 yang arahnya tidak jelas atau
+  perlu konfirmasi, dan rilis tanpa forecast.
+- Analisis mendalam hanya untuk dampak ≥ 4 (`deep_min_impact`) dan tidak untuk rilis terjadwal
+  (`analysis.deep_on_scheduled_release: false`: angkanya sudah dibaca parser). Narasi outlook dan
+  ringkasan laporan AI mati (`outlook.use_llm` / `reports.use_llm: false`): tabel dan angkanya
+  memang dari aturan. Desk satu jawaban (`llm.desk_votes: 1`, bisa 3 lagi), Tanya AI 20 per hari.
+- `budget.llm_monthly_usd` 2,5: saldo $5 cukup dua bulan. Jatah harian tetap dihitung seperti
+  ADR-030 (sisa bulan ÷ hari tersisa, ±$0,08 per hari). Perkiraan (ganti dengan `llm_usage`
+  nyata): hari ramai ±$0,10–0,15 (±100 berita sulit × $0,0004, ±10 analisis mendalam × $0,003,
+  ±30 keputusan sinyal × $0,0013, ≤ 20 pertanyaan × $0,001), jadi di hari ramai berita biasa
+  memakai aturan lebih awal dan keputusan sinyal tetap memakai AI dari separuh jatah prioritas.
+- Tes `tests/test_ai_economy.py` mengunci: berita mudah tidak memanggil AI, berita sulit dan
+  dampak tinggi memanggilnya, dan batas $2,5 dipakai.
+
+### ADR-033 Sinyal tetap: TP1–TP3 dicentang, SL tertembus = INVALID — Diterapkan
+
+- Pengguna: "sinyal di M5/M15 tidak update kalau dapat sinyal; muncul TP1, 2, 3, SL dan zona
+  entry; kalau nembus SL sinyal invalid; sinyal ada tingkat keyakinan, semakin yakin semakin
+  kuat". Level sinyal memang tidak pernah diubah setelah keluar; yang belum ada adalah mengikuti
+  sinyal itu sampai selesai dan memberitahukannya.
+- `signals/progress.py`: `SignalProgress` di `EngineState.progress` (kv `signal_engine`, selamat
+  dari restart). BUY dinilai dari bid, SELL dari ask (harga yang menutup posisi), zona entry dari
+  harga tengah. Langkah: `entered`, `tp1`, `tp2`, `tp3` (selesai), `sl` (INVALID, selesai),
+  `expired`. Tanpa TP1 sampai `valid_until` → kedaluwarsa; setelah TP1 sinyal tetap berjalan
+  sampai `paper.max_hold_hours` sejak dibuat. Satu lonjakan yang melewati beberapa level
+  melaporkan semuanya sekaligus. Setelah selesai, harga berikutnya tidak dihitung lagi.
+- `SignalService._follow` memeriksa setiap evaluasi (tiap detik) dengan harga terbaru; tiap
+  langkah = satu pesan Telegram (`signal_update`: TP dan SL prioritas tinggi, masuk zona dan
+  kedaluwarsa normal; "masuk zona" tidak dikirim untuk entry market). Sinyal yang masih berjalan
+  tetap sinyal aktif mesin: arah sama tidak membuat sinyal baru, arah berlawanan hanya bila
+  syarat pembalikan terpenuhi ("digantikan"). Service `paper` tetap mencatat R untuk statistik
+  dan batas rugi, tapi kini diam (dulu mengirim pesan TP1/tutup sendiri: dua pesan untuk satu
+  kejadian).
+- Kekuatan: `Signal.strength` dari confidence: ≥ 85 SANGAT KUAT, ≥ 75 KUAT, ≥ 65 SEDANG, selain
+  itu LEMAH. Telegram: "Keyakinan 78/100 · KUAT ●●●○" dan "📌 Level ini tetap ...". Dashboard:
+  langkah zona entry → TP1 → TP2 → TP3 dengan ✓ dan jamnya, kotak SL "tertembus = INVALID", garis
+  grafik bertanda ✓; sinyal yang selesai (INVALID/TP3/kedaluwarsa) tetap tampil 2 jam.
+- Batas jujur: harga diperiksa sekali per detik dari kutipan bid/ask, jadi jarum (wick) yang
+  lebih singkat dari itu bisa terlewat; tanpa MT5 harga adalah proxy (samakan dengan `/finex`).
+
+### ADR-034 Update otomatis setiap hari — Diterapkan
+
+- Pengguna: "kamu buat itu bisa berjalan otomatis". Tugas Windows "Gold News Agent - Perbarui
+  otomatis" setiap hari 05:00 (jam laptop, WIB), dipasang oleh installer (langkah 8) dan oleh
+  setiap klik "Perbarui", jadi instalasi lama mendapatkannya setelah satu kali update manual.
+- `perbarui.cmd otomatis` (jendela minimize): ambil versi baru; bila tidak ada perubahan,
+  program tidak disentuh. Bila ada, tujuh langkah update yang sama tanpa `pause`, catatan ditulis
+  ke `data\logs\perbarui.log` (satu baris "=====" per hari menandai tugas berjalan), program
+  dinyalakan lagi minimize tanpa membuka browser, dan program yang sengaja dimatikan (Matikan)
+  tetap mati. Gagal sebelum versi baru terpasang → versi lama dinyalakan lagi (seperti biasa).
+- 05:00 WIB = tutup/buka harian pasar emas (17:00–18:00 New York: 04:00–05:00 WIB saat musim
+  panas AS, 05:00–06:00 WIB saat musim dingin), jam paling sepi sepanjang tahun. Tugas berjalan
+  juga dengan baterai, dan hanya saat pengguna login (sesi yang sama dengan MT5).
+- Laptop mati atau tidur pada 05:00 = update menunggu hari berikutnya (atau klik Perbarui).
+
 ## Estimasi biaya LLM (untuk Q4)
 
-**Sejak 13 Nov 2026 (ADR-030) semua rute memakai Claude Haiku 5.5 ($0,10 / $0,50 per juta token,
-baca cache $0,01) dengan batas keras $5 per bulan; tabel di bawah adalah perhitungan zaman Opus,
-disimpan sebagai riwayat. Di Haiku angka yang sama kira-kira 40× lebih kecil.**
+**Sejak 13 Nov 2026 (ADR-030, ADR-032) semua rute memakai Claude Haiku 5.5 ($0,10 / $0,50 per
+juta token, baca cache $0,01), hanya untuk berita yang tidak bisa dibaca aturan, dengan batas
+keras $2,5 per bulan; tabel di bawah adalah perhitungan zaman Opus, disimpan sebagai riwayat. Di
+Haiku angka yang sama kira-kira 40× lebih kecil.**
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):
 

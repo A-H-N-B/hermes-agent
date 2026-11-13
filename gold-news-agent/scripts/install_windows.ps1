@@ -190,6 +190,15 @@ function Install-GoldNewsAgent {
     $Startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'GoldNewsAgent.cmd'
     [IO.File]::WriteAllText($Startup, "@start `"Gold News Agent`" /min `"$Win\gold_agent_loop.cmd`"`r`n", [Text.Encoding]::ASCII)
     Ok "Nyala otomatis saat login: $Startup"
+    # Daily unattended update at 05:00 WIB: the gold market's daily close / reopen (17:00-18:00
+    # New York) in both summer and winter time. Minimized, and also on battery.
+    try {
+        $run = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c start `"Memperbarui Gold News Agent`" /min `"$(Join-Path $Win 'perbarui.cmd')`" otomatis"
+        $daily = New-ScheduledTaskTrigger -Daily -At '05:00'
+        $power = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName 'Gold News Agent - Perbarui otomatis' -Action $run -Trigger $daily -Settings $power -Description 'Memperbarui Gold News Agent setiap hari 05:00 bila ada versi baru' -Force -ErrorAction Stop | Out-Null
+        Ok 'Update otomatis: setiap hari 05:00 WIB, hanya bila ada versi baru'
+    } catch { Warn 'Jadwal update otomatis tidak bisa dibuat; klik Perbarui sendiri bila perlu.' }
     $shell = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
     foreach ($pair in @(@('Jalankan Gold News Agent', 'jalankan.cmd'), @('Matikan Gold News Agent', 'matikan.cmd'), @('Perbarui Gold News Agent', 'perbarui.cmd'))) {

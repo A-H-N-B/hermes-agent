@@ -125,11 +125,12 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    verifikasi email (dan nomor HP bila diminta).
 2. **Isi saldo:** menu **Settings → Billing** → *Add credits* / *Buy credits*. Masukkan kartu
    (Visa/Mastercard; kartu debit dengan fitur transaksi internasional biasanya bisa). Mulai
-   kecil, mis. **US$5–10**, cukup untuk beberapa minggu pemakaian normal.
+   kecil, mis. **US$5**, cukup untuk ±2 bulan dengan batas bawaan program.
 3. **Pasang batas biaya** supaya tagihan tidak pernah kebablasan: **Settings → Limits** → atur
-   *spend limit* bulanan, mis. US$6 (sedikit di atas batas program). Program punya batas
-   kerasnya sendiri: `budget.llm_monthly_usd` (bawaan **US$5 per bulan**; ubah dengan mis.
-   `uv run gold-agent config set budget.llm_monthly_usd 10`), dibagi rata per hari. Bila habis,
+   *spend limit* bulanan, mis. US$3 (sedikit di atas batas program). Program punya batas
+   kerasnya sendiri: `budget.llm_monthly_usd` (bawaan **US$2,5 per bulan**, jadi saldo $5 cukup
+   dua bulan; ubah dengan mis. `uv run gold-agent config set budget.llm_monthly_usd 5`), dibagi
+   rata per hari. Bila habis,
    AI mati sampai tanggal 1; dashboard, Telegram, dan sinyal tetap jalan dengan aturan program
    (sinyal ditandai "tanpa review AI").
 4. **Buat key:** menu **API Keys** → **Create Key** → beri nama, mis. `gold-news-agent` →
@@ -152,12 +153,13 @@ lewat Claude Console, dengan saldo (credit) sendiri.
 Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): semua tugas (triage
 tiap berita, analisis mendalam, outlook per jam, ringkasan, keputusan akhir sinyal, Tanya AI)
 memakai **Claude Haiku 5.5** ($0,10 / $0,50 per juta token), dengan tingkat `effort` berbeda per
-tugas. Biayanya sekitar $0,0004 per berita biasa, $0,004 per keputusan sinyal (tiga suara), dan
-$0,001 per pertanyaan. Kebutuhan penuh hari ramai sekitar $0,5, lebih dari jatah $5 per bulan
-(±$0,17 per hari), jadi jatah harian menahannya: berita biasa, outlook, dan Tanya AI berhenti di
-separuh jatah dan memakai jawaban program, sedangkan keputusan sinyal dan berita berdampak tinggi
-tetap memakai AI sampai jatah hari itu habis. Biaya nyata tercatat di tabel `llm_usage` dan
-terlihat di header dashboard ("AI $x / $5 bulan ini"), laporan harian, dan `/stats`. Isi
+tugas, dan hanya bila perlu: rilis data dan berita mudah dibaca mesin tanpa AI, narasi outlook
+dan laporan memakai tulisan program. Biayanya sekitar $0,0004 per berita yang dibaca AI, $0,0013
+per keputusan sinyal (satu jawaban), dan $0,001 per pertanyaan; hari ramai sekitar $0,10–0,15.
+Jatah $2,5 per bulan (±$0,08 per hari) menahannya: berita biasa dan Tanya AI berhenti di separuh
+jatah dan memakai jawaban program, sedangkan keputusan sinyal dan berita berdampak tinggi tetap
+memakai AI sampai jatah hari itu habis. Biaya nyata tercatat di tabel `llm_usage` dan terlihat di
+header dashboard ("AI $x / $2.50 bulan ini"), laporan harian, dan `/stats`. Isi
 permintaan program ini hanya berita publik dan angka pasar, tanpa data akun atau rahasia.
 
 **Memantau pemakaian:** Console → **Usage** menampilkan biaya per hari.

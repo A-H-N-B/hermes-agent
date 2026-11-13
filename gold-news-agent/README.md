@@ -47,10 +47,17 @@ tambahan hasil review Fase 0).
 - Tiap rencana trade membawa peluang TP1 sebelum SL dan nilai harapan (EV) dalam R: volatilitas
   GARCH + Monte Carlo, drift hanya dari keunggulan yang sudah terbukti, digabung dengan hasil
   setup serupa di masa lalu. Setup yang terbukti rugi (seluruh pita 95 % EV negatif) menunggu.
-- Keputusan akhir: desk AI tiga suara Claude Haiku 5.5 paralel (jawaban dalam hitungan detik);
-  trade lolos bila mayoritas setuju. Semua AI memakai Haiku 5.5 dengan batas keras **$5 per
-  bulan**: dibagi rata per hari, dan bila habis AI mati sampai tanggal 1 sementara dashboard,
-  Telegram, dan sinyal tetap jalan dengan aturan program.
+- Keputusan akhir: desk AI satu jawaban Claude Haiku 5.5 (dalam hitungan detik). AI hanya
+  dipakai bila perlu: rilis data dan berita mudah (dampak rendah, atau arah jelas dari kata
+  kunci) dibaca mesin tanpa AI; AI membaca berita penting atau yang arahnya tidak jelas. Batas
+  keras **$2,5 per bulan** (saldo $5 cukup dua bulan), dibagi rata per hari; bila habis AI mati
+  sampai tanggal 1 sementara dashboard, Telegram, dan sinyal tetap jalan dengan aturan program.
+- Sinyal tetap: setelah keluar, zona entry, SL, TP1, TP2, dan TP3 tidak berubah. Alat mengikuti
+  harga tiap detik dan mengirim kabar saat harga masuk zona, TP1/TP2/TP3 tercapai (dicentang ✓
+  di dashboard), atau SL tertembus: sinyal itu langsung **INVALID**. Tiap sinyal membawa
+  keyakinan 0–100 dengan label LEMAH / SEDANG / KUAT / SANGAT KUAT.
+- Update otomatis: di Windows, setiap hari 05:00 WIB (saat pasar emas tutup/buka harian) alat
+  memperbarui dirinya sendiri bila ada versi baru, tanpa membuka browser.
 - Impuls momentum: setiap detik harga dibandingkan dengan ambang gerak 1–10 menit yang luar biasa
   (≥ 3σ) sekaligus tembus high/low 30 menit, jadi awal gerak naik/turun besar langsung menjadi
   kandidat BUY/SELL tanpa menunggu berita. Akurasinya diukur ulang dari impuls 7 hari terakhir.
@@ -181,7 +188,8 @@ port langsung ke internet. Jika `dashboard.host` bukan localhost, `DASHBOARD_PAS
 
 ## Evaluasi & laporan
 
-Setiap sinyal otomatis di-*paper trade* oleh service `paper` dengan harga dari sumber yang sama:
+Setiap sinyal otomatis di-*paper trade* (diam, tanpa pesan; kabar TP/SL dikirim service `signal`)
+oleh service `paper` dengan harga dari sumber yang sama:
 isi di ask/bid + slippage, 50% ditutup di TP1 lalu stop ke breakeven, sisanya ke TP2, dan
 kedaluwarsa jika TP1 tidak tersentuh dalam masa berlaku. Hasil (R, MFE/MAE, durasi) tersimpan
 dan ikut menghitung batas rugi harian. Service `evaluator` tiap pagi (05:30 WIB) menjalankan

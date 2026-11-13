@@ -189,27 +189,29 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      30 hari, batas bawah 95%-nya di atas 50%) menggantikan bawaan;
    - timeframe yang spread-nya terlalu besar dibanding SL (`max_cost_ratio`) dilewati;
    - **AI memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
-     chart-nya dari timeframe yang layak. Tiga jawaban **Claude Haiku 5.5** terpisah dan
-     bersamaan (`llm.desk_votes`, selesai dalam hitungan detik); trade lolos bila
-     mayoritas setuju. Jumlah suara dan alasan suara yang menahan tampil di sinyal. Angka harga,
-     SL, dan TP tetap dihitung sistem. TUNGGU dari AI ditanya ulang setelah 3 menit, atau
-     langsung bila ada impuls baru;
+     chart-nya dari timeframe yang layak. Satu jawaban **Claude Haiku 5.5** (`llm.desk_votes`,
+     bawaan 1 supaya hemat; 3 = suara mayoritas), selesai dalam hitungan detik. Alasan bila AI
+     menahan tampil di sinyal. Angka harga, SL, dan TP tetap dihitung sistem. TUNGGU dari AI
+     ditanya ulang setelah 3 menit, atau langsung bila ada impuls baru;
    - **impuls momentum** (`signal_engine.impulse`): bila harga bergerak luar biasa cepat (gerak
      1–10 menit ≥ 3σ) dan menembus high/low 30 menit terakhir, sistem langsung membuat kandidat
      BUY/SELL di chart M5 tanpa menunggu berita, asal skor berita/makro tidak melawan dan harga
      belum terlalu jauh (≤ 1,5 ATR) dari awal gerak. Ini yang mencegah gerak besar terlewat.
    Timeframe tetap juga bisa: `uv run gold-agent config set trading.timeframe.select M5`.
-6. Biaya AI (`budget`). Semua AI memakai **Claude Haiku 5.5** ($0,10 / $0,50 per juta token).
-   `llm_monthly_usd` (bawaan **$5 per bulan**) adalah batas keras: tidak ada panggilan Claude
-   yang dimulai bila bisa melewatinya. Batas itu dibagi rata: tiap hari boleh memakai sisa bulan
-   dibagi jumlah hari yang tersisa (hari sepi menyisakan lebih untuk hari berikutnya). Berita
-   biasa, outlook, laporan, dan Tanya AI berhenti di separuh jatah hari itu
-   (`priority_reserve_pct: 50`); separuhnya untuk keputusan sinyal dan berita berdampak tinggi.
-   Bila $5 bulan itu habis, AI mati sampai tanggal 1: dashboard, Telegram, dan sinyal tetap
-   jalan dengan aturan program (sinyal ditandai "tanpa review AI"). Header dashboard menulis
-   "AI $x / $5 bulan ini". Satu review AI sekitar $0,004 dan satu pertanyaan Tanya AI sekitar
-   $0,001. Contoh menaikkan batas ke $10:
-   `uv run gold-agent config set budget.llm_monthly_usd 10`.
+6. Biaya AI (`budget`). Semua AI memakai **Claude Haiku 5.5** ($0,10 / $0,50 per juta token),
+   dan hanya bila perlu: rilis data yang angkanya terbaca dan berita mudah (dampak rendah, atau
+   dampak sedang yang arahnya jelas dari kata kunci) dibaca mesin tanpa AI (`llm.triage_min_impact`,
+   bawaan 3); AI membaca berita penting dan yang arahnya tidak jelas. Narasi outlook dan ringkasan
+   laporan memakai tulisan program. `llm_monthly_usd` (bawaan **$2,5 per bulan**, jadi saldo $5
+   cukup dua bulan) adalah batas keras: tidak ada panggilan Claude yang dimulai bila bisa
+   melewatinya. Batas itu dibagi rata: tiap hari boleh memakai sisa bulan dibagi jumlah hari
+   yang tersisa (hari sepi menyisakan lebih untuk hari berikutnya). Berita biasa dan Tanya AI
+   berhenti di separuh jatah hari itu (`priority_reserve_pct: 50`); separuhnya untuk keputusan
+   sinyal dan berita berdampak tinggi. Bila batas bulan itu habis, AI mati sampai tanggal 1:
+   dashboard, Telegram, dan sinyal tetap jalan dengan aturan program (sinyal ditandai "tanpa
+   review AI"). Header dashboard menulis "AI $x / $2.50 bulan ini". Satu keputusan sinyal sekitar
+   $0,0013 dan satu pertanyaan Tanya AI sekitar $0,001. Contoh menaikkan batas ke $5:
+   `uv run gold-agent config set budget.llm_monthly_usd 5`.
 7. Fundamental harian (`market.fundamentals_refresh_minutes`, bawaan 60). Bias harian emas
    dibangun dari: yield riil AS 10 tahun dan yield 2 tahun (Treasury AS), inflasi ekspektasi
    (breakeven), tren dolar, posisi spekulan besar di futures emas COMEX (CFTC COT), arus ETF
@@ -314,6 +316,14 @@ Yang baru di halaman Live dan bot:
   Telegram: `/tanya kapan aku harus sell?`, atau ketik pesan biasa tanpa `/`. Claude Haiku 5.5
   menjawab dari data alat ini saat itu (harga, sinyal aktif, impuls, jam rawan rilis, berita):
   BUY, SELL, atau TUNGGU dulu, lalu yang harus dipantau. Bukan saran keuangan.
+- **Sinyal tetap sampai selesai.** Setelah sinyal BUY/SELL keluar, zona entry, SL, TP1, TP2,
+  dan TP3 **tidak berubah**. Kartu sinyal di Live menunjukkan langkahnya: zona entry → TP1 →
+  TP2 → TP3, masing-masing dicentang ✓ dengan jamnya saat tercapai. Bila harga menembus SL,
+  sinyal itu langsung **INVALID** (kotak merah, kabar Telegram ❌): jangan masuk lagi dengan
+  sinyal itu. TP3 tercapai = selesai. Tanpa TP1 sampai "Berlaku s/d" = kedaluwarsa. Setiap
+  kejadian dikirim ke Telegram. Keyakinan 0–100 ditulis dengan labelnya: LEMAH (< 65), SEDANG
+  (65–74), KUAT (75–84), SANGAT KUAT (≥ 85); makin tinggi, makin kuat sinyalnya. Harga diperiksa
+  tiap detik, jadi jarum harga yang lebih singkat dari itu bisa terlewat.
 - **Notifikasi.** Sinyal BUY/SELL baru otomatis masuk Telegram. Di dashboard klik tombol
   "🔕 Notifikasi" di atas sekali dan izinkan di browser: setiap sinyal baru muncul sebagai
   notifikasi Windows dengan bunyi, selama tab dashboard terbuka.
@@ -427,6 +437,16 @@ disimpan di `data\backups\config-sebelum-update-*.patch`), mengambil versi baru,
 dependensinya, memeriksa config masih valid, lalu menyalakan program lagi dan membuat shortcut
 Perbarui. `.env` dan `data\` tidak disentuh. Bila gagal sebelum versi baru terpasang, versi lama
 dinyalakan lagi.
+
+**Update otomatis (Windows).** Installer dan setiap klik Perbarui memasang tugas Windows
+"Gold News Agent - Perbarui otomatis": setiap hari **05:00 WIB** (saat pasar emas tutup/buka
+harian, paling sepi) alat memeriksa versi baru. Bila tidak ada, program tidak disentuh. Bila ada,
+update berjalan sendiri di jendela yang di-minimize, tanpa pertanyaan dan tanpa membuka browser,
+lalu program menyala lagi (program yang sengaja dimatikan tetap mati). Catatannya di
+`data\logs\perbarui.log`: tiap hari ada satu baris `=====` dengan tanggalnya. Bila baris itu
+tidak bertambah, tugasnya tidak berjalan di laptop ini (laptop mati/tidur pada 05:00); klik
+Perbarui sendiri. Mematikan update otomatis: buka *Task Scheduler*, hapus tugas itu (klik
+Perbarui berikutnya memasangnya lagi).
 
 **macOS/Linux** (tanpa updater):
 

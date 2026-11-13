@@ -10,10 +10,13 @@
 # loads, tests the official data sources the new version reads and switches on the ones that
 # answer from this computer, then starts the agent again. .env, data\ and the local config files
 # are never touched. On any failure before the new version is in place, the old version is
-# started again.
+# started again. Each run also (re)registers the Windows scheduled task "Gold News Agent -
+# Perbarui otomatis" (daily 05:00) that runs "perbarui.cmd otomatis": unattended, only when
+# there is a new version, and without opening the browser.
 # Kept ASCII-only: Windows PowerShell 5.1 reads `irm | iex` text without an encoding hint.
 
 function Update-GoldNewsAgent {
+    param([switch]$Otomatis)
     $ErrorActionPreference = 'Continue'
     $Branch = 'claude/prompt-execution-repo-setup-7e735z'
     $Base = 'C:\hermes-agent'
@@ -35,13 +38,33 @@ function Update-GoldNewsAgent {
     function Ok($text) { Write-Host "  OK  $text" -ForegroundColor Green }
     function Warn($text) { Write-Host "  !!  $text" -ForegroundColor Yellow }
     function Fail($text) { Write-Host "  XX  $text" -ForegroundColor Red }
-    function Start-Agent { & (Join-Path $Win 'jalankan.cmd') }
+    function Start-Agent {
+        if ($Otomatis) { if ($wasRunning) { Start-Process (Join-Path $Win 'gold_agent_loop.cmd') -WindowStyle Minimized } }
+        else { & (Join-Path $Win 'jalankan.cmd') }
+    }
 
     if (-not (Test-Path (Join-Path $Root 'pyproject.toml'))) {
         Fail "Program tidak ditemukan di $Root. Pasang dulu dengan perintah instalasi."
         return
     }
     $env:Path = "$env:ProgramFiles\Git\cmd;$env:USERPROFILE\.local\bin;$env:Path"
+
+    $wasRunning = $true
+    if ($Otomatis) {
+        # The daily scheduled run: leave the running agent alone unless there is a new version,
+        # and leave a stopped one (Matikan) stopped after updating it.
+        git -C $Base fetch -q origin $Branch
+        if ($LASTEXITCODE -ne 0) { Fail 'Gagal mengambil update (internet?). Dicoba lagi besok.'; return }
+        $new = [int](git -C $Base rev-list --count "HEAD..origin/$Branch")
+        if ($new -eq 0) { Ok 'Sudah versi terbaru: program tidak diganggu.'; return }
+        Ok "$new perubahan baru: memperbarui sekarang"
+        $wasRunning = [bool](Get-Process gold-agent -ErrorAction SilentlyContinue)
+        if (-not $wasRunning) {
+            cmd /c 'tasklist /V /FI "WINDOWTITLE eq Gold News Agent*" 2>nul | find /I "cmd.exe" >nul'
+            $wasRunning = $LASTEXITCODE -eq 0
+        }
+        if (-not $wasRunning) { Ok 'Program sedang dimatikan: diperbarui tanpa dinyalakan.' }
+    }
 
     Step 1 'Mematikan program'
     cmd /c 'taskkill /F /T /FI "WINDOWTITLE eq Gold News Agent*" >nul 2>&1'
@@ -116,6 +139,15 @@ function Update-GoldNewsAgent {
     if ($failed.Count) { Warn "Belum terjangkau dari jaringan ini (dicoba lagi saat update berikutnya): $($failed -join ', ')" }
 
     Step 7 'Menyalakan program'
+    # Daily unattended update at 05:00 WIB: the gold market's daily close / reopen (17:00-18:00
+    # New York) in both summer and winter time. Minimized, and also on battery.
+    try {
+        $run = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c start `"Memperbarui Gold News Agent`" /min `"$(Join-Path $Win 'perbarui.cmd')`" otomatis"
+        $daily = New-ScheduledTaskTrigger -Daily -At '05:00'
+        $power = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName 'Gold News Agent - Perbarui otomatis' -Action $run -Trigger $daily -Settings $power -Description 'Memperbarui Gold News Agent setiap hari 05:00 bila ada versi baru' -Force -ErrorAction Stop | Out-Null
+        Ok 'Update otomatis: setiap hari 05:00 WIB, hanya bila ada versi baru'
+    } catch { Warn 'Jadwal update otomatis tidak bisa dibuat; klik Perbarui sendiri bila perlu.' }
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Perbarui Gold News Agent.lnk'))
     $link.TargetPath = Join-Path $Win 'perbarui.cmd'
@@ -124,8 +156,10 @@ function Update-GoldNewsAgent {
     Start-Agent
     Write-Host ''
     Write-Host '==================== UPDATE SELESAI ====================' -ForegroundColor Green
-    Write-Host ' Update berikutnya: klik shortcut "Perbarui Gold News Agent" di Desktop.'
+    Write-Host ' Update berikutnya otomatis setiap hari 05:00 WIB bila ada versi baru'
+    Write-Host ' (atau klik shortcut "Perbarui Gold News Agent" di Desktop).'
     Write-Host '========================================================' -ForegroundColor Green
 }
 
-Update-GoldNewsAgent
+# "otomatis" (from perbarui.cmd's scheduled run) runs unattended; irm | iex passes nothing.
+Update-GoldNewsAgent -Otomatis:($args -contains 'otomatis')
