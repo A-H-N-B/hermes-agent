@@ -59,6 +59,9 @@ tambahan hasil review Fase 0).
 - Tanpa MT5, harga emas spot dari Binance XAUUSDT (selisih ke broker biasanya di bawah $1–2;
   PAXG hanya cadangan) dan bisa disamakan persis ke harga brokermu (Finex): ketik bid broker di
   halaman Live ("Samakan") atau `/finex 2662.4`; semua level ikut bergeser.
+- Naik / turun (%): halaman Live menunjukkan berapa persen emas naik/turun sejak pasar buka hari
+  ini (dengan rentang tertinggi/terendah), dibanding 1–6 hari atau 1 minggu lalu (atau hari lain
+  sampai 60), per hari bursa, dan per candle; semua dihitung ulang setiap harga masuk.
 - Tanya AI: tanya "kapan aku harus buy?" di dashboard atau Telegram (`/tanya` atau pesan biasa);
   Haiku 5.5 menjawab dari data alat ini saat itu.
 - Ekonofisika (dihitung program, lalu ditimbang desk AI): ekor distribusi, entropi permutasi,

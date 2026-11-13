@@ -298,6 +298,18 @@ Berhenti: tekan **Ctrl+C**. Perintah bot yang berguna: `/signal`, `/outlook`, `/
 
 Yang baru di halaman Live dan bot:
 
+- **Naik / turun (%).** Kartu di bagian atas halaman Live, dihitung ulang setiap harga masuk:
+  - "Hari ini ▲ +0,47%": berapa persen emas naik/turun sejak pasar buka hari itu (pasar emas buka
+    pukul 17:00 New York = 04:00 WIB musim panas AS, 05:00 WIB musim dingin), beserta selisih
+    dolarnya;
+  - garis rentang hari ini: titik buka, harga sekarang, terendah dan tertinggi dalam persen;
+  - tombol **1, 2, 3, 4, 5, 6 hari** dan **1 minggu**: berapa persen dibanding harga N × 24 jam
+    yang lalu (tiap tombol langsung menulis persennya); hari lain (sampai 60) diketik di kotak
+    "atau hari lain";
+  - daftar per hari: tiap hari bursa terakhir dari buka sampai tutup, dengan batang hijau/merah.
+  Di grafik, label kanan atas menulis berapa persen candle terbaru sudah naik/turun dari harga
+  bukanya; arahkan kursor ke candle lain untuk melihat persennya. Telegram `/status` dan Tanya AI
+  juga menyebut persen hari ini dan 1/3/7 hari.
 - **Tanya AI.** Di dashboard, kartu "Tanya AI": tulis "kapan aku harus buy?" lalu Enter. Di
   Telegram: `/tanya kapan aku harus sell?`, atau ketik pesan biasa tanpa `/`. Claude Haiku 5.5
   menjawab dari data alat ini saat itu (harga, sinyal aktif, impuls, jam rawan rilis, berita):

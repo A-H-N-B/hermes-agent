@@ -321,5 +321,11 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   share or the month ("AI mati sampai tanggal 1"), callers fall back to rules. `ModelPrice`
   `long_prompt_tokens`/`long_prompt_factor` (Haiku: > 100K tokens = 5x) in real and worst-case
   cost. `/api/credit` = `Allowance.to_json()` + `ai_on`; header chip "AI $x / $5 bulan ini".
+  Percent moves (13 Nov, ADR-031): `dashboard/moves.py` (`price_moves`, `stored_moves`,
+  `move_line`): today vs the trading day's open (`MarketContext.day_open/day_open_at/day_high/
+  day_low` from the live D1 bar), each stored D1 bar open → close, N days back = last close known
+  at now − N×24 h (M15 ≤ 7 days, H1 beyond, ≤ 60). `/api/moves?days=N`; the Live card "Naik /
+  turun (%)" re-computes every percent from each tick; `#candle-pct` shows the newest or hovered
+  candle's move (crosshair). Telegram `/status` line and the chat brief's `<pergerakan>`.
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

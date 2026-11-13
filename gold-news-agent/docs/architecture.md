@@ -536,6 +536,20 @@ kedua yang diuji terhadap data acak:
   tercapai" dan hidup lagi tanggal 1.
 - Effort: triage low, triage_high/desk/chat/brief medium (bawaan Haiku), deep high.
 
+### ADR-031 Naik / turun dalam persen — Diterapkan
+
+- Pengguna: "dari awal buka market sampai tutup bisa ketahuan sudah berapa persen kenaikan dan
+  penurunan, ... bisa di custom 1–6 hari ke belakang, ... candle terbaru lagi naik berapa persen,
+  harus real time". `dashboard/moves.py`: hari ini = harga sekarang terhadap pembukaan hari bursa
+  (17:00 New York, bar D1 yang sedang berjalan; `MarketContext.day_open/_at/_high/_low` dari
+  `CandleBuilder.current("D1")`), per hari bursa = buka → tutup bar D1 tersimpan, dan N hari =
+  terhadap harga N × 24 jam lalu (penutupan bar terakhir yang sudah selesai saat itu: akhir pekan
+  memberi penutupan Jumat), dari M15 untuk ≤ 7 hari dan H1 untuk yang lebih panjang (≤ 60).
+- Server hanya memberi harga acuan (`/api/moves`, cache bar per menit); halaman menghitung semua
+  persen dari harga setiap tick, jadi angkanya real time tanpa beban server. Persen candle
+  (terbaru atau yang disorot kursor) dihitung di halaman dari bar grafik.
+- Kata-kata yang sama (`move_line`) di Telegram `/status` dan brief Tanya AI (`<pergerakan>`).
+
 ## Estimasi biaya LLM (untuk Q4)
 
 **Sejak 13 Nov 2026 (ADR-030) semua rute memakai Claude Haiku 5.5 ($0,10 / $0,50 per juta token,

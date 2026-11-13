@@ -14,6 +14,7 @@ from gold_agent.analysis.llm_client import Turn
 from gold_agent.assistant.chat import MAX_TURNS, ChatAssistant, ChatFacts
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_EVENTS
+from gold_agent.dashboard.moves import move_line, stored_moves
 from gold_agent.evaluation.performance import summarize
 from gold_agent.market.rebase import request_calibration
 from gold_agent.models import CalendarEvent, Signal
@@ -131,15 +132,18 @@ class BotCommands:
         halt = await ctx.ops.kv_get(KV_HALT)
         if state is not None and halt is not None:
             state = state.model_copy(update={"halted": bool(halt.get("halted"))})
-        return templates.render_status(
+        context = await ctx.market.latest_context()
+        text = templates.render_status(
             now=now,
             state=state,
-            context=await ctx.market.latest_context(),
+            context=context,
             active=(await self._engine_state()).active(now),
             next_event=await self._next_event(now),
             muted_until=self._dispatcher.mute_until,
             mode=ctx.settings.mode,
         )
+        line = move_line(await stored_moves(ctx, context))
+        return f"{text}\n📈 Naik/turun: {esc(line)}" if line else text
 
     async def _signal(self, _args: list[str], _user: int | None) -> str:
         ctx = self._ctx

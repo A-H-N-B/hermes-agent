@@ -183,4 +183,10 @@ class MarketContext(BaseModel):
     # Added to every price of a proxy feed so it reads like the user's broker (the user set it
     # from a broker quote, services/market.py); None = no re-basing.
     price_offset: float | None = None
+    # The trading day so far (from 17:00 New York, the gold market's daily open): its first
+    # price, when it opened, and its high and low (dashboard/moves.py).
+    day_open: float | None = None
+    day_open_at: datetime | None = None
+    day_high: float | None = None
+    day_low: float | None = None
     notes: list[str] = Field(default_factory=list)

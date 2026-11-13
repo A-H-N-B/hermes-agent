@@ -311,6 +311,7 @@ def build_market_context(
     recent_spreads = [s for ts, s in spreads if ts >= window_start and s > 0]
     asia = asia_range(builder.candles("M5"), now, sessions)
     d1 = builder.candles("D1")
+    day = builder.current("D1")
     prev_day = previous_complete(d1, now)
     levels = compute_levels(
         price=tick.mid,
@@ -350,6 +351,10 @@ def build_market_context(
             "asia_low": asia[1] if asia else None,
             "prev_day_high": prev_day.high if prev_day else None,
             "prev_day_low": prev_day.low if prev_day else None,
+            "day_open": day.open if day else None,
+            "day_open_at": day.open_time if day else None,
+            "day_high": day.high if day else None,
+            "day_low": day.low if day else None,
             "dxy": usd.latest if usd else None,
             "dxy_source": usd.source if usd else None,
             "dxy_z_15m": dxy_z_15,

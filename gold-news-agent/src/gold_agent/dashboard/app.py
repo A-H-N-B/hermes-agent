@@ -208,6 +208,11 @@ def create_app(
     ) -> dict[str, Any]:
         return await data.forecast(tf)
 
+    @app.get("/api/moves", dependencies=guard)
+    async def api_moves(days: int | None = Query(default=None, ge=1, le=60)) -> dict[str, Any]:
+        """How far gold moved in percent: today, recent days, and `days` back."""
+        return await data.moves(days)
+
     @app.get("/api/timing", dependencies=guard)
     async def api_timing() -> dict[str, Any]:
         return await data.timing()

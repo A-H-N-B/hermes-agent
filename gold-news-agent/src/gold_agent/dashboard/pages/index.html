@@ -36,6 +36,28 @@
         <details class="more"><summary>Lihat detail (alasan, semua jadwal, skenario)</summary>
           <div id="timing-details"></div></details>
       </article>
+      <article id="moves-card" class="card moves">
+        <h2>Naik / turun (%) <span class="muted">(dihitung ulang setiap harga masuk)</span></h2>
+        <div id="moves-today" class="moves-today"><p class="muted">Memuat…</p></div>
+        <div id="moves-range" class="moves-range" hidden>
+          <div class="range-track">
+            <span id="range-fill" class="range-fill"></span>
+            <span id="range-open" class="range-open" title="harga buka"></span>
+            <span id="range-now" class="range-now" title="harga sekarang"></span>
+          </div>
+          <div class="range-labels"><span id="range-low"></span><span id="range-high"></span></div>
+        </div>
+        <h3 class="sub">Berapa persen dalam … terakhir</h3>
+        <div id="moves-chips" class="chips moves-chips" role="group" aria-label="pilih berapa hari ke belakang"></div>
+        <form id="moves-form" class="actions moves-form">
+          <label for="moves-days">atau hari lain:</label>
+          <input id="moves-days" type="number" min="1" max="60" step="1" required placeholder="mis. 10">
+          <button type="submit" class="button">Lihat</button>
+        </form>
+        <p id="moves-back" class="moves-back"></p>
+        <h3 class="sub">Per hari (buka → tutup)</h3>
+        <div id="moves-days-list" class="moves-days"></div>
+      </article>
       <article class="card chat">
         <h2>Tanya AI <span class="muted">(Haiku 5.5 · dijawab dari data alat ini saat ini)</span></h2>
         <div id="chat-log" class="chat-log" aria-live="polite">
@@ -77,6 +99,7 @@
           </div>
           <div id="tf-forecast" class="tf-forecast"><p class="muted">Memuat prediksi…</p></div>
           <div class="chart-wrap">
+            <div id="candle-pct" class="candle-pct" aria-live="off"></div>
             <div id="chart"></div>
             <button id="tf-button" type="button" class="tf-button" title="pilih timeframe">M5</button>
             <div id="tf-ring" class="tf-ring" hidden>

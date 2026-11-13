@@ -307,6 +307,148 @@ function prependNews(item) {
   while (list.children.length > 80) list.removeChild(list.lastChild);
 }
 
+// ------------------------------------------------------------------ Naik / turun (%)
+// Reference prices (today's open, the price N days ago, each day's open and close) come from
+// /api/moves once a minute; every percentage is re-computed from the live price on each tick,
+// so the card moves in real time (dashboard/moves.py).
+
+const MOVE_CHIPS = [1, 2, 3, 4, 5, 6, 7];
+const moves = { data: null, days: 1, price: null };
+const changePct = (price, reference) => (price / reference - 1) * 100;
+const arrow = (value) => (value > 0 ? "▲" : value < 0 ? "▼" : "■");
+const tone = (value) => (value > 0 ? "BUY" : value < 0 ? "SELL" : "");
+// Small moves (a single candle) get a third decimal so they do not read as 0.00%.
+const pctText = (value) => (value === null || value === undefined || Number.isNaN(value) ? "–" : `${arrow(value)} ${signed(value, Math.abs(value) < 0.1 ? 3 : 2)}%`);
+const spanName = (days) => (days === 7 ? "1 minggu" : `${days} hari`);
+
+async function loadMoves() {
+  const extra = MOVE_CHIPS.includes(moves.days) ? "" : `?days=${moves.days}`;
+  try {
+    moves.data = await api(`/api/moves${extra}`);
+    renderMoves(moves.price ?? moves.data.price);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function renderMoves(price) {
+  const data = moves.data;
+  if (!data) return;
+  moves.price = price;
+  const today = data.today;
+  const box = clear($("#moves-today"));
+  if (!today || price === null || price === undefined) {
+    box.append(el("p", { class: "muted", text: "data harga hari ini belum tersedia" }));
+    $("#moves-range").hidden = true;
+  } else {
+    today.high = Math.max(today.high, price);
+    today.low = Math.min(today.low, price);
+    const change = changePct(price, today.open);
+    box.append(
+      el("div", { class: `move-big ${tone(change)}`, text: `Hari ini ${pctText(change)}` }),
+      el("div", { class: "muted", text: `${signed(price - today.open)}$ sejak pasar buka ${today.open_at_wib} WIB di ${num(today.open)} · sekarang ${num(price)}${data.market_open ? "" : " · pasar tutup"}` }),
+    );
+    renderRange(today, price);
+  }
+  renderChips(price);
+  renderLookback(price);
+  renderMoveDays(today, price);
+}
+
+// The day's range in percent of the open: open marker, price marker, fill from open to price.
+function renderRange(today, price) {
+  const low = changePct(today.low, today.open);
+  const high = changePct(today.high, today.open);
+  const now = changePct(price, today.open);
+  const lo = Math.min(low, 0);
+  const span = Math.max(high, 0) - lo || 1;
+  const at = (value) => `${((value - lo) / span) * 100}%`; // CSSOM: the CSP forbids inline styles
+  $("#moves-range").hidden = false;
+  const fill = $("#range-fill");
+  fill.className = `range-fill ${tone(now)}`;
+  fill.style.left = at(Math.min(0, now));
+  fill.style.width = `${(Math.abs(now) / span) * 100}%`;
+  $("#range-open").style.left = at(0);
+  $("#range-now").style.left = at(now);
+  $("#range-low").textContent = `terendah ${signed(low)}% (${num(today.low)})`;
+  $("#range-high").textContent = `tertinggi ${signed(high)}% (${num(today.high)})`;
+}
+
+function lookbackRow(days) {
+  return moves.data ? moves.data.lookbacks.find((row) => row.days === days) : null;
+}
+
+function renderChips(price) {
+  const box = clear($("#moves-chips"));
+  for (const days of MOVE_CHIPS) {
+    const row = lookbackRow(days);
+    const change = row && row.price !== null && price !== null && price !== undefined ? changePct(price, row.price) : null;
+    const button = el("button", { type: "button", class: `${tone(change)}${days === moves.days ? " on" : ""}`, text: `${spanName(days)} ${pctText(change)}` });
+    button.addEventListener("click", () => { moves.days = days; renderMoves(moves.price); });
+    box.append(button);
+  }
+}
+
+function renderLookback(price) {
+  const box = clear($("#moves-back"));
+  const row = lookbackRow(moves.days);
+  if (!row) {
+    box.append(el("span", { class: "muted", text: `Memuat ${spanName(moves.days)}…` }));
+    return;
+  }
+  if (row.price === null || price === null || price === undefined) {
+    box.append(el("span", { class: "muted", text: `${spanName(moves.days)} terakhir: data belum cukup` }));
+    return;
+  }
+  const change = changePct(price, row.price);
+  box.append(
+    el("b", { class: tone(change), text: `${spanName(moves.days)} terakhir: ${pctText(change)}` }),
+    el("span", { class: "muted", text: ` · dari ${num(row.price)} (${row.at_wib} WIB) ke ${num(price)} (${signed(price - row.price)}$)` }),
+  );
+}
+
+// Each recent trading day, open to close, as a bar; today last, moving with the price.
+function renderMoveDays(today, price) {
+  const list = clear($("#moves-days-list"));
+  const rows = moves.data.days.map((row) => ({ label: row.label, change: row.pct }));
+  if (today && price !== null && price !== undefined) rows.push({ label: "Hari ini", change: changePct(price, today.open), today: true });
+  const widest = Math.max(0.05, ...rows.map((row) => Math.abs(row.change)));
+  for (const row of rows) {
+    const bar = el("div", { class: "bar" });
+    const fill = el("i", { class: row.change >= 0 ? "pos" : "neg" });
+    fill.style.width = `${(Math.abs(row.change) / widest) * 50}%`;
+    bar.append(fill);
+    list.append(
+      el("span", { class: row.today ? "today" : "muted", text: row.label }),
+      bar,
+      el("b", { class: tone(row.change), text: pctText(row.change) }),
+    );
+  }
+}
+
+function setMoveDays(event) {
+  event.preventDefault();
+  const days = Math.round(Number($("#moves-days").value));
+  if (!(days >= 1 && days <= 60)) return;
+  moves.days = days;
+  if (lookbackRow(days)) renderMoves(moves.price);
+  else loadMoves();
+}
+
+// The candle under the cursor (or the newest one): how far it moved from its open, in percent.
+let hoveredBar = null;
+
+function renderCandlePct() {
+  const state = charts.live;
+  const box = $("#candle-pct");
+  const bar = hoveredBar || (state && state.last);
+  if (!box || !bar || !bar.open) return;
+  const change = changePct(bar.close, bar.open);
+  const when = hoveredBar ? `${new Date(bar.time * 1000).toISOString().slice(11, 16)} WIB` : "sekarang";
+  box.className = `candle-pct ${tone(change)}`;
+  box.textContent = `Candle ${state.tf} ${when}: ${pctText(change)} · buka ${num(bar.open)} → ${num(bar.close)}`;
+}
+
 // ------------------------------------------------------------------ chart
 
 // One builder for both candle charts: Live, and the "Gold News Agent" indicator chart on the
@@ -338,6 +480,11 @@ function makeChart(name, container, indicator) {
   if (name === "live") {
     charts[name].ind = makeIndicatorSeries(lib, chart);
     charts[name].tf = savedTf();
+    chart.subscribeCrosshairMove((param) => {
+      const bar = param && param.time !== undefined ? param.seriesData.get(series) : null;
+      hoveredBar = bar && bar.open !== undefined ? bar : null;
+      renderCandlePct();
+    });
     const forecastLine = (style) => chart.addSeries(lib.LineSeries, {
       lineWidth: 2, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       pointMarkersVisible: true, pointMarkersRadius: 3,
@@ -389,6 +536,7 @@ async function loadChart(state) {
   const shifted = bars.map((b) => ({ ...b, time: b.time + WIB_OFFSET }));
   state.series.setData(shifted);
   state.last = shifted.length ? { ...shifted[shifted.length - 1] } : null;
+  if (state === charts.live) renderCandlePct();
   const step = TF_SECONDS[state.tf];
   const snap = (t) => Math.floor((t + WIB_OFFSET) / step) * step;
   const markers = [
@@ -1271,6 +1419,8 @@ function onTick(tick) {
     if (newBar) drawProjection(state);
     if (newBar && state.ind && currentPage === "live") refreshLiveExtras(true);
   }
+  renderCandlePct();
+  renderMoves(tick.mid);
 }
 
 // ------------------------------------------------------------------ outlook
@@ -1713,6 +1863,9 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   $("#rebase-reset").addEventListener("click", () => sendRebase(null));
   $("#chat-form").addEventListener("submit", sendChat);
+  $("#moves-form").addEventListener("submit", setMoveDays);
+  loadMoves();
+  setInterval(loadMoves, 60000);
   showAlertsButton();
   buildRing();
   // Fallback when the live push is down: the board, indicator read and forecast still refresh.

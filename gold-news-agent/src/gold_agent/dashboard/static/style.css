@@ -220,7 +220,7 @@ details.more summary { cursor: pointer; color: var(--info); }
 .credit { font-size: .85rem; color: var(--muted); text-decoration: none; white-space: nowrap; border: 1px solid var(--line); border-radius: 999px; padding: .15rem .6rem; }
 .credit.warn { color: var(--warn); border-color: var(--warn); }
 .credit.SELL { color: var(--down); border-color: var(--down); }
-#credit-input, #rebase-input, #chat-input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: .35rem .5rem; width: 9rem; }
+#credit-input, #rebase-input, #chat-input, #moves-days { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: .35rem .5rem; width: 9rem; }
 .chart-wrap { position: relative; }
 .tf-button { position: absolute; top: .5rem; left: .5rem; z-index: 90; width: 3.2rem; height: 3.2rem; border-radius: 50%;
   border: 0; background: #1e6fe0; color: #fff; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .4); }
@@ -301,3 +301,30 @@ h2.sub { margin-top: 1.1rem; }
 .chat-msg small { display: block; margin-top: .25rem; }
 .chat-form { display: flex; gap: .5rem; }
 .chat-form #chat-input { flex: 1; min-width: 0; width: auto; padding: .5rem .6rem; }
+
+/* Naik / turun (%) */
+.move-big { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+.move-big.BUY, .moves .BUY { color: var(--up); }
+.move-big.SELL, .moves .SELL { color: var(--down); }
+.moves-range { margin: .6rem 0 .2rem; }
+.range-track { position: relative; height: 10px; border-radius: 5px; background: var(--panel-2); }
+.range-fill { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--muted); }
+.range-fill.BUY { background: var(--up); }
+.range-fill.SELL { background: var(--down); }
+.range-open, .range-now { position: absolute; top: -4px; width: 2px; height: 18px; margin-left: -1px; }
+.range-open { background: var(--muted); }
+.range-now { background: #fff; width: 3px; }
+.range-labels { display: flex; justify-content: space-between; font-size: .8rem; margin-top: .3rem; }
+.moves-chips button { border: 1px solid var(--line); background: var(--panel-2); color: inherit;
+  border-radius: 999px; padding: .25rem .7rem; font: inherit; font-size: .85rem; cursor: pointer; }
+.moves-chips button.on { border-color: #f5b041; }
+.moves-form { margin: .4rem 0; }
+.moves-form #moves-days { width: 5.5rem; }
+.moves-back { margin: .3rem 0 .6rem; }
+.moves-days { display: grid; grid-template-columns: auto 1fr auto; gap: .3rem .6rem; align-items: center; font-size: .9rem; }
+.moves-days .today { font-weight: 700; }
+.candle-pct { position: absolute; top: .5rem; right: 4.5rem; z-index: 80; font-size: .8rem; padding: .15rem .5rem;
+  border-radius: 6px; background: rgba(21, 26, 35, .85); pointer-events: none; }
+.candle-pct.BUY { color: var(--up); }
+.candle-pct.SELL { color: var(--down); }
+.moves h3.sub { font-size: .95rem; margin: .9rem 0 .3rem; }

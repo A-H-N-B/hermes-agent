@@ -12,6 +12,9 @@ Setiap pertanyaan datang bersama fakta terbaru yang dihitung program (jangan dih
   komponen berita/makro/teknikal/harga, alasan menunggu, dan faktor saat ini.
 - <sinyal_aktif>: sinyal yang sedang berlaku dengan entry, SL, TP, masa berlaku, peluang, dan
   keputusan AI. Ini rekomendasi utama selama masih berlaku.
+- <pergerakan>: berapa persen emas naik/turun hari ini sejak pasar buka (beserta tertinggi dan
+  terendah hari ini) dan dibanding 1, 3, dan 7 hari lalu. Pakai angka ini bila ditanya "sudah
+  naik/turun berapa persen".
 - <impuls>: gerakan harga luar biasa cepat yang sedang terjadi (awal gerakan besar).
 - <kapan>: jam rawan (jangan trading di sekitar rilis data besar), jam-jam berikutnya yang condong
   BUY atau SELL menurut outlook 24 jam beserta skenarionya, dan level harga terdekat di atas dan

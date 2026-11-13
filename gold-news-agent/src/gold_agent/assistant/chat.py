@@ -30,6 +30,7 @@ from gold_agent.analysis.llm_client import (
 from gold_agent.analysis.prompts import load_prompt, untrusted
 from gold_agent.config import Settings
 from gold_agent.core.app import AppContext
+from gold_agent.dashboard.moves import move_line, stored_moves
 from gold_agent.dashboard.timing import timing_view
 from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
 from gold_agent.market.impulse import describe
@@ -72,6 +73,7 @@ class ChatFacts:
     analyses: list[Analysis]
     fundamentals: FundamentalSnapshot | None
     choice: JSON | None  # the signal service's last timeframe choice
+    moves: JSON | None = None  # percent moves (dashboard/moves.py)
 
 
 @dataclass(frozen=True)
@@ -90,9 +92,10 @@ async def gather_facts(
     stored = await ctx.ops.kv_get(KV_ENGINE)
     engine = EngineState.from_json(stored) if stored else EngineState()
     fundamentals = await ctx.ops.kv_get(KV_FUNDAMENTALS)
+    context = context or await ctx.market.latest_context()
     return ChatFacts(
         now=now,
-        context=context or await ctx.market.latest_context(),
+        context=context,
         state=state or await ctx.signals.latest_state(),
         active=engine.active(now),
         outlook=await ctx.signals.latest_outlook(),
@@ -102,6 +105,7 @@ async def gather_facts(
         analyses=await ctx.news.analyses_since(now - timedelta(hours=NEWS_HOURS)),
         fundamentals=FundamentalSnapshot.model_validate(fundamentals) if fundamentals else None,
         choice=await ctx.ops.kv_get(KV_TIMEFRAME),
+        moves=await stored_moves(ctx, context),
     )
 
 
@@ -303,6 +307,7 @@ def chat_brief(facts: ChatFacts, settings: Settings) -> str:
             f"<waktu>{fmt_wib(facts.now, with_date=True)} WIB · sesi {session} · "
             f"pasar {market}</waktu>",
             *_price_lines(context),
+            f"<pergerakan>{(move_line(facts.moves) if facts.moves else None) or '-'}</pergerakan>",
             *_engine_lines(facts.state, settings),
             *_active_lines(facts.active),
             *_impulse_lines(context),
@@ -334,6 +339,9 @@ def summary(facts: ChatFacts) -> str:
         lines.append(f"Saat ini ada {describe(context.impulse)}.")
     if context is not None and context.mid is not None:
         lines.append(f"Harga {context.mid:.2f} ({context.source or '-'}).")
+    moved = move_line(facts.moves) if facts.moves else None
+    if moved:
+        lines.append(f"Naik/turun: {moved}.")
     lines.append("Bukan saran keuangan. Keputusan & risiko di tanganmu.")
     return " ".join(lines)
 

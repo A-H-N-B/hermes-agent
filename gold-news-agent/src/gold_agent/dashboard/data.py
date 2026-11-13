@@ -15,6 +15,12 @@ from gold_agent.dashboard.indicators_view import (
     indicator_series,
     indicator_summary,
 )
+from gold_agent.dashboard.moves import (
+    DAY_ROWS,
+    FINE_DAYS,
+    LOOKBACK_DAYS,
+    price_moves,
+)
 from gold_agent.dashboard.timing import timing_view
 from gold_agent.evaluation.performance import summarize
 from gold_agent.fundamentals.snapshot import KV_FUNDAMENTALS
@@ -188,6 +194,23 @@ class DashboardData:
             daily = await self._latest("D1", min(5000, limit * per), source)
             return aggregate(daily, tf)[-limit:]
         return await self._latest(tf, limit, source)
+
+    async def moves(self, extra_days: int | None = None) -> JSON:
+        """Percent moves for the "Naik / turun" card: today since the open, recent days, and
+        against the price N days ago (dashboard/moves.py)."""
+        source = await self._source()
+        longest = max((*LOOKBACK_DAYS, extra_days or 0))
+        coarse: list[Candle] = []
+        if longest > FINE_DAYS:
+            coarse = await self._latest("H1", 24 * (longest + 2), source)
+        return price_moves(
+            context=await self._context(),
+            daily=await self._latest("D1", DAY_ROWS + 2, source),
+            fine=await self._latest("M15", 4 * 24 * (FINE_DAYS + 1), source),
+            coarse=coarse,
+            now=self._ctx.clock.now(),
+            extra_days=extra_days,
+        )
 
     async def forecast(self, tf: str) -> JSON:
         ctx = self._ctx
