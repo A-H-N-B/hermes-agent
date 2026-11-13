@@ -1,6 +1,8 @@
 """Paper tracker (section 17): every signal is filled and managed against live quotes from the
-same price source, results are stored, and the engine learns when a signal closes (its slot and
-the daily loss limit). After a restart it resumes open positions and replays stored ticks."""
+same price source and the results are stored (Performa, the daily loss limit). It keeps score
+quietly: what the user hears about a signal (TP reached, SL breached) comes from the signal's own
+progress (signals/progress.py). After a restart it resumes open positions and replays stored
+ticks."""
 
 from __future__ import annotations
 
@@ -14,7 +16,6 @@ import structlog
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
     STREAM_EVENTS,
-    STREAM_NOTIFY,
     STREAM_SIGNALS,
     STREAM_TICKS,
     Handler,
@@ -23,10 +24,7 @@ from gold_agent.core.bus import (
     consume,
 )
 from gold_agent.evaluation.paper import Quote, apply_quote, close_at_market, open_position
-from gold_agent.models import Notification, Signal, SignalOutcome, Tick
-from gold_agent.models.common import Priority
-from gold_agent.notify import templates
-from gold_agent.notify.policy import notification_id
+from gold_agent.models import Signal, SignalOutcome, Tick
 from gold_agent.signals.engine import KV_PAPER_DAILY, wib_day
 from gold_agent.timeutils.sessions import WIB
 
@@ -139,13 +137,9 @@ class PaperService:
             await self._finish(signal, after)
             return
         self.positions[signal_id] = (signal, after)
-        if after.tp1_hit_at is not None and before.tp1_hit_at is None:
-            await self._ctx.signals.save_outcome(after)
-            self._saved_at[signal_id] = quote.ts
-            await self._notify(
-                signal, "high", templates.render_paper_tp1(signal, after), f"paper-tp1:{signal_id}"
-            )
-        elif quote.ts - self._saved_at.get(signal_id, after.opened_at) >= SAVE_EVERY:
+        if (
+            after.tp1_hit_at is not None and before.tp1_hit_at is None
+        ) or quote.ts - self._saved_at.get(signal_id, after.opened_at) >= SAVE_EVERY:
             await self._ctx.signals.save_outcome(after)
             self._saved_at[signal_id] = quote.ts
 
@@ -159,12 +153,6 @@ class PaperService:
         )
         log.info(
             "paper.closed", signal=signal.signal_id, status=outcome.status, r=outcome.r_multiple
-        )
-        await self._notify(
-            signal,
-            "normal",
-            templates.render_paper_close(signal, outcome),
-            f"paper-close:{signal.signal_id}",
         )
         await self._publish_daily(outcome.closed_at or ctx.clock.now())
 
@@ -197,19 +185,6 @@ class PaperService:
         payload = {"day": wib_day(moment), "r": total, "trades": len(closed)}
         await ctx.ops.kv_set(KV_PAPER_DAILY, payload, ctx.clock.now())
         await ctx.bus.publish(STREAM_EVENTS, {"type": "paper.daily", **payload})
-
-    async def _notify(self, signal: Signal, priority: Priority, text: str, key: str) -> None:
-        now = self._ctx.clock.now()
-        notification = Notification(
-            id=notification_id(key, now.isoformat()),
-            kind="signal_update",
-            priority=priority,
-            text=text,
-            created_at=now,
-            dedupe_key=key,
-            ref_ids=[signal.signal_id],
-        )
-        await self._ctx.bus.publish(STREAM_NOTIFY, notification)
 
     # ------------------------------------------------------------------ run
 

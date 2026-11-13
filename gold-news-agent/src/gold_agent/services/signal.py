@@ -29,6 +29,7 @@ from gold_agent.core.bus import (
     STREAM_ANALYSES,
     STREAM_CONTEXT,
     STREAM_EVENTS,
+    STREAM_NOTIFY,
     STREAM_OUTLOOK,
     STREAM_RELEASES,
     STREAM_SIGNALS,
@@ -47,12 +48,16 @@ from gold_agent.models import (
     FundamentalSnapshot,
     LatencyStage,
     MarketContext,
+    Notification,
     Outlook,
     ReleaseReading,
     Signal,
+    SignalProgress,
     SignalReview,
     SignalState,
 )
+from gold_agent.notify import templates
+from gold_agent.notify.policy import notification_id
 from gold_agent.signals.accuracy import AccuracyBook
 from gold_agent.signals.desk import (
     KEEP_REVIEWS,
@@ -85,6 +90,7 @@ from gold_agent.signals.outlook import (
     weekend_notes,
 )
 from gold_agent.signals.profile import HourlyProfile, compute_profile
+from gold_agent.signals.progress import Event, advance
 from gold_agent.signals.scoring import STALE_NEWS_HALF_LIVES
 from gold_agent.signals.timeframe import KV_TIMEFRAME, TfChoice, choose_timeframe
 from gold_agent.timeutils.sessions import SessionClock, last_weekly
@@ -160,7 +166,6 @@ class SignalService:
         self._handlers: dict[str, Callable[[dict[str, Any]], Awaitable[None]]] = {
             "outlook.refresh": self._on_outlook_refresh,
             "signal.halt": self._on_halt,
-            "signal.closed": self._on_closed,
             "paper.daily": self._on_paper_daily,
         }
 
@@ -278,6 +283,7 @@ class SignalService:
                 return None
             self._last_eval = now
             self._prune(now)
+            await self._follow(context, now)
             events = await self.events(now)
             choice = await self._choose_timeframe(now, context)
             impulses = await self.accuracy.impulses(source=context.source)
@@ -544,13 +550,61 @@ class SignalService:
             },
         )
 
+    async def _follow(self, context: MarketContext, now: datetime) -> None:
+        """Move the last signal on with this second's price (signals/progress.py): its levels
+        never change; each TP reached is announced, and a breached SL makes it INVALID and
+        ends it, so the engine is free for the next signal."""
+        signal, progress = self.state.last_signal, self.state.progress
+        if (
+            signal is None
+            or progress is None
+            or progress.signal_id != signal.signal_id
+            or progress.ended_at is not None
+            or signal.signal_id in self.state.closed_signal_ids
+            or context.bid is None
+            or context.ask is None
+        ):
+            return
+        hold = timedelta(hours=self._ctx.settings.paper.max_hold_hours)
+        moved, events = advance(
+            progress, signal, bid=context.bid, ask=context.ask, at=now, max_hold=hold
+        )
+        if not events:
+            return
+        self.state.progress = moved
+        await self._save_state()
+        price = context.bid if signal.action == "BUY" else context.ask
+        for event in events:
+            await self._announce(signal, moved, event, price, now)
+
+    async def _announce(
+        self, signal: Signal, progress: SignalProgress, event: Event, price: float, now: datetime
+    ) -> None:
+        log.info("signal.progress", signal=signal.signal_id, step=event, price=price)
+        if event == "entered" and signal.entry_type == "market":
+            return  # a market entry is in its zone when it is given: nothing new to say
+        key = f"progress:{event}:{signal.signal_id}"
+        await self._ctx.bus.publish(
+            STREAM_NOTIFY,
+            Notification(
+                id=notification_id(key, now.isoformat()),
+                kind="signal_update",
+                priority="normal" if event in ("entered", "expired") else "high",
+                text=templates.render_progress(signal, progress, event, now=price),
+                created_at=now,
+                dedupe_key=key,
+                ref_ids=[signal.signal_id],
+            ),
+        )
+
     async def _publish_state(self, state: SignalState, now: datetime, *, force: bool) -> None:
+        state = state.model_copy(update={"progress": self.state.progress})
         self.last_state = state
         previous = self._published
         decided = (
             previous is None
-            or (previous.action, previous.active_signal_id, previous.halted)
-            != (state.action, state.active_signal_id, state.halted)
+            or (previous.action, previous.active_signal_id, previous.halted, previous.progress)
+            != (state.action, state.active_signal_id, state.halted, state.progress)
             or abs(previous.composite_score - state.composite_score) >= SCORE_CHANGE
         )
         worded = previous is not None and previous.wait_reasons != state.wait_reasons
@@ -618,15 +672,6 @@ class SignalService:
                 now,
             )
         log.warning("signal.halt", halted=self.state.halted, by=data.get("by"))
-        await self.evaluate(force_publish=True)
-
-    async def _on_closed(self, data: dict[str, Any]) -> None:
-        signal_id = data.get("signal_id")
-        if not signal_id:
-            return
-        async with self._lock:
-            self.state.closed_signal_ids.add(str(signal_id))
-            await self._save_state()
         await self.evaluate(force_publish=True)
 
     async def _on_paper_daily(self, data: dict[str, Any]) -> None:

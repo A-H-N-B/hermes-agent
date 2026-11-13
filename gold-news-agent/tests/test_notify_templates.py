@@ -49,7 +49,7 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
     release = event("Retail Sales m/m", at=NOW + timedelta(hours=2), key="us_retail_sales_mom")
     text = render_signal(signal, now=NOW, next_event=release)
     lines = text.split("\n")
-    assert lines[0] == "🟢 <b>BUY XAUUSD</b> | Confidence 100/100"
+    assert lines[0] == "🟢 <b>BUY XAUUSD</b> | Keyakinan 100/100 · <b>SANGAT KUAT</b> ●●●●"
     assert lines[1] == "🕐 19:35 WIB · Sesi London–New York"
     assert lines[2] == (
         "📊 Chart M15 (bawaan sesi London–New York; belum ada timeframe yang terbukti lebih akurat)"
@@ -59,16 +59,17 @@ def test_signal_message_follows_the_template(settings: Settings) -> None:
     assert lines[5] == "🛑 SL 2643.60 (6.50$ · 1.62×ATR M15)"
     assert lines[6] == "✅ TP1 2656.60 (1R) · TP2 2663.10 (2R) · TP3 2668.00 (high kemarin)"
     assert lines[7] == "⏳ Berlaku s/d Selasa 13 Okt 21:05 WIB"  # 6 candles of M15
-    assert lines[8] == (
+    assert lines[8].startswith("📌 Level ini tetap (tidak diubah) sampai TP3 atau SL")
+    assert lines[9] == (
         "📰 Pemicu: Serangan rudal memicu permintaan aset aman. — wire (diterima 300 dtk)"
     )
-    assert lines[9].startswith("📊 Berita +0.66 · Makro +0.57 · Teknikal +0.62")
-    assert lines[10].startswith("🎲 Peluang TP1 sebelum SL ")  # odds of the plan, model-based
-    assert lines[10].endswith("(model volatilitas)")
+    assert lines[10].startswith("📊 Berita +0.66 · Makro +0.57 · Teknikal +0.62")
+    assert lines[11].startswith("🎲 Peluang TP1 sebelum SL ")  # odds of the plan, model-based
+    assert lines[11].endswith("(model volatilitas)")
     assert any(line.startswith("⚠️ Batal jika: harga menembus SL 2643.60") for line in lines)
     noted = signal.model_copy(update={"physics_note": "keteraturan hampir acak · ekor <tebal>"})
     noted_lines = render_signal(noted, now=NOW, next_event=release).split("\n")
-    assert noted_lines[11] == "🧪 Ekonofisika: keteraturan hampir acak · ekor &lt;tebal&gt;"
+    assert noted_lines[12] == "🧪 Ekonofisika: keteraturan hampir acak · ekor &lt;tebal&gt;"
     assert "📅 Event berikutnya: USD Retail Sales m/m pukul 21:35 WIB (2 jam lagi)" in lines
     assert any("isi risk.account_equity" in line for line in lines)  # no guessed lot size
     assert lines[-1] == "<i>Bukan saran keuangan. Keputusan &amp; risiko di tanganmu.</i>"

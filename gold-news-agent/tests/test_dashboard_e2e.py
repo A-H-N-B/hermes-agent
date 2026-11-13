@@ -224,7 +224,7 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         assert titles == [
             "BUY 2649.60–2650.40",
             "BUY zona bawah",
-            "SL 2643.60",
+            "SL 2643.60 (tembus = INVALID)",
             "TP1 2656.60",
             "TP2 2663.10",
             "TP3 2668.00",

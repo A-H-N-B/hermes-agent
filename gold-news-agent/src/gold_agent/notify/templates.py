@@ -20,7 +20,7 @@ from gold_agent.models import (
     PlaybookBucket,
     ReleaseReading,
     Signal,
-    SignalOutcome,
+    SignalProgress,
     SignalState,
 )
 from gold_agent.notify.format import (
@@ -64,7 +64,8 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         f" ({esc(signal.tp3_source)})" if signal.tp3_source and signal.tp3_source != "3R" else ""
     )
     lines = [
-        f"{icon} <b>{signal.action} XAUUSD</b> | Confidence {signal.confidence}/100",
+        f"{icon} <b>{signal.action} XAUUSD</b> | Keyakinan {signal.confidence}/100 · "
+        f"<b>{signal.strength}</b> {STRENGTH_DOTS[signal.strength]}",
         f"🕐 {wib_clock(signal.created_at_utc)} WIB · Sesi {esc(signal.session)}",
     ]
     if signal.impulse_note:
@@ -94,6 +95,7 @@ def render_signal(signal: Signal, *, now: datetime, next_event: CalendarEvent | 
         f"{signal.sl_atr_multiple:.2f}×ATR {esc(signal.timeframe or 'M15')})",
         f"✅ TP1 {price(signal.tp1)} (1R) · TP2 {price(signal.tp2)} (2R) · {tp3}",
         f"⏳ Berlaku s/d {esc(signal.valid_until_wib)}",
+        "📌 Level ini tetap (tidak diubah) sampai TP3 atau SL; SL tertembus = sinyal INVALID",
     ]
     if signal.trigger_summary:
         trigger = f"📰 Pemicu: {esc(signal.trigger_summary)} — {esc(signal.trigger_source or '-')}"
@@ -158,40 +160,46 @@ def render_signal_replaced(old: Signal, new_id: str, new_action: str) -> str:
     )
 
 
-CLOSE_REASON = {
-    "tp2": "TP2 tercapai",
-    "tp1": "TP1 tercapai, sisa ditutup karena waktu habis",
-    "breakeven": "TP1 tercapai, sisa kena stop breakeven",
-    "sl": "kena stop loss",
-    "expired": "kedaluwarsa sebelum TP1",
-    "cancelled": "dibatalkan",
+STRENGTH_DOTS = {"LEMAH": "●○○○", "SEDANG": "●●○○", "KUAT": "●●●○", "SANGAT KUAT": "●●●●"}
+PROGRESS_TITLE = {
+    "entered": "📍 <b>Harga masuk zona entry</b>",
+    "tp1": "✅ <b>TP1 tercapai</b>",
+    "tp2": "✅✅ <b>TP2 tercapai</b>",
+    "tp3": "🏁 <b>TP3 tercapai — sinyal selesai</b>",
+    "sl": "❌ <b>SL tertembus — sinyal INVALID</b>",
+    "expired": "⌛ <b>Sinyal kedaluwarsa</b>",
 }
 
 
-def render_paper_tp1(signal: Signal, outcome: SignalOutcome) -> str:
-    stop = price(outcome.stop) if outcome.stop is not None else "-"
-    return "\n".join(
-        [
-            f"✅ <b>TP1 tercapai</b> · {signal.action} {esc(signal.created_at_wib)}",
-            f"Paper: {outcome.realized_r:+.2f}R sudah diamankan · geser SL ke breakeven {stop}",
-            f"Sisa posisi menuju TP2 {price(signal.tp2)}. Bukan saran keuangan.",
-        ]
-    )
-
-
-def render_paper_close(signal: Signal, outcome: SignalOutcome) -> str:
-    r_value = outcome.r_multiple if outcome.r_multiple is not None else 0.0
-    icon = "📗" if r_value > 0 else "📕" if r_value < 0 else "📘"
-    duration = duration_id((outcome.duration_minutes or 0.0) * 60)
-    return "\n".join(
-        [
-            f"{icon} <b>Sinyal {signal.action} ditutup</b> · {esc(signal.created_at_wib)} · "
-            f"{CLOSE_REASON.get(outcome.status, outcome.status)}",
-            f"Hasil paper {r_value:+.2f}R · entry {price(outcome.entry_price)} → keluar "
-            f"{price(outcome.exit_price)} · durasi {duration}",
-            f"MFE {outcome.mfe_r:+.2f}R · MAE -{outcome.mae_r:.2f}R",
-        ]
-    )
+def render_progress(signal: Signal, progress: SignalProgress, event: str, *, now: float) -> str:
+    """One step in a signal's life (signals/progress.py), with its fixed levels."""
+    reached = [name.upper() for name in ("tp1", "tp2", "tp3") if getattr(progress, f"{name}_at")]
+    chart = f" · chart {esc(signal.timeframe)}" if signal.timeframe else ""
+    lines = [
+        f"{PROGRESS_TITLE[event]} · {signal.action} XAUUSD {esc(signal.created_at_wib)}{chart}",
+        f"Harga {price(now)} · entry {price(signal.entry_low)}–{price(signal.entry_high)} · "
+        f"SL {price(signal.stop_loss)} · TP1 {price(signal.tp1)} · TP2 {price(signal.tp2)} · "
+        f"TP3 {price(signal.tp3)}",
+    ]
+    if event == "sl":
+        before = f" Sebelumnya tercapai: {', '.join(reached)}." if reached else ""
+        lines.append(f"Jangan masuk lagi dengan sinyal ini.{before}")
+    elif event in ("tp1", "tp2"):
+        target = signal.tp2 if event == "tp1" else signal.tp3
+        lines.append(
+            f"Berikutnya {'TP2' if event == 'tp1' else 'TP3'} {price(target)}; "
+            f"SL tetap {price(signal.stop_loss)}."
+        )
+    elif event == "expired":
+        lines.append(
+            f"Berhenti dipantau setelah {', '.join(reached)}."
+            if reached
+            else "Tidak sampai TP1 dalam masa berlakunya; jangan masuk lagi dengan sinyal ini."
+        )
+    elif event == "entered":
+        lines.append("Sinyal berlaku selama harga belum menembus SL.")
+    lines.append("Bukan saran keuangan.")
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------ fast path

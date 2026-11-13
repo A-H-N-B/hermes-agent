@@ -105,6 +105,9 @@ def event_view(event: CalendarEvent, now: datetime) -> JSON:
     }
 
 
+SHOW_ENDED = timedelta(hours=2)  # an ended signal stays on the card this long
+
+
 class DashboardData:
     def __init__(self, ctx: AppContext, hub: LiveHub | None = None) -> None:
         self._ctx = ctx
@@ -160,11 +163,23 @@ class DashboardData:
         events = await ctx.calendar.between(now, now + timedelta(days=7))
         upcoming = next((e for e in events if e.impact == "high" and not e.all_day), None)
         active = engine.active(now)
+        progress = engine.progress
+        if engine.last_signal is None or (
+            progress is not None and progress.signal_id != engine.last_signal.signal_id
+        ):
+            progress = None
+        # A signal that just ended (SL breached, TP3, expired) stays on the card a while with
+        # how it ended, so the user sees it went INVALID rather than silently disappear.
+        ended_at = progress.ended_at if progress else None
+        recent = ended_at is not None and now - ended_at < SHOW_ENDED
+        last = engine.last_signal if active is None and recent else None
         return {
             "now": _iso(now),
             "mode": ctx.settings.mode,
             "state": state.model_dump(mode="json") if state else None,
             "active": active.model_dump(mode="json") if active else None,
+            "progress": progress.model_dump(mode="json") if progress else None,
+            "ended": last.model_dump(mode="json") if last else None,
             "context": context_view(await self._context()),
             "halted": bool(halt and halt.get("halted")),
             "next_event": event_view(upcoming, now) if upcoming else None,

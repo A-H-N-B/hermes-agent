@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from gold_agent.models.common import Action
 
@@ -119,6 +119,38 @@ class Signal(BaseModel):
     impulse_note: str | None = None  # the momentum impulse behind it and how past ones ended
     price_offset: float | None = None  # a proxy feed's re-basing onto the broker's prices
 
+    @computed_field
+    @property
+    def strength(self) -> str:
+        """The confidence in words: the higher it is, the stronger the signal."""
+        return strength_label(self.confidence)
+
+
+STRENGTH = ((85, "SANGAT KUAT"), (75, "KUAT"), (65, "SEDANG"), (0, "LEMAH"))
+
+
+def strength_label(confidence: int) -> str:
+    return next(label for floor, label in STRENGTH if confidence >= floor)
+
+
+ProgressEnd = Literal["sl", "tp3", "expired", "replaced"]
+
+
+class SignalProgress(BaseModel):
+    """What became of a signal after it was given; its levels never change, the price decides
+    (signals/progress.py)."""
+
+    signal_id: str
+    action: Literal["BUY", "SELL"]
+    entered_at: datetime | None = None  # price in the entry zone
+    tp1_at: datetime | None = None
+    tp2_at: datetime | None = None
+    tp3_at: datetime | None = None
+    run_until: datetime | None = None  # after TP1 the signal runs on to TP3 or SL until then
+    ended_at: datetime | None = None
+    end: ProgressEnd | None = None  # sl = INVALID, tp3 = done, expired, replaced
+    end_price: float | None = None
+
 
 class SignalState(BaseModel):
     """What the engine thinks right now; WAIT carries its reasons."""
@@ -135,6 +167,7 @@ class SignalState(BaseModel):
     wait_reasons: list[str] = Field(default_factory=list)
     active_signal_id: str | None = None
     halted: bool = False
+    progress: SignalProgress | None = None  # the last signal's life so far (TP hits, SL, end)
 
 
 OutcomeStatus = Literal["open", "tp1", "tp2", "tp3", "sl", "breakeven", "expired", "cancelled"]

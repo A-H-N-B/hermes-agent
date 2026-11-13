@@ -25,6 +25,7 @@ from gold_agent.models import (
     Impulse,
     MarketContext,
     Signal,
+    SignalProgress,
     SignalState,
     TradeOdds,
 )
@@ -33,6 +34,7 @@ from gold_agent.models.signals import SetupType
 from gold_agent.signals.impulses import record_line
 from gold_agent.signals.levels import TradeLevels, compute_levels, position_size
 from gold_agent.signals.odds import trade_odds
+from gold_agent.signals.progress import start, still_running
 from gold_agent.signals.scoring import PriceAt, ScoreBreakdown, confidence, score
 from gold_agent.signals.timeframe import MIN_CALLS, TfChoice, choose_timeframe, session_key
 from gold_agent.timeutils.risky import risky_flags
@@ -71,12 +73,15 @@ class EngineState:
     halted: bool = False
     daily_r: float = 0.0  # realised R on `daily_r_day` (paper tracker)
     daily_r_day: str | None = None  # WIB date
+    progress: SignalProgress | None = None  # the last signal's life (signals/progress.py)
 
     def active(self, now: datetime) -> Signal | None:
+        """The last signal while it is in play: not replaced, its SL not breached, TP3 not
+        reached, and not expired (past TP1 it runs on until `progress.run_until`)."""
         signal = self.last_signal
         if signal is None or signal.signal_id in self.closed_signal_ids:
             return None
-        return signal if now < signal.valid_until_utc else None
+        return signal if still_running(self.progress, signal, now) else None
 
     def count_today(self, now: datetime) -> int:
         return self.signals_today if self.signals_day == wib_day(now) else 0
@@ -89,6 +94,7 @@ class EngineState:
         self.signals_today = (self.signals_today if self.signals_day == day else 0) + 1
         self.signals_day = day
         self.last_signal = signal
+        self.progress = start(signal)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -98,6 +104,7 @@ class EngineState:
             "signals_today": self.signals_today,
             "last_release_at": self.last_release_at.isoformat() if self.last_release_at else None,
             "last_release_name": self.last_release_name,
+            "progress": self.progress.model_dump(mode="json") if self.progress else None,
         }
 
     @classmethod
@@ -111,6 +118,9 @@ class EngineState:
             signals_today=int(data.get("signals_today") or 0),
             last_release_at=datetime.fromisoformat(release_at) if release_at else None,
             last_release_name=data.get("last_release_name"),
+            progress=SignalProgress.model_validate(data["progress"])
+            if data.get("progress")
+            else None,
         )
 
 

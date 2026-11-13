@@ -1,4 +1,4 @@
-"""Paper tracker service: signal -> fill on the next quote -> TP1 alert -> close -> engine events,
+"""Paper tracker service: signal -> fill on the next quote -> TP1 -> close -> engine events (quiet),
 plus source filtering, reversal, restart catch-up from stored ticks and unfilled signals."""
 
 from __future__ import annotations
@@ -59,9 +59,8 @@ async def test_signal_is_filled_managed_and_reported(
     assert stored is not None and stored.entry_price == pytest.approx(2650.15)
 
     await feed(paper, clock, tick(10, 2656.6))
-    alerts = await drain(ctx, STREAM_NOTIFY)
-    assert [a["priority"] for a in alerts] == ["high"]
-    assert alerts[0]["text"].startswith("✅ <b>TP1 tercapai</b>")
+    after_tp1 = await ctx.signals.outcome(signal.signal_id)
+    assert after_tp1 is not None and after_tp1.tp1_hit_at is not None
     await feed(paper, clock, tick(30, 2663.1))
     final = await ctx.signals.outcome(signal.signal_id)
     assert final is not None and final.status == "tp2"
@@ -70,8 +69,8 @@ async def test_signal_is_filled_managed_and_reported(
     assert events[1]["type"] == "paper.daily" and events[1]["r"] == pytest.approx(1.481)
     daily = await ctx.ops.kv_get(KV_PAPER_DAILY)
     assert daily is not None and daily["trades"] == 1
-    closing = (await drain(ctx, STREAM_NOTIFY))[-1]
-    assert closing["text"].startswith("📗 <b>Sinyal BUY ditutup</b>")
+    # It keeps score quietly: the user hears about TPs and the SL from the signal's progress.
+    assert await drain(ctx, STREAM_NOTIFY) == []
     assert signal.signal_id not in paper.positions
 
 

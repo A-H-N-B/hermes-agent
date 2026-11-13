@@ -14,6 +14,8 @@ const wibFormat = new Intl.DateTimeFormat("id-ID", {
 const wibClock = new Intl.DateTimeFormat("id-ID", {
   timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit",
 });
+const wibHourMinute = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const hhmm = (iso) => (iso ? wibHourMinute.format(new Date(iso)) : "–");
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -109,6 +111,51 @@ function componentBars(components) {
   return wrap;
 }
 
+// A signal's levels never change after it is given; the price walks it through these steps
+// (signals/progress.py): into the entry zone, TP1, TP2, TP3, or the SL, which makes it INVALID.
+const STRENGTH_DOTS = { LEMAH: "●○○○", SEDANG: "●●○○", KUAT: "●●●○", "SANGAT KUAT": "●●●●" };
+const ENDED_TEXT = {
+  sl: (s, p) => `❌ Sinyal ${s.action} ${s.created_at_wib} INVALID — SL ${num(s.stop_loss)} tertembus pukul ${hhmm(p.ended_at)} WIB. Jangan masuk lagi dengan sinyal ini.`,
+  tp3: (s, p) => `🏁 Sinyal ${s.action} ${s.created_at_wib} selesai — TP3 ${num(s.tp3)} tercapai pukul ${hhmm(p.ended_at)} WIB.`,
+  expired: (s, p) => (p.tp1_at
+    ? `⌛ Sinyal ${s.action} ${s.created_at_wib} berhenti dipantau setelah TP1.`
+    : `⌛ Sinyal ${s.action} ${s.created_at_wib} kedaluwarsa tanpa menyentuh TP1. Jangan masuk lagi dengan sinyal ini.`),
+  replaced: (s) => `↩️ Sinyal ${s.action} ${s.created_at_wib} digantikan sinyal arah sebaliknya.`,
+};
+
+function progressOf(signal, progress) {
+  return progress && signal && progress.signal_id === signal.signal_id ? progress : {};
+}
+
+function progressSteps(signal, progress) {
+  const p = progressOf(signal, progress);
+  const row = el("div", { class: "steps" });
+  const steps = [
+    ["Zona entry", `${num(signal.entry_low)}–${num(signal.entry_high)}`, p.entered_at],
+    ["TP1 (1R)", num(signal.tp1), p.tp1_at],
+    ["TP2 (2R)", num(signal.tp2), p.tp2_at],
+    ["TP3", num(signal.tp3), p.tp3_at],
+  ];
+  for (const [label, value, at] of steps) {
+    row.append(el("div", { class: `step${at ? " done" : ""}` },
+      el("b", { text: `${at ? "✓ " : ""}${label}` }), el("span", { text: value }),
+      el("small", { class: "muted", text: at ? `${hhmm(at)} WIB` : "belum" })));
+  }
+  const hit = p.end === "sl";
+  row.append(el("div", { class: `step stop${hit ? " hit" : ""}` },
+    el("b", { text: `${hit ? "✗ " : ""}Stop loss` }), el("span", { text: num(signal.stop_loss) }),
+    el("small", { class: "muted", text: hit ? `tertembus ${hhmm(p.ended_at)} WIB` : "tertembus = INVALID" })));
+  return row;
+}
+
+function progressStatus(signal, progress) {
+  const p = progressOf(signal, progress);
+  const where = p.tp2_at ? "TP2 tercapai, menuju TP3" : p.tp1_at ? "TP1 tercapai, menuju TP2"
+    : p.entered_at || signal.entry_type === "market" ? "harga di zona entry / sudah lewat" : "menunggu harga masuk zona entry";
+  return el("p", { class: "status-line" }, el("b", { text: "AKTIF" }),
+    ` · ${where} · level tetap sampai TP3 atau SL`);
+}
+
 function renderSignalCard(payload) {
   const card = clear($("#signal-card"));
   const state = payload.state;
@@ -116,21 +163,24 @@ function renderSignalCard(payload) {
   const action = active ? active.action : state ? state.action : "WAIT";
   const head = el("div", { class: "signal-head" },
     el("span", { class: `action ${action}`, text: action }),
-    el("span", { class: "muted", text: active ? `Confidence ${active.confidence}/100` :
-      state ? `skor ${signed(state.composite_score)} · confidence ${state.confidence}` : "status belum ada" }));
+    active
+      ? el("span", { class: `strength ${active.strength.replace(" ", "-")}`, text: `Keyakinan ${active.confidence}/100 · ${active.strength} ${STRENGTH_DOTS[active.strength] || ""}` })
+      : el("span", { class: "muted", text: state ? `skor ${signed(state.composite_score)} · confidence ${state.confidence}` : "status belum ada" }));
   if (payload.halted) head.append(el("span", { class: "badge warn", text: "KILL SWITCH" }));
   head.append(el("span", { class: "badge", text: payload.mode }));
   card.append(head);
+  const ended = !active && payload.ended && payload.progress ? payload.ended : null;
+  if (ended) {
+    const p = payload.progress;
+    card.append(el("p", { class: `ended ${p.end}`, text: (ENDED_TEXT[p.end] || ENDED_TEXT.expired)(ended, p) }),
+      progressSteps(ended, p));
+  }
 
   if (active) {
     card.append(el("p", { class: "muted",
-      text: `${active.created_at_wib} · ${active.session} · ${active.setup_type}` }));
+      text: `${active.created_at_wib} · ${active.session} · ${active.setup_type} · chart ${active.timeframe || "–"}` }));
+    card.append(progressStatus(active, payload.progress), progressSteps(active, payload.progress));
     card.append(el("div", { class: "levels" },
-      levelBox("Entry", `${num(active.entry_low)}–${num(active.entry_high)}`),
-      levelBox("Stop loss", num(active.stop_loss)),
-      levelBox("TP1 (1R)", num(active.tp1)),
-      levelBox("TP2 (2R)", num(active.tp2)),
-      levelBox("TP3", num(active.tp3)),
       levelBox("Berlaku s/d", active.valid_until_wib),
       levelBox("Lot", active.lot_size !== null ? String(active.lot_size) : "–")));
     if (active.lot_note) card.append(el("p", { class: "muted", text: `Lot: ${active.lot_note}` }));
@@ -1184,7 +1234,7 @@ async function showTf(tf) {
   state.tf = tf;
   markTf(tf);
   await loadChart(state);
-  drawSignal(state, lastState ? lastState.active : null);
+  drawSignal(state, lastState ? lastState.active : null, lastState ? lastState.progress : null);
   await loadIndicators(state);
   state.chart.timeScale().fitContent();
   await refreshForecast();
@@ -1316,19 +1366,21 @@ function drawProjection(state) {
 
 // The active signal as price lines: entry zone, stop loss, TP1-TP3. Levels come from the same
 // price feed as these candles, so they need no shifting (unlike the Pine indicator).
-function drawSignal(state, active) {
+function drawSignal(state, active, progress) {
   if (!state) return;
   for (const line of state.lines) state.series.removePriceLine(line);
   state.lines = [];
   if (!active) return;
   const side = active.action === "BUY" ? "#26a69a" : "#ef5350";
+  const p = progressOf(active, progress);
+  const tp = (name, at) => `${at ? "✓ " : ""}${name} ${num(active[name.toLowerCase()])}`;
   const levels = [
     [active.entry_high, `${active.action} ${num(active.entry_low)}–${num(active.entry_high)}`, side, 2],
     [active.entry_low, `${active.action} zona bawah`, side, 2],
-    [active.stop_loss, `SL ${num(active.stop_loss)}`, "#ef5350", 0],
-    [active.tp1, `TP1 ${num(active.tp1)}`, "#2ecc71", 1],
-    [active.tp2, `TP2 ${num(active.tp2)}`, "#2ecc71", 1],
-    [active.tp3, `TP3 ${num(active.tp3)}`, "#2ecc71", 3],
+    [active.stop_loss, `SL ${num(active.stop_loss)} (tembus = INVALID)`, "#ef5350", 0],
+    [active.tp1, tp("TP1", p.tp1_at), "#2ecc71", 1],
+    [active.tp2, tp("TP2", p.tp2_at), "#2ecc71", 1],
+    [active.tp3, tp("TP3", p.tp3_at), "#2ecc71", 3],
   ];
   for (const [price, title, color, lineStyle] of levels) {
     state.lines.push(state.series.createPriceLine({ price, title, color, lineStyle, lineWidth: 2, axisLabelVisible: true }));
@@ -1612,7 +1664,7 @@ const loaders = {
     chart.tf = preferredTf(auto);
     markTf(chart.tf);
     await loadChart(chart);
-    drawSignal(chart, state.active);
+    drawSignal(chart, state.active, state.progress);
     await liveExtras(true);
   },
   outlook: async () => {
@@ -1631,7 +1683,7 @@ const loaders = {
     renderPlan(state, outlook);
     const chart = makeChart("gna", $("#gna-chart"), true);
     await loadChart(chart);
-    drawSignal(chart, state.active);
+    drawSignal(chart, state.active, state.progress);
     chart.outlook = outlook;
     chart.active = state.active;
     drawProjection(chart);
@@ -1736,7 +1788,8 @@ function refreshLiveExtras(series = false) {
 function onState(state) {
   const before = lastState && lastState.state;
   if (currentPage !== "live" || !before || before.action !== state.action
-      || before.active_signal_id !== state.active_signal_id || before.halted !== state.halted) {
+      || before.active_signal_id !== state.active_signal_id || before.halted !== state.halted
+      || JSON.stringify(before.progress) !== JSON.stringify(state.progress)) {
     refreshSoon();
     return;
   }
@@ -1817,7 +1870,7 @@ function refreshSoon() { // coalesce bursts of state/signal events into one fetc
       lastState = state;
       renderSignalCard(state);
       renderPrice(state.context);
-      drawSignal(charts.live, state.active);
+      drawSignal(charts.live, state.active, state.progress);
       refreshLiveExtras(); // the timing windows follow the new state
     }
   }, 500);

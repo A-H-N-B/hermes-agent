@@ -12,6 +12,7 @@ from gold_agent.config import Settings, load_settings
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
     STREAM_EVENTS,
+    STREAM_NOTIFY,
     STREAM_OUTLOOK,
     STREAM_SIGNALS,
     STREAM_STATE,
@@ -350,6 +351,38 @@ async def test_an_answer_that_does_not_come_counts_for_nothing(
     (signal,) = await drain(context2, STREAM_SIGNALS)
     assert (signal["review"]["agree"], signal["review"]["votes"]) == (2, 2)
     assert signal["review"]["note"].startswith("1 dari 3 suara AI tidak jalan")
+
+
+async def test_a_signal_keeps_its_levels_reports_its_targets_and_dies_at_its_sl(
+    service_factory: Factory, clock: ManualClock
+) -> None:
+    service, context, _ = await service_factory(*unanimous("BUY"))
+    await feed_rally(service, clock)
+    story = analysis(first_seen=T0)
+    await context.news.save_analysis(story)
+    await service.handle_analysis(msg("news.analyses", story))
+    await decided(service)
+    (given,) = await drain(context, STREAM_SIGNALS)
+    assert given["strength"] in ("SEDANG", "KUAT", "SANGAT KUAT")  # confidence in words
+    await drain(context, STREAM_NOTIFY)
+    levels = ("entry_low", "entry_high", "stop_loss", "tp1", "tp2", "tp3")
+    clock.advance(30)
+    await service.handle_context(msg("market.context", bullish(clock.now(), given["tp1"] + 0.2)))
+    (tp1,) = await drain(context, STREAM_NOTIFY)
+    assert (
+        tp1["text"].startswith("✅ <b>TP1 tercapai</b> · BUY XAUUSD") and tp1["priority"] == "high"
+    )
+    signal = service.state.active(clock.now())
+    assert signal is not None and all(getattr(signal, k) == given[k] for k in levels)  # fixed
+    clock.advance(30)
+    breach = given["stop_loss"] - 0.5
+    await service.handle_context(msg("market.context", bullish(clock.now(), breach)))
+    (sl,) = await drain(context, STREAM_NOTIFY)
+    assert sl["text"].startswith("❌ <b>SL tertembus — sinyal INVALID</b>")
+    assert "Sebelumnya tercapai: TP1." in sl["text"]
+    assert service.state.active(clock.now()) is None  # free for the next signal
+    state = (await drain(context, STREAM_STATE))[-1]
+    assert state["progress"]["end"] == "sl" and state["active_signal_id"] is None
 
 
 async def feed_rally2(service: SignalService, clock: ManualClock, start: datetime) -> None:
