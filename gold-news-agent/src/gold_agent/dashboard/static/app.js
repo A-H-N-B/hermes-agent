@@ -67,7 +67,7 @@ async function api(path) {
 // ------------------------------------------------------------------ live page
 
 const MODEL_NAMES = {
-  "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-opus-5": "Opus 5",
+  "claude-haiku-5-5": "Haiku 5.5", "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-opus-5": "Opus 5",
   "claude-opus-4-8": "Opus 4.8", "claude-sonnet-5-5": "Sonnet 5.5",
 };
 const modelName = (model) => MODEL_NAMES[model] || model || "AI";
@@ -913,19 +913,24 @@ const CREDIT_STATUS = { aman: "", menipis: "warn", habis: "SELL" };
 function renderCredit(c) {
   const badge = $("#credit");
   const b = c.balance;
-  if (!b) {
-    badge.textContent = c.has_key ? "Claude: isi saldo" : "Claude: tanpa API key";
+  if (!c.has_key) {
+    badge.textContent = "AI: tanpa API key";
     badge.className = "credit";
+  } else if (!c.ai_on) {
+    badge.textContent = `AI mati · batas $${num(c.monthly_usd)}/bulan tercapai`;
+    badge.className = "credit SELL";
   } else {
-    badge.textContent = `Claude $${num(b.remaining_usd)}${b.days_left !== null ? ` · ±${Math.floor(b.days_left)} hari` : ""}`;
-    badge.className = `credit ${CREDIT_STATUS[b.status]}`;
+    // This month's AI cost so far, against the hard monthly ceiling.
+    badge.textContent = `AI $${num(c.spent_month_usd)} / $${num(c.monthly_usd)} bulan ini`;
+    badge.className = `credit ${b ? CREDIT_STATUS[b.status] : ""}`;
   }
   const info = $("#credit-info");
   if (!info) return;
   clear(info);
   const rows = [
     ["Sisa saldo (perkiraan)", b ? `$${num(b.remaining_usd)}` : "–", b ? `dari $${num(b.balance_usd)} yang diisi ${b.as_of_wib} WIB, terpakai $${num(b.spent_since_usd, 4)}` : "belum diisi"],
-    ["Pemakaian hari ini", `$${num(c.spent_today_usd, 4)}`, `batas keras $${num(c.daily_budget_usd)}/hari; berita biasa berhenti di $${num(c.routine_budget_usd)}, sisanya untuk keputusan sinyal dan berita besar`],
+    ["Pemakaian bulan ini", `$${num(c.spent_month_usd, 4)}`, `batas keras $${num(c.monthly_usd)} per bulan: bila tercapai AI mati sampai tanggal 1, web dan Telegram tetap jalan tanpa AI`],
+    ["Pemakaian hari ini", `$${num(c.spent_today_usd, 4)}`, `jatah hari ini $${num(c.ceiling_usd, 4)} (sisa bulan dibagi rata per hari); berita biasa berhenti di $${num(c.routine_usd, 4)}, sisanya untuk keputusan sinyal dan berita besar`],
     ["Rata-rata per hari", b && b.per_day_usd !== null ? `$${num(b.per_day_usd, 4)}` : "–", "dari pemakaian 7 hari terakhir"],
     ["Perkiraan habis", b && b.empty_at_wib ? `${b.empty_at_wib} WIB` : "–", b && b.days_left !== null ? `±${num(b.days_left, 1)} hari lagi${b.status !== "aman" ? " · segera top-up" : ""}` : ""],
   ];
@@ -1405,7 +1410,7 @@ function renderHealth(health) {
   tiles.append(
     tile("Umur data harga", health.context_age_seconds === null ? "tidak ada" : duration(health.context_age_seconds)),
     tile("Sumber harga", ctx ? `${ctx.source || "–"}${ctx.proxy ? " (proxy)" : ""}` : "–"),
-    tile("Biaya LLM hari ini", `$${num(health.llm_cost_today, 2)} / $${num(health.llm_budget, 2)}`),
+    tile("Biaya AI bulan ini", `$${num(health.llm_month, 2)} / $${num(health.llm_monthly_budget, 2)}`),
     tile("Sumber berita", `${health.sources.filter((s) => s.status === "ok").length} ok / ${health.sources.length}`));
   const body = clear($("#sources-table tbody"));
   for (const s of health.sources) {

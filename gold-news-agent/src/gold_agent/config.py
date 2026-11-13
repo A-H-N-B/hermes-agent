@@ -242,14 +242,25 @@ class RiskSettings(StrictModel):
 
 
 class BudgetSettings(StrictModel):
+    llm_monthly_usd: float = Field(ge=0)  # hard ceiling per calendar month (WIB)
     llm_daily_usd: float = Field(ge=0)  # hard ceiling per WIB day
     priority_reserve_pct: float = Field(ge=0, lt=100)  # kept for priority calls
     paid_data_monthly_usd: float = Field(ge=0)
 
+    def daily_ceiling(self, spent_before_today: float, days_left: int) -> float:
+        """Today's ceiling: what is left of the month shared evenly over the days left in it
+        (today included), never more than `llm_daily_usd`. A quiet day leaves more for the
+        days after it, and the month never passes `llm_monthly_usd`."""
+        left = max(0.0, self.llm_monthly_usd - spent_before_today)
+        return min(self.llm_daily_usd, left / max(1, days_left))
+
+    def routine_share(self, ceiling: float) -> float:
+        """Where routine calls stop; priority calls go on to the ceiling."""
+        return ceiling * (1 - self.priority_reserve_pct / 100)
+
     @property
     def routine_daily_usd(self) -> float:
-        """Where routine calls stop; priority calls go on to the ceiling."""
-        return self.llm_daily_usd * (1 - self.priority_reserve_pct / 100)
+        return self.routine_share(self.llm_daily_usd)
 
 
 class QuietHours(StrictModel):
@@ -371,6 +382,14 @@ class ModelPrice(StrictModel):
     output: float = Field(ge=0)
     cache_write: float = Field(ge=0)
     cache_read: float = Field(ge=0)
+    # A prompt longer than this many tokens (cache reads and writes included) pays every price
+    # times long_prompt_factor (Claude Haiku 5.5: over 100,000 tokens, 5x).
+    long_prompt_tokens: int | None = Field(default=None, gt=0)
+    long_prompt_factor: float = Field(default=1.0, ge=1)
+
+    def factor(self, prompt_tokens: float) -> float:
+        long = self.long_prompt_tokens is not None and prompt_tokens > self.long_prompt_tokens
+        return self.long_prompt_factor if long else 1.0
 
 
 ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk", "chat")
@@ -380,6 +399,9 @@ ROUTES = ("triage", "triage_high", "deep", "outlook", "brief", "desk", "chat")
 ALWAYS_THINKING_MODELS = frozenset(
     {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5", "claude-fable-5-1"}
 )
+# Models with no server-side refusal fallback: a list of fallback models is a 400 and "default"
+# leaves a declined request declined, so `llm.fallbacks` must be "off" when a route uses one.
+NO_FALLBACK_MODELS = frozenset({"claude-haiku-5-5"})
 
 
 class LlmSettings(StrictModel):
@@ -414,6 +436,11 @@ class LlmSettings(StrictModel):
                 )
             if route.model not in self.pricing_per_mtok:
                 raise ValueError(f"llm.{name}: no pricing_per_mtok entry for {route.model}")
+            if self.fallbacks != "off" and route.model in NO_FALLBACK_MODELS:
+                raise ValueError(
+                    f"llm.{name}: {route.model} has no server-side refusal fallback; "
+                    "set llm.fallbacks: off"
+                )
         return self
 
 

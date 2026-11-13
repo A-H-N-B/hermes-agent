@@ -1,4 +1,4 @@
-"""Tanya AI (assistant/chat.py): questions answered from what the agent knows now, by Opus 5.5
+"""Tanya AI (assistant/chat.py): questions answered from what the agent knows now, by Haiku 5.5
 with every fact written by the program, or by the program's own summary when there is no AI;
 on the dashboard and on Telegram."""
 
@@ -97,9 +97,9 @@ async def test_opus_answers_from_the_brief_with_the_conversation_so_far(
     fake = FakeAnthropic(written(ANSWER))
     history: list[Turn] = [("user", "halo"), ("assistant", "Halo, ada yang bisa dibantu?")]
     reply = await assistant(settings, ctx, fake).answer("kapan aku harus buy?", history, facts())
-    assert (reply.text, reply.model) == (ANSWER, "claude-opus-5-5")
+    assert (reply.text, reply.model) == (ANSWER, "claude-haiku-5-5")
     (request,) = fake.requests
-    assert request["output_config"] == {"effort": "low"}
+    assert request["output_config"] == {"effort": "medium"}
     assert request["system"][0]["cache_control"] == {"type": "ephemeral"}
     roles = [m["role"] for m in request["messages"]]
     assert roles == ["user", "assistant", "user"]  # the earlier turns, then facts + question
@@ -134,7 +134,7 @@ async def test_without_the_ai_the_program_still_answers(
         update={"llm": settings.llm.model_copy(update={"chat_per_day": 1})}
     )
     first = assistant(capped, ctx, FakeAnthropic(written(ANSWER)))
-    assert (await first.answer("buy?", [], facts())).model == "claude-opus-5-5"
+    assert (await first.answer("buy?", [], facts())).model == "claude-haiku-5-5"
     # Another surface (Telegram after the dashboard) or a restart counts the same answers.
     other = assistant(capped, ctx, FakeAnthropic(written(ANSWER)))
     second = await other.answer("lagi?", [], facts())
@@ -185,7 +185,7 @@ async def test_telegram_questions_get_an_escaped_answer_and_keep_the_thread(
         facts=live,
     )
     first = await commands.run("tanya", ["kapan", "buy?"], user_id=1)
-    assert first == "BUY bila &gt; 2668 &amp; RSI &lt; 70\n\n<i>🤖 Opus 5.5</i>"
+    assert first == "BUY bila &gt; 2668 &amp; RSI &lt; 70\n\n<i>🤖 Haiku 5.5</i>"
     await commands.ask("lalu SL di mana?", 1)  # a plain message continues the same thread
     roles = [m["role"] for m in fake.requests[1]["messages"]]
     assert roles == ["user", "assistant", "user"]

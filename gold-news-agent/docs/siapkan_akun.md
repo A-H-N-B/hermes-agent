@@ -127,12 +127,11 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    (Visa/Mastercard; kartu debit dengan fitur transaksi internasional biasanya bisa). Mulai
    kecil, mis. **US$5–10**, cukup untuk beberapa minggu pemakaian normal.
 3. **Pasang batas biaya** supaya tagihan tidak pernah kebablasan: **Settings → Limits** → atur
-   *spend limit* bulanan, mis. US$600 (= 30 hari × US$20). Selain itu program punya batas
-   kerasnya sendiri: `budget.llm_daily_usd` (bawaan **US$20/hari**; ubah dengan mis.
-   `uv run gold-agent config set budget.llm_daily_usd 10`). Berita biasa, outlook, dan laporan
-   berhenti di 75 % batas itu; sisanya khusus untuk keputusan akhir sinyal dan berita berdampak
-   tinggi. Setelah batas penuh tercapai, semua analisis memakai aturan dan sinyal keluar dengan
-   tanda "Tanpa review AI" sampai 00:00 WIB.
+   *spend limit* bulanan, mis. US$6 (sedikit di atas batas program). Program punya batas
+   kerasnya sendiri: `budget.llm_monthly_usd` (bawaan **US$5 per bulan**; ubah dengan mis.
+   `uv run gold-agent config set budget.llm_monthly_usd 10`), dibagi rata per hari. Bila habis,
+   AI mati sampai tanggal 1; dashboard, Telegram, dan sinyal tetap jalan dengan aturan program
+   (sinyal ditandai "tanpa review AI").
 4. **Buat key:** menu **API Keys** → **Create Key** → beri nama, mis. `gold-news-agent` →
    **Create**.
 5. Key langsung tampil, diawali `sk-ant-`. **Salin sekarang**: key hanya ditampilkan sekali.
@@ -150,17 +149,16 @@ lewat Claude Console, dengan saldo (credit) sendiri.
    Bila muncul daftar nama model, key berfungsi. `401` artinya key salah. `400` dengan pesan
    soal billing/credit artinya saldo belum diisi.
 
-Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): triage tiap berita,
-analisis mendalam, outlook per jam, dan ringkasan harian/mingguan memakai **Claude Opus 5.5**,
-dengan tingkat `effort` berbeda per tugas. Keputusan akhir setiap sinyal dijawab tiga suara
-Opus 5.5 bersamaan (effort low, dalam hitungan detik; mayoritas menentukan), dan pertanyaan di
-"Tanya AI" juga dijawab Opus 5.5. Biayanya ±$0,02 per berita biasa, ±$0,15 per keputusan sinyal,
-dan ±$0,05 per pertanyaan. Di hari yang sangat ramai biaya tanpa rem bisa ±$24, jadi
-`budget.llm_daily_usd` (bawaan $20/hari) menahannya: setelah $15 berita biasa, outlook, dan Tanya
-AI memakai jawaban program sampai pukul 00:00 WIB, sedangkan keputusan sinyal dan berita
-berdampak tinggi tetap memakai AI sampai $20. Biaya nyata tercatat di tabel `llm_usage` dan
-terlihat di header dashboard, laporan harian, dan `/stats`. Isi permintaan program ini hanya
-berita publik dan angka pasar, tanpa data akun atau rahasia.
+Model yang dipakai sudah diatur di `config/settings.yaml` (bagian `llm`): semua tugas (triage
+tiap berita, analisis mendalam, outlook per jam, ringkasan, keputusan akhir sinyal, Tanya AI)
+memakai **Claude Haiku 5.5** ($0,10 / $0,50 per juta token), dengan tingkat `effort` berbeda per
+tugas. Biayanya sekitar $0,0004 per berita biasa, $0,004 per keputusan sinyal (tiga suara), dan
+$0,001 per pertanyaan. Kebutuhan penuh hari ramai sekitar $0,5, lebih dari jatah $5 per bulan
+(±$0,17 per hari), jadi jatah harian menahannya: berita biasa, outlook, dan Tanya AI berhenti di
+separuh jatah dan memakai jawaban program, sedangkan keputusan sinyal dan berita berdampak tinggi
+tetap memakai AI sampai jatah hari itu habis. Biaya nyata tercatat di tabel `llm_usage` dan
+terlihat di header dashboard ("AI $x / $5 bulan ini"), laporan harian, dan `/stats`. Isi
+permintaan program ini hanya berita publik dan angka pasar, tanpa data akun atau rahasia.
 
 **Memantau pemakaian:** Console → **Usage** menampilkan biaya per hari.
 **Bila key bocor:** Console → API Keys → klik key itu → **Delete** (atau *Disable*), buat yang

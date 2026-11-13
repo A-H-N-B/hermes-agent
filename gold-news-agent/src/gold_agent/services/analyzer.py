@@ -66,17 +66,19 @@ LLM_ALERTS: dict[str, tuple[AlertKind, AlertSeverity, str, str]] = {
     "reserve": (
         "budget",
         "warning",
-        "Budget AI rutin hari ini terpakai",
+        "Jatah AI rutin hari ini terpakai",
         "Biaya AI hari ini lewat ${routine:.2f}: sampai 00:00 WIB berita biasa memakai aturan "
         "dan Tanya AI dijawab program. Keputusan sinyal (AI) dan berita dampak tinggi tetap "
-        "memakai sisa budget sampai batas ${ceiling:.2f}.",
+        "memakai sisa jatah sampai ${ceiling:.2f} (batas ${monthly:.2f} per bulan, terpakai "
+        "${month:.2f}).",
     ),
     "exhausted": (
         "budget",
         "warning",
-        "Batas biaya AI harian tercapai",
-        "Batas ${ceiling:.2f} hari ini tercapai: sampai 00:00 WIB semua analisis memakai aturan "
-        "dan sinyal keluar tanpa review AI (ditandai di setiap sinyal).",
+        "Jatah biaya AI tercapai",
+        "Jatah AI hari ini ${ceiling:.2f} habis (batas ${monthly:.2f} per bulan, terpakai "
+        "${month:.2f}): sampai jatah berikutnya semua analisis memakai aturan dan sinyal keluar "
+        "tanpa review AI (ditandai di setiap sinyal). Dashboard dan Telegram tetap jalan.",
     ),
     "ok": (
         "recovery",
@@ -295,7 +297,7 @@ class AnalyzerService:
         previous, self._llm_state = self._llm_state, state
         if state == "ok" and previous is None:
             return
-        budget = self._ctx.settings.budget
+        allowed = self.llm.allowance
         kind, severity, title, detail = LLM_ALERTS[state]
         await self._alert(
             Alert(
@@ -304,7 +306,10 @@ class AnalyzerService:
                 severity=severity,
                 title=title,
                 detail=detail.format(
-                    routine=budget.routine_daily_usd, ceiling=budget.llm_daily_usd
+                    routine=allowed.routine if allowed else 0.0,
+                    ceiling=allowed.ceiling if allowed else 0.0,
+                    monthly=self._ctx.settings.budget.llm_monthly_usd,
+                    month=allowed.spent_month if allowed else 0.0,
                 ),
                 created_at=now,
                 dedupe_key=f"llm_{state}",

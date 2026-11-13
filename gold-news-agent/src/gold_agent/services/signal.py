@@ -2,10 +2,10 @@
 the hourly outlook (11.3), the Monday-open outlook (11.6) and the weekly hourly-profile rebuild.
 
 Every evaluation first picks the chart to trade on (signals/timeframe.py, fed by the measured
-accuracy in signals/accuracy.py). A candidate the engine produces then goes to Opus 5.5 (three
-quick independent answers, signals/desk.py) for the final BUY / SELL / WAIT and timeframe; the
-review runs in the background and the next evaluation, on fresh prices, applies it. Without the
-AI the engine decides alone, labelled.
+accuracy in signals/accuracy.py). A candidate the engine produces then goes to the AI desk
+(three quick independent answers, signals/desk.py) for the final BUY / SELL / WAIT and
+timeframe; the review runs in the background and the next evaluation, on fresh prices, applies
+it. Without the AI the engine decides alone, labelled.
 
 State that must survive a restart lives in kv_state: `signal_engine` (last signal, daily count,
 last release), `trading_halt` (/stop) and `paper_daily` (realised R, written by the paper tracker).

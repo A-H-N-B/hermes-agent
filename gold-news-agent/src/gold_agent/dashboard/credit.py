@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from gold_agent.analysis.llm_client import wib_day_start
+from gold_agent.analysis.llm_client import allowance
 from gold_agent.core.app import AppContext
 from gold_agent.timeutils.sessions import fmt_wib
 
@@ -60,10 +60,9 @@ def credit_summary(
 async def credit_view(ctx: AppContext) -> JSON:
     now = ctx.clock.now()
     spend = ctx.ops.llm_spend_since
-    base: JSON = {
-        "spent_today_usd": round(await spend(wib_day_start(now)), 4),
-        "daily_budget_usd": ctx.settings.budget.llm_daily_usd,
-        "routine_budget_usd": round(ctx.settings.budget.routine_daily_usd, 2),
+    allowed = await allowance(ctx.ops, ctx.settings.budget, now)
+    base: JSON = allowed.to_json() | {
+        "ai_on": allowed.spent_month < allowed.monthly and allowed.ceiling > 0,
         "has_key": bool(ctx.env.get("ANTHROPIC_API_KEY")),
     }
     stored = await ctx.ops.kv_get(KV_CREDIT)

@@ -1,5 +1,5 @@
 """Claude API access for analysis: structured outputs, prompt caching, timeouts, circuit breaker,
-a hard daily budget and per-call usage/cost logging (section 13.1).
+a hard monthly budget paced into daily allowances, and per-call usage/cost logging (13.1).
 
 Requests go through the beta Messages endpoint so a safety-classifier refusal (a false positive on
 benign news) can be retried server-side on the recommended fallback model (`fallbacks="default"`).
@@ -9,6 +9,7 @@ the dashboard's credit estimate stay right when a fallback model answers."""
 from __future__ import annotations
 
 import asyncio
+import calendar
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ import anthropic
 import pydantic
 import structlog
 
-from gold_agent.config import LlmRoute, LlmSettings, ModelPrice, Settings
+from gold_agent.config import BudgetSettings, LlmRoute, LlmSettings, ModelPrice, Settings
 from gold_agent.core.clock import Clock
 from gold_agent.storage.ops_repo import OpsRepo
 from gold_agent.timeutils.sessions import WIB
@@ -52,9 +53,9 @@ def worst_case_usd(llm: LlmSettings, route: LlmRoute, prompt_chars: int) -> floa
     hops = 1
     if llm.fallbacks == "default":
         prices, hops = list(llm.pricing_per_mtok.values()), 2
-    rate_in = max(max(price.input, price.cache_write) for price in prices)
-    rate_out = max(price.output for price in prices)
     tokens_in = prompt_chars / CHARS_PER_TOKEN
+    rate_in = max(max(p.input, p.cache_write) * p.factor(tokens_in) for p in prices)
+    rate_out = max(p.output * p.factor(tokens_in) for p in prices)
     return (hops * tokens_in * rate_in + route.max_tokens * rate_out) / 1e6
 
 
@@ -101,7 +102,8 @@ def cost_usd(price: ModelPrice | None, usage: Any) -> float:
     cached_read = getattr(usage, "cache_read_input_tokens", 0) or 0
     fresh = getattr(usage, "input_tokens", 0) or 0
     output = getattr(usage, "output_tokens", 0) or 0
-    total = (
+    factor = price.factor(fresh + cached_write + cached_read)
+    total = factor * (
         fresh * price.input
         + cached_write * price.cache_write
         + cached_read * price.cache_read
@@ -140,6 +142,44 @@ def wib_day_start(moment: datetime) -> datetime:
     return datetime.combine(local.date(), dtime(0, 0), tzinfo=WIB)
 
 
+def wib_month_start(moment: datetime) -> datetime:
+    local = moment.astimezone(WIB)
+    return datetime.combine(local.date().replace(day=1), dtime(0, 0), tzinfo=WIB)
+
+
+def days_left_in_month(moment: datetime) -> int:
+    """Days of the WIB month still to come, today included."""
+    local = moment.astimezone(WIB).date()
+    return calendar.monthrange(local.year, local.month)[1] - local.day + 1
+
+
+@dataclass(frozen=True)
+class Allowance:
+    """Where today's AI spend stands against its limits (every logged call and hold counted)."""
+
+    spent_today: float
+    spent_month: float
+    ceiling: float  # today's hard ceiling: the month's remainder shared over its days left
+    routine: float  # where routine calls stop today
+    monthly: float  # budget.llm_monthly_usd
+
+    def to_json(self) -> dict[str, float]:
+        return {
+            "spent_today_usd": round(self.spent_today, 4),
+            "spent_month_usd": round(self.spent_month, 4),
+            "ceiling_usd": round(self.ceiling, 4),
+            "routine_usd": round(self.routine, 4),
+            "monthly_usd": self.monthly,
+        }
+
+
+async def allowance(ops: OpsRepo, budget: BudgetSettings, now: datetime) -> Allowance:
+    today = await ops.llm_spend_since(wib_day_start(now))
+    month = await ops.llm_spend_since(wib_month_start(now))
+    ceiling = budget.daily_ceiling(month - today, days_left_in_month(now))
+    return Allowance(today, month, ceiling, budget.routine_share(ceiling), budget.llm_monthly_usd)
+
+
 class LlmClient:
     def __init__(
         self,
@@ -159,6 +199,7 @@ class LlmClient:
         breaker = settings.llm.circuit_breaker
         self.breaker = CircuitBreaker(breaker.failures, breaker.cooldown_seconds, clock)
         self.budget_state: BudgetState = "ok"  # the furthest the WIB day got (for alerts)
+        self.allowance: Allowance | None = None  # as of the newest admission
         self._budget_day: datetime | None = None
         self._admission = asyncio.Lock()
 
@@ -169,18 +210,16 @@ class LlmClient:
     def route(self, name: Route) -> LlmRoute:
         return getattr(self._settings.llm, name)
 
-    async def spent_today(self) -> float:
-        return await self._ops.llm_spend_since(wib_day_start(self._clock.now()))
-
-    def _note_budget(self, total: float) -> None:
+    def _note_budget(self, allowed: Allowance) -> None:
         """Track how far today's spend got: it only moves up within a WIB day, so a total that
         dips as reservations resolve does not flap the alerts."""
-        budget = self._settings.budget
+        self.allowance = allowed
+        total = allowed.spent_today
         state: BudgetState = (
             "exhausted"
-            if total > budget.llm_daily_usd
+            if total > allowed.ceiling
             else "reserve"
-            if total > budget.routine_daily_usd
+            if total > allowed.routine
             else "ok"
         )
         day = wib_day_start(self._clock.now())
@@ -193,13 +232,15 @@ class LlmClient:
     async def _admit(
         self, route: Route, *, priority: bool, prompt_chars: int, ref_id: str | None
     ) -> int:
-        """Hold this call's worst case in llm_usage, then check the WIB day's total (finished
-        calls and every hold, this one included): routine calls stop at the routine share of the
-        budget, priority calls (the signal decision, high-impact news) at the ceiling. The hold
-        comes first and lives in the shared table, so calls running at the same time, in any
-        process, cannot pass the ceiling together: at worst two that start together near it both
-        wait. This client's own admissions take turns, so its parallel calls (the desk's votes)
-        are admitted exactly. Returns the held row."""
+        """Hold this call's worst case in llm_usage, then check the spend (finished calls and
+        every hold, this one included) against today's allowance: the month's budget left,
+        shared over the days left in it. Routine calls stop at the routine share, priority calls
+        (the signal decision, high-impact news) at today's ceiling, and nothing passes the
+        monthly ceiling: once it is reached the AI is off until the 1st and the agent runs on
+        its own rules. The hold comes first and lives in the shared table, so calls running at
+        the same time, in any process, cannot pass a ceiling together. This client's own
+        admissions take turns, so its parallel calls (the desk's votes) are admitted exactly.
+        Returns the held row."""
         config = self.route(route)
         budget = self._settings.budget
         worst = worst_case_usd(self._settings.llm, config, prompt_chars)
@@ -213,20 +254,26 @@ class LlmClient:
                 error=IN_FLIGHT,
                 ref_id=ref_id,
             )
-            total = await self.spent_today()
-            self._note_budget(total)
-            if total <= (budget.llm_daily_usd if priority else budget.routine_daily_usd):
+            allowed = await allowance(self._ops, budget, self._clock.now())
+            self._note_budget(allowed)
+            limit = allowed.ceiling if priority else allowed.routine
+            if allowed.spent_today <= limit and allowed.spent_month <= allowed.monthly:
                 return hold
             await self._ops.delete_llm_usage(hold)
-        spent = total - worst
+        month, today = allowed.spent_month - worst, allowed.spent_today - worst
+        if month + worst > allowed.monthly or allowed.ceiling <= 0:
+            raise LlmUnavailable(
+                f"batas biaya AI bulanan ${allowed.monthly:.2f} tercapai (terpakai "
+                f"${month:.2f}); AI mati sampai tanggal 1, alat tetap jalan tanpa AI"
+            )
         if priority:
             raise LlmUnavailable(
-                f"batas biaya AI harian ${budget.llm_daily_usd:.2f} tercapai "
-                f"(terpakai ${spent:.2f})"
+                f"jatah biaya AI hari ini ${allowed.ceiling:.2f} tercapai (terpakai "
+                f"${today:.2f}; batas ${allowed.monthly:.2f} per bulan dibagi rata per hari)"
             )
         raise LlmUnavailable(
-            f"budget AI rutin hari ini terpakai (${spent:.2f} dari "
-            f"${budget.routine_daily_usd:.2f}); sisanya untuk keputusan sinyal dan berita penting"
+            f"jatah AI rutin hari ini terpakai (${today:.2f} dari ${allowed.routine:.2f}); "
+            "sisanya untuk keputusan sinyal dan berita penting"
         )
 
     async def _record(

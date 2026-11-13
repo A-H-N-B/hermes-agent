@@ -10,12 +10,13 @@ from pydantic import ValidationError
 
 from gold_agent.analysis.drivers import DriverKB
 from gold_agent.analysis.llm_client import (
-    FALLBACK_BETA,
     LlmClient,
     LlmFailed,
     LlmUnavailable,
+    allowance,
     cost_usd,
     usage_cost,
+    wib_day_start,
     worst_case_usd,
 )
 from gold_agent.analysis.triage import TriageEngine, TriageInputs, build_user_message, cluster_items
@@ -90,11 +91,16 @@ def inputs(c: NewsCluster) -> TriageInputs:
 
 
 def test_cost_uses_the_price_table(settings: Settings) -> None:
-    price = settings.llm.pricing_per_mtok["claude-opus-5-5"]
-    cost = cost_usd(price, usage(input_tokens=1_000_000, output_tokens=0, cache_read=0))
-    assert cost == pytest.approx(4.00)
-    cached = cost_usd(price, usage(input_tokens=0, output_tokens=0, cache_read=1_000_000))
-    assert cached == pytest.approx(0.20)
+    price = settings.llm.pricing_per_mtok["claude-haiku-5-5"]
+    cost = cost_usd(price, usage(input_tokens=100_000, output_tokens=0, cache_read=0))
+    assert cost == pytest.approx(0.01)  # $0.10 per million
+    cached = cost_usd(price, usage(input_tokens=0, output_tokens=0, cache_read=100_000))
+    assert cached == pytest.approx(0.001)  # $0.01 per million
+    # Haiku 5.5: a prompt over 100,000 tokens (cache reads included) pays 5x on everything.
+    short = cost_usd(price, usage(input_tokens=60_000, output_tokens=1000, cache_read=40_000))
+    long = cost_usd(price, usage(input_tokens=60_001, output_tokens=1000, cache_read=40_000))
+    assert short == pytest.approx((60_000 * 0.10 + 1000 * 0.50 + 40_000 * 0.01) / 1e6)
+    assert long == pytest.approx(5 * (60_001 * 0.10 + 1000 * 0.50 + 40_000 * 0.01) / 1e6)
 
 
 def test_a_fallback_answer_is_priced_hop_by_hop(settings: Settings) -> None:
@@ -119,13 +125,14 @@ async def test_triage_request_is_cached_fast_and_schema_bound(ctx: AppContext) -
     engine = make(ctx, fake)
     analysis = await engine.analyze(inputs(cluster()))
     assert analysis.origin == "llm" and not analysis.ai_pending
-    assert analysis.model == "claude-opus-5-5" and analysis.prompt_version == engine.prompt.version
+    assert analysis.model == "claude-haiku-5-5" and analysis.prompt_version == engine.prompt.version
     (request,) = fake.requests
-    assert request["model"] == "claude-opus-5-5"
+    assert request["model"] == "claude-haiku-5-5"
     assert request["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert "thinking" not in request  # always on for Opus 5.5; effort is the control
+    assert "thinking" not in request  # adaptive by default on Haiku 5.5; effort is the control
     assert request["output_config"] == {"effort": "low"}
-    assert request["fallbacks"] == "default" and request["betas"] == [FALLBACK_BETA]
+    # Haiku 5.5 has no server-side refusal fallback: the request must not ask for one.
+    assert "fallbacks" not in request and "betas" not in request
     assert request["output_format"] is TriageResult
     assert "<berita>" in request["messages"][0]["content"]
     assert fake.options[0] == {"timeout": 20.0, "max_retries": 0}
@@ -167,32 +174,53 @@ async def test_circuit_breaker_opens_after_repeated_failures(ctx: AppContext) ->
     assert len(fake.requests) == failures
 
 
-async def spend(ctx: AppContext, usd: float) -> None:
+async def spend(ctx: AppContext, usd: float, at: datetime = T0) -> None:
     await ctx.ops.add_llm_usage(
-        ts=T0, route="triage", model="claude-opus-5-5", cost_usd=usd, ok=True
+        ts=at, route="triage", model="claude-haiku-5-5", cost_usd=usd, ok=True
     )
 
 
-async def test_the_daily_budget_is_a_hard_ceiling_with_a_reserve_for_priority_calls(
+async def spent_today(ctx: AppContext) -> float:
+    return await ctx.ops.llm_spend_since(wib_day_start(ctx.clock.now()))
+
+
+def test_the_month_is_shared_evenly_over_the_days_left(settings: Settings) -> None:
+    budget = settings.budget
+    assert (budget.llm_monthly_usd, budget.llm_daily_usd) == (5.0, 1.0)
+    assert budget.daily_ceiling(spent_before_today=1.2, days_left=19) == pytest.approx(0.2)
+    assert budget.daily_ceiling(0.0, days_left=2) == 1.0  # never more than llm_daily_usd
+    assert budget.daily_ceiling(5.3, days_left=10) == 0.0  # the month is spent
+    assert budget.routine_share(0.2) == pytest.approx(0.1)  # priority_reserve_pct 50
+
+
+async def test_the_monthly_budget_is_paced_per_day_and_never_passed(
     ctx: AppContext, clock: ManualClock
 ) -> None:
-    budget = ctx.settings.budget
-    assert (budget.llm_daily_usd, budget.routine_daily_usd) == (20.0, 15.0)
-    fake = FakeAnthropic(parsed(triage_value()), parsed(triage_value()))
+    fake = FakeAnthropic(*[parsed(triage_value()) for _ in range(4)])
     client = LlmClient(ctx.settings, api_key=None, ops=ctx.ops, clock=ctx.clock, client=fake)
-    await spend(ctx, 14.95)  # one more routine call could pass the routine share
-    with pytest.raises(LlmUnavailable, match="budget AI rutin"):
+    # 13 Oct (WIB), 19 days left including today; $1.20 went earlier this month, so today's
+    # share is $3.80 / 19 = $0.20, and ordinary calls stop at half of it.
+    await spend(ctx, 1.2, at=T0 - timedelta(days=10))
+    await spend(ctx, 0.099)  # one more routine call could pass $0.10
+    with pytest.raises(LlmUnavailable, match=r"jatah AI rutin hari ini terpakai .*\$0.10"):
         await client.structured("triage", system="s", user="u", schema=TriageResult)
     assert client.budget_state == "reserve"
     await client.structured("triage", system="s", user="u", schema=TriageResult, priority=True)
-    await spend(ctx, 4.95)  # ~$19.90: one more call could pass the ceiling itself
-    with pytest.raises(LlmUnavailable, match=r"batas biaya AI harian \$20.00"):
+    await spend(ctx, 0.2 - await spent_today(ctx) - 0.0005)  # one more call could pass $0.20
+    with pytest.raises(LlmUnavailable, match=r"jatah biaya AI hari ini \$0.20 tercapai"):
         await client.structured("desk", system="s", user="u", schema=TriageResult, priority=True)
     assert client.budget_state == "exhausted" and len(fake.requests) == 1
-    assert await client.spent_today() < budget.llm_daily_usd
-    clock.advance(timedelta(days=1).total_seconds())  # a new WIB day starts from zero
+    assert await spent_today(ctx) < 0.2
+    clock.advance(timedelta(days=1).total_seconds())  # tomorrow: a fresh share of what is left
     await client.structured("triage", system="s", user="u", schema=TriageResult)
     assert client.budget_state == "ok"
+    # The month's $5 is used up: the AI is off until the 1st, whatever the day's share.
+    await spend(ctx, 5.0, at=clock.now())
+    with pytest.raises(LlmUnavailable, match=r"batas biaya AI bulanan \$5.00 tercapai"):
+        await client.structured("desk", system="s", user="u", schema=TriageResult, priority=True)
+    clock.set(datetime(2026, 10, 31, 17, 0, 1, tzinfo=UTC))  # 1 Nov 00:00:01 WIB
+    await client.structured("triage", system="s", user="u", schema=TriageResult)
+    assert len(fake.requests) == 3
 
 
 class Gate:
@@ -215,7 +243,8 @@ async def test_calls_running_together_cannot_pass_the_ceiling(ctx: AppContext) -
     fake.beta = SimpleNamespace(messages=gate)
     client = LlmClient(ctx.settings, api_key=None, ops=ctx.ops, clock=ctx.clock, client=fake)
     worst = worst_case_usd(ctx.settings.llm, ctx.settings.llm.triage, len("su"))
-    await spend(ctx, 20.0 - 2.5 * worst)  # room for two calls' worst case, not three
+    ceiling = (await allowance(ctx.ops, ctx.settings.budget, ctx.clock.now())).ceiling
+    await spend(ctx, ceiling - 2.5 * worst)  # room for two calls' worst case, not three
     calls = [
         asyncio.create_task(
             client.structured("triage", system="s", user="u", schema=TriageResult, priority=True)
@@ -227,12 +256,12 @@ async def test_calls_running_together_cannot_pass_the_ceiling(ctx: AppContext) -
             break
         await asyncio.sleep(0.01)
     assert gate.started == 2  # the third was refused while the first two were running
-    assert await client.spent_today() == pytest.approx(20.0 - 0.5 * worst)  # held worst cases
+    assert await spent_today(ctx) == pytest.approx(ceiling - 0.5 * worst)  # held worst cases
     gate.open.set()
     results = await asyncio.gather(*calls, return_exceptions=True)
     assert sum(isinstance(r, LlmUnavailable) for r in results) == 1
     real = sum(r.cost_usd for r in results if not isinstance(r, BaseException))
-    assert await client.spent_today() == pytest.approx(20.0 - 2.5 * worst + real)  # released
+    assert await spent_today(ctx) == pytest.approx(ceiling - 2.5 * worst + real)  # released
 
 
 async def test_rules_only_mode_and_missing_key(ctx: AppContext) -> None:
@@ -300,9 +329,9 @@ async def test_deep_analysis_uses_the_large_model_and_keeps_quoted_evidence(
     first = await engine.analyze(inputs(cluster()))
     assert engine.needs_deep(first)
     deepened = await engine.deepen(first, inputs(cluster()))
-    assert deepened.deep is not None and deepened.deep_model == "claude-opus-5-5"
+    assert deepened.deep is not None and deepened.deep_model == "claude-haiku-5-5"
     assert deepened.deep.evidence == ["signals fewer rate cuts"]
-    assert fake.requests[1]["model"] == "claude-opus-5-5"
+    assert fake.requests[1]["model"] == "claude-haiku-5-5"
     assert fake.requests[1]["output_config"] == {"effort": "high"}
 
 
@@ -330,8 +359,12 @@ def test_config_refuses_routes_the_api_would_reject_or_could_not_price(
     settings: Settings,
 ) -> None:
     raw = settings.model_dump(mode="json")
-    raw["llm"]["triage"]["thinking"] = "disabled"  # Opus 5.5: 400 at every effort
+    raw["llm"]["triage"] |= {"model": "claude-opus-5-5", "thinking": "disabled"}  # 400 always
     with pytest.raises(ValidationError, match="cannot run with thinking disabled"):
+        Settings.model_validate(raw)
+    raw = settings.model_dump(mode="json")
+    raw["llm"]["fallbacks"] = "default"  # Haiku 5.5 has no server-side refusal fallback
+    with pytest.raises(ValidationError, match=r"set llm\.fallbacks: off"):
         Settings.model_validate(raw)
     raw = settings.model_dump(mode="json")
     raw["llm"]["deep"]["model"] = "claude-unpriced-9"

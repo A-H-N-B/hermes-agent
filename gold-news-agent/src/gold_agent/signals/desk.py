@@ -2,7 +2,7 @@
 
 The engine proposes a candidate: a direction from news + macro + technical + price (or a
 momentum impulse, signals/impulse.py), every hard filter passed, levels computed, its odds
-estimated. `llm.desk_votes` independent Opus 5.5 answers (route `llm.desk`, effort low so a
+estimated. `llm.desk_votes` independent Claude answers (route `llm.desk`, Haiku 5.5, so a
 review takes seconds) review the whole picture in parallel and a strict majority decides (a tie
 holds): one unlucky answer cannot send or block a trade alone. An answer that does not come in
 time counts for nothing. Guardrails keep that safe:
@@ -52,6 +52,7 @@ from gold_agent.timeutils.sessions import SESSION_LABEL_ID, fmt_wib
 
 JSON = dict[str, Any]
 MODEL_NAMES = {
+    "claude-haiku-5-5": "Haiku 5.5",
     "claude-fable-5-1": "Fable 5.1",
     "claude-opus-5-5": "Opus 5.5",
     "claude-opus-5": "Opus 5",
@@ -74,7 +75,7 @@ def model_name(model: str | None) -> str:
 
 
 def desk_label(settings: Settings) -> str:
-    """Who decides, for people: "Opus 5.5"."""
+    """Who decides, for people: "Haiku 5.5"."""
     return model_name(settings.llm.desk.model)
 
 

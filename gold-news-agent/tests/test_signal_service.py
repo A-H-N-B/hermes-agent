@@ -126,20 +126,20 @@ async def test_news_with_confirming_price_publishes_and_persists_one_signal(
     await service.handle_analysis(msg("news.analyses", story))
     assert await drain(context, STREAM_SIGNALS) == []  # Opus decides first
     assert service.last_state is not None and service.last_state.action == "WAIT"
-    assert service.last_state.wait_reasons[0].startswith("menunggu keputusan AI (Opus 5.5)")
+    assert service.last_state.wait_reasons[0].startswith("menunggu keputusan AI (Haiku 5.5)")
     await decided(service)
 
     signals = await drain(context, STREAM_SIGNALS)
     assert [s["action"] for s in signals] == ["BUY"]
     review = signals[0]["review"]
-    assert review["model"] == "claude-opus-5-5" and review["confidence"] == 72
-    assert review["models"] == ["claude-opus-5-5"]
+    assert review["model"] == "claude-haiku-5-5" and review["confidence"] == 72
+    assert review["models"] == ["claude-haiku-5-5"]
     assert review["reasons"] == ["berita dan chart M15 searah"]
     assert (review["agree"], review["votes"], review["dissent"]) == (3, 3, None)
-    # Three quick Opus 5.5 answers on the same brief.
-    assert [r["model"] for r in fake.requests] == ["claude-opus-5-5"] * 3
+    # Three quick Haiku 5.5 answers on the same brief.
+    assert [r["model"] for r in fake.requests] == ["claude-haiku-5-5"] * 3
     for request in fake.requests:
-        assert request["output_config"]["effort"] == "low"
+        assert request["output_config"]["effort"] == "medium"
         assert '<kandidat arah="BUY"' in request["messages"][0]["content"]
     logged = await context.ops.kv_get(KV_DESK)
     assert logged is not None and [r["decision"] for r in logged["reviews"]] == ["BUY"]
@@ -240,7 +240,7 @@ async def test_opus_can_hold_a_candidate_and_is_not_asked_again_until_something_
     state = service.last_state
     assert state is not None and state.action == "WAIT"
     assert state.wait_reasons == [
-        "AI (Opus 5.5) menahan BUY (3/3 suara): harga sudah naik jauh sebelum "
+        "AI (Haiku 5.5) menahan BUY (3/3 suara): harga sudah naik jauh sebelum "
         "berita, risiko mengejar"
     ]
     clock.advance(30)
@@ -263,7 +263,7 @@ async def test_opus_picks_the_chart_and_the_trade_is_sized_on_it(
     (signal,) = await drain(context, STREAM_SIGNALS)
     assert (signal["timeframe"], signal["timeframe_reason"]) == (
         "M5",
-        "M5 dipilih AI (Opus 5.5)",
+        "M5 dipilih AI (Haiku 5.5)",
     )
     assert signal["sl_distance"] == 2.4  # 1.2 ATR of M5 (2.0), not of M15
     created = datetime.fromisoformat(signal["created_at_utc"])
@@ -329,7 +329,7 @@ async def test_an_answer_that_does_not_come_counts_for_nothing(
     assert await drain(context, STREAM_SIGNALS) == []
     assert service.last_state is not None
     assert service.last_state.wait_reasons[0] == (
-        "AI (Opus 5.5) menahan BUY (2/3 suara): CPI 20 menit lagi"
+        "AI (Haiku 5.5) menahan BUY (2/3 suara): CPI 20 menit lagi"
     )
     # One answer times out: the two that came decide, and both approve.
     service2, context2, _ = await service_factory(
@@ -351,19 +351,21 @@ async def feed_rally2(service: SignalService, clock: ManualClock, start: datetim
         await service.handle_context(msg("market.context", bullish(clock.now(), 2645.0 + minute)))
 
 
-async def test_past_the_daily_ceiling_the_engine_decides_alone_and_says_why(
+async def test_past_the_monthly_ceiling_the_engine_decides_alone_and_says_why(
     service_factory: Factory, clock: ManualClock
 ) -> None:
     service, context, fake = await service_factory()
     await context.ops.add_llm_usage(
-        ts=T0, route="triage", model="claude-opus-5-5", cost_usd=20.0, ok=True
+        ts=T0, route="triage", model="claude-haiku-5-5", cost_usd=5.0, ok=True
     )
     await feed_rally(service, clock)
     await service.handle_analysis(msg("news.analyses", analysis(first_seen=T0)))
     await decided(service)
     (signal,) = await drain(context, STREAM_SIGNALS)
     assert signal["review"]["model"] is None and fake.requests == []
-    assert signal["review"]["note"].startswith("AI tidak dipakai: batas biaya AI harian $20.00")
+    assert signal["review"]["note"].startswith(
+        "AI tidak dipakai: batas biaya AI bulanan $5.00 tercapai"
+    )  # the signal still goes out, from the engine alone
 
 
 # ------------------------------------------------------------------ outlook scheduling

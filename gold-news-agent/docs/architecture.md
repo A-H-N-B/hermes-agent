@@ -511,7 +511,36 @@ kedua yang diuji terhadap data acak:
 - Harga yang persis sama dengan aplikasi Finex hanya dari server Finex sendiri: terminal MT5 Finex
   di komputer yang sama (alat hanya membaca, tidak pernah login).
 
+### ADR-030 Semua AI di Claude Haiku 5.5, batas keras $5 per bulan — Diterapkan
+
+- Pengguna (13 Nov 2026): "model AI pakai Haiku 5.5 saja, 5 dollar 1 bulan tidak boleh lebih;
+  kalau lebih AI mati sendiri, web tetap jalan tanpa AI". Semua rute (`triage`, `triage_high`,
+  `deep`, `outlook`, `brief`, `desk`, `chat`) memakai `claude-haiku-5-5`: $0,10 / $0,50 per
+  juta token (40× lebih murah dari Opus 5.5), tulis cache 5 menit $0,125, baca cache $0,01.
+  Prompt di atas 100.000 token membayar 5× di semua kategori: `ModelPrice.long_prompt_tokens` /
+  `long_prompt_factor` ikut dihitung di biaya nyata dan di hold biaya terburuk, walau prompt
+  alat ini jauh lebih pendek.
+- Haiku 5.5 tidak punya *fallback* refusal server-side (daftar model fallback = 400): `llm.fallbacks:
+  "off"`, dan config menolak `default` bersama rute Haiku. Refusal tetap ditangani klien
+  (jawaban aturan).
+- Batas: `budget.llm_monthly_usd` (5) per bulan kalender WIB. Jatah hari ini = (batas bulanan −
+  pemakaian sebelum hari ini) ÷ jumlah hari tersisa (hari ini termasuk), paling banyak
+  `llm_daily_usd` (1): AI hidup setiap hari, hari sepi menyisakan untuk hari berikutnya, dan
+  total bulan tidak pernah lewat $5. Panggilan rutin berhenti di separuh jatah
+  (`priority_reserve_pct` 50); keputusan sinyal dan berita penting memakai sisanya. Hold biaya
+  terburuk di `llm_usage` tetap menjaga panggilan bersamaan dari proses mana pun.
+- Kebutuhan penuh hari ramai di Haiku ±$0,5, jatah ±$0,17–0,28: sebagian berita biasa memakai
+  aturan setiap hari. Saat $5 habis, `LlmUnavailable("batas biaya AI bulanan ...")`: semua
+  pemanggil sudah punya jalur tanpa AI (aturan triage, mesin sinyal sendiri, ringkasan program
+  di Tanya AI), dashboard dan Telegram tetap jalan; header menulis "AI mati · batas $5/bulan
+  tercapai" dan hidup lagi tanggal 1.
+- Effort: triage low, triage_high/desk/chat/brief medium (bawaan Haiku), deep high.
+
 ## Estimasi biaya LLM (untuk Q4)
+
+**Sejak 13 Nov 2026 (ADR-030) semua rute memakai Claude Haiku 5.5 ($0,10 / $0,50 per juta token,
+baca cache $0,01) dengan batas keras $5 per bulan; tabel di bawah adalah perhitungan zaman Opus,
+disimpan sebagai riwayat. Di Haiku angka yang sama kira-kira 40× lebih kecil.**
 
 Harga per 1 juta token (Claude API, 6 Okt 2026):
 

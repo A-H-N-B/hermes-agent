@@ -5,10 +5,10 @@ The program writes the facts into one brief: the price (and whether it was re-ba
 broker's), the engine's state and its reasons, the active signal with its levels and odds, a
 momentum impulse under way, when to click (the timing view: blackout around the next release,
 the outlook hours leaning BUY or SELL, the price levels that would confirm them), the charts,
-upcoming events, recent news, related markets and the day's fundamentals. Opus 5.5 answers from
-that brief in plain Indonesian, citing only its numbers (prompts/chat_system.md). Without the AI
-(disabled, outage, budget, the daily cap) the answer is the program's own summary of the same
-facts, so a question always gets an answer.
+upcoming events, recent news, related markets and the day's fundamentals. Claude (`llm.chat`)
+answers from that brief in plain Indonesian, citing only its numbers (prompts/chat_system.md).
+Without the AI (disabled, outage, budget, the daily cap) the answer is the program's own summary
+of the same facts, so a question always gets an answer.
 """
 
 from __future__ import annotations

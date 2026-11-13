@@ -189,8 +189,8 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      30 hari, batas bawah 95%-nya di atas 50%) menggantikan bawaan;
    - timeframe yang spread-nya terlalu besar dibanding SL (`max_cost_ratio`) dilewati;
    - **AI memutuskan akhir** setiap sinyal: setuju (BUY/SELL) atau TUNGGU, dan memilih
-     chart-nya dari timeframe yang layak. Tiga jawaban **Claude Opus 5.5** terpisah dan
-     bersamaan (`llm.desk_votes`, effort low, selesai dalam hitungan detik); trade lolos bila
+     chart-nya dari timeframe yang layak. Tiga jawaban **Claude Haiku 5.5** terpisah dan
+     bersamaan (`llm.desk_votes`, selesai dalam hitungan detik); trade lolos bila
      mayoritas setuju. Jumlah suara dan alasan suara yang menahan tampil di sinyal. Angka harga,
      SL, dan TP tetap dihitung sistem. TUNGGU dari AI ditanya ulang setelah 3 menit, atau
      langsung bila ada impuls baru;
@@ -199,13 +199,17 @@ Perintah itu menolak nilai yang membuat program tidak bisa jalan dan menyebut fi
      BUY/SELL di chart M5 tanpa menunggu berita, asal skor berita/makro tidak melawan dan harga
      belum terlalu jauh (≤ 1,5 ATR) dari awal gerak. Ini yang mencegah gerak besar terlewat.
    Timeframe tetap juga bisa: `uv run gold-agent config set trading.timeframe.select M5`.
-6. Biaya AI (`budget`). `llm_daily_usd` (bawaan **$20/hari**) adalah batas keras: tidak ada
-   panggilan Claude yang dimulai bila bisa melewatinya. Berita biasa, outlook, dan laporan
-   berhenti di 75 % (`priority_reserve_pct: 25`, jadi $15); sisa $5 khusus untuk keputusan sinyal
-   dan berita berdampak tinggi. Satu review AI sekitar $0,15 dan dibatasi
-   `llm.desk_reviews_per_day` (60) review per hari; satu pertanyaan Tanya AI sekitar $0,05,
-   paling banyak `llm.chat_per_day` (60) per hari (setelah itu dijawab program tanpa AI). Contoh menurunkan batas ke $10:
-   `uv run gold-agent config set budget.llm_daily_usd 10`.
+6. Biaya AI (`budget`). Semua AI memakai **Claude Haiku 5.5** ($0,10 / $0,50 per juta token).
+   `llm_monthly_usd` (bawaan **$5 per bulan**) adalah batas keras: tidak ada panggilan Claude
+   yang dimulai bila bisa melewatinya. Batas itu dibagi rata: tiap hari boleh memakai sisa bulan
+   dibagi jumlah hari yang tersisa (hari sepi menyisakan lebih untuk hari berikutnya). Berita
+   biasa, outlook, laporan, dan Tanya AI berhenti di separuh jatah hari itu
+   (`priority_reserve_pct: 50`); separuhnya untuk keputusan sinyal dan berita berdampak tinggi.
+   Bila $5 bulan itu habis, AI mati sampai tanggal 1: dashboard, Telegram, dan sinyal tetap
+   jalan dengan aturan program (sinyal ditandai "tanpa review AI"). Header dashboard menulis
+   "AI $x / $5 bulan ini". Satu review AI sekitar $0,004 dan satu pertanyaan Tanya AI sekitar
+   $0,001. Contoh menaikkan batas ke $10:
+   `uv run gold-agent config set budget.llm_monthly_usd 10`.
 7. Fundamental harian (`market.fundamentals_refresh_minutes`, bawaan 60). Bias harian emas
    dibangun dari: yield riil AS 10 tahun dan yield 2 tahun (Treasury AS), inflasi ekspektasi
    (breakeven), tren dolar, posisi spekulan besar di futures emas COMEX (CFTC COT), arus ETF
@@ -295,7 +299,7 @@ Berhenti: tekan **Ctrl+C**. Perintah bot yang berguna: `/signal`, `/outlook`, `/
 Yang baru di halaman Live dan bot:
 
 - **Tanya AI.** Di dashboard, kartu "Tanya AI": tulis "kapan aku harus buy?" lalu Enter. Di
-  Telegram: `/tanya kapan aku harus sell?`, atau ketik pesan biasa tanpa `/`. Claude Opus 5.5
+  Telegram: `/tanya kapan aku harus sell?`, atau ketik pesan biasa tanpa `/`. Claude Haiku 5.5
   menjawab dari data alat ini saat itu (harga, sinyal aktif, impuls, jam rawan rilis, berita):
   BUY, SELL, atau TUNGGU dulu, lalu yang harus dipantau. Bukan saran keuangan.
 - **Notifikasi.** Sinyal BUY/SELL baru otomatis masuk Telegram. Di dashboard klik tombol

@@ -212,7 +212,8 @@ async def test_dashboard_pages_live_push_and_safety(dashboard: DashboardService)
         await page.fill("#credit-input", "9.85")
         await page.click("#credit-form button[type=submit]")
         await page.wait_for_selector("#credit-status:has-text('Tersimpan')")
-        assert (await page.text_content("#credit") or "").startswith("Claude $9.85")
+        assert "$9.85" in (await page.text_content("#credit-info") or "")
+        assert (await page.text_content("#credit") or "") == "AI: tanpa API key"
         sources = await page.text_content("#sources-table") or ""
         assert "bls_latest" in sources and "down" in sources and "HTTP 403" in sources
 

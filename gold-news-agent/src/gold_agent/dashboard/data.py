@@ -6,7 +6,7 @@ import dataclasses
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from gold_agent.analysis.llm_client import wib_day_start
+from gold_agent.analysis.llm_client import wib_day_start, wib_month_start
 from gold_agent.assistant.chat import ChatFacts, gather_facts
 from gold_agent.core.app import AppContext
 from gold_agent.dashboard.indicators_view import (
@@ -343,7 +343,8 @@ class DashboardData:
             "context": context_view(context),
             "context_age_seconds": (now - context.ts).total_seconds() if context else None,
             "llm_cost_today": round(await ctx.ops.llm_spend_since(wib_day_start(now)), 4),
-            "llm_budget": ctx.settings.budget.llm_daily_usd,
+            "llm_month": round(await ctx.ops.llm_spend_since(wib_month_start(now)), 4),
+            "llm_monthly_budget": ctx.settings.budget.llm_monthly_usd,
             "heartbeats": {
                 name: {"ts": _iso(ts), "age_seconds": (now - ts).total_seconds()}
                 for name, ts in sorted(heartbeats.items())

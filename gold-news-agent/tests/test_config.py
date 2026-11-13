@@ -134,6 +134,17 @@ def test_the_impulse_and_chat_knobs_stay_in_range() -> None:
         Settings.model_validate(raw)
 
 
+def test_the_monthly_ai_budget_and_long_prompt_prices_stay_in_range() -> None:
+    raw = _settings_dict()
+    raw["budget"]["llm_monthly_usd"] = -1
+    with pytest.raises(ValidationError, match="llm_monthly_usd"):
+        Settings.model_validate(raw)
+    raw = _settings_dict()
+    raw["llm"]["pricing_per_mtok"]["claude-haiku-5-5"]["long_prompt_factor"] = 0.5  # a discount
+    with pytest.raises(ValidationError, match="long_prompt_factor"):
+        Settings.model_validate(raw)
+
+
 def test_execution_cannot_be_enabled_from_config() -> None:
     raw = _settings_dict()
     raw["execution_enabled"] = True

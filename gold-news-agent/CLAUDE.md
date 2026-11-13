@@ -312,5 +312,14 @@ uv run pre-commit install --hook-type pre-commit --hook-type pre-push
   when `terminal64.exe` runs (`terminal_running`, injectable `running`): `initialize()` would
   start the terminal itself (up to ~60 s, then a login prompt). The Live price line shows
   Bid · Ask · session · feed in words.
+  Haiku + $5/month (13 Nov, ADR-030): every route on `claude-haiku-5-5` (no server-side refusal
+  fallback: `llm.fallbacks: "off"`, quoted because YAML 1.1 reads off as false; config rejects
+  "default" with a Haiku route). `budget.llm_monthly_usd` (5) per WIB calendar month, paced:
+  `BudgetSettings.daily_ceiling` = (monthly − spent before today) / days left, capped by
+  `llm_daily_usd` (1); routine calls stop at `routine_share` (`priority_reserve_pct` 50).
+  `llm_client.allowance()` reads both totals (holds included); `_admit` refuses past the day's
+  share or the month ("AI mati sampai tanggal 1"), callers fall back to rules. `ModelPrice`
+  `long_prompt_tokens`/`long_prompt_factor` (Haiku: > 100K tokens = 5x) in real and worst-case
+  cost. `/api/credit` = `Allowance.to_json()` + `ai_on`; header chip "AI $x / $5 bulan ini".
 - Phase 8 (order execution) is NOT built: it needs explicit approval after ≥ 2–4 weeks of
   recorded paper trading.

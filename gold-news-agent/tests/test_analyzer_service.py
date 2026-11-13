@@ -75,7 +75,7 @@ async def test_relevant_story_is_triaged_published_and_timed(
     published = Analysis.model_validate(message.data)
     assert published.cluster_id == "c1" and published.triage.direction_gold == "bearish"
     stored = await context.news.get_analysis("c1")
-    assert stored is not None and stored.model == "claude-opus-5-5"
+    assert stored is not None and stored.model == "claude-haiku-5-5"
     stages = {s.stage: s for s in await context.ops.latency_samples(T0 - timedelta(minutes=1))}
     assert stages["triaged"].seconds_from_first_seen == pytest.approx(2.0)
     assert len(fake.requests) == 1
@@ -176,25 +176,27 @@ async def test_llm_outage_degrades_to_rules_and_raises_one_health_alert(
     assert "rules-only" in alerts[0]["title"]
 
 
-async def test_the_daily_ai_budget_drops_ordinary_news_first_and_says_so_once(
+async def test_the_days_ai_share_drops_ordinary_news_first_and_says_so_once(
     service_factory: Callable[..., Any], clock: ManualClock
 ) -> None:
     service, context, fake = await service_factory(parsed(triage_value(impact_score=2)))
+    # 13 Oct: $5 over the 19 days left = $0.26 today; ordinary news stops at half of it.
     await context.ops.add_llm_usage(
-        ts=T0, route="triage", model="claude-opus-5-5", cost_usd=15.0, ok=True
+        ts=T0, route="triage", model="claude-haiku-5-5", cost_usd=0.14, ok=True
     )
     for n in range(2):
         result = await service.handle_cluster(
             cluster(f"Gold rallies as dollar slides, part {n}", cid=f"c{n}")
         )
         assert result is not None and result.origin == "rules"
-        assert any("budget AI rutin" in note for note in result.notes)
+        assert any("jatah AI rutin" in note for note in result.notes)
     assert fake.requests == []
     alerts = [m.data for m in await drain(context, STREAM_ALERTS)]
     assert [(a["kind"], a["title"]) for a in alerts] == [
-        ("budget", "Budget AI rutin hari ini terpakai")
+        ("budget", "Jatah AI rutin hari ini terpakai")
     ]
-    assert "$15.00" in alerts[0]["detail"] and "$20.00" in alerts[0]["detail"]
+    detail = alerts[0]["detail"]
+    assert "$0.13" in detail and "$0.26" in detail and "$5.00 per bulan" in detail
     tomorrow = T0 + timedelta(days=1)
     clock.set(tomorrow + timedelta(seconds=2))
     result = await service.handle_cluster(

@@ -98,13 +98,18 @@ risk:
   volume_step: 0.01
 
 budget:
-  # Hard ceiling on Claude API spend per WIB day: no call starts once it would pass it (each
-  # call reserves its worst case while it runs, so calls running together cannot overshoot).
-  llm_daily_usd: 20.0
-  # Routine calls (ordinary headlines, the hourly outlook narrative, reports) stop at
-  # (100 - this)% of the ceiling; the rest is kept for the signal decision (AI committee) and
+  # Hard ceiling on Claude API spend per calendar month (WIB): no call starts once it would pass
+  # it (each call reserves its worst case while it runs, so calls running together cannot
+  # overshoot). Reached = the AI is off until the 1st; the dashboard, Telegram and signals keep
+  # running on the program's own rules.
+  llm_monthly_usd: 5.0
+  # Each day may spend what is left of the month divided by the days left in it (so the AI lasts
+  # the whole month and a quiet day leaves more for later), never more than this.
+  llm_daily_usd: 1.0
+  # Routine calls (ordinary headlines, the hourly outlook narrative, reports, Tanya AI) stop at
+  # (100 - this)% of the day's share; the rest is kept for the signal decision (AI desk) and
   # high-impact news (a release or impact >= 4).
-  priority_reserve_pct: 25
+  priority_reserve_pct: 50
   paid_data_monthly_usd: 0 # Q4: enables Twelve Data / X API / premium feeds when > 0
 
 notifications:
@@ -189,64 +194,69 @@ llm:
   provider: anthropic
   enabled: true # false = rules-only mode
   deep_min_impact: 3
-  # Every route on Claude Opus 5.5. Thinking is always on (thinking: disabled is a 400), so
-  # `effort` is the control for depth, latency and cost; max_tokens leaves room for the
-  # thinking, which counts toward it.
+  # Every route on Claude Haiku 5.5 ($0.10 / $0.50 per million tokens: 40x cheaper than Opus 5.5,
+  # so $5 a month goes a long way). Adaptive thinking is on by default and `effort` controls
+  # depth, latency and cost; max_tokens leaves room for the thinking, which counts toward it.
   triage:
-    model: claude-opus-5-5
+    model: claude-haiku-5-5
     effort: low # every ordinary headline: keeps thinking short so triage stays fast
     timeout_seconds: 20
     max_tokens: 4096
   triage_high:
-    model: claude-opus-5-5
+    model: claude-haiku-5-5
     effort: medium # a release or rules impact >= 4: the reading the news score leans on most
     timeout_seconds: 40
     max_tokens: 8192
   deep:
-    model: claude-opus-5-5
+    model: claude-haiku-5-5
     effort: high # impact >= deep_min_impact: worth the extra thought
     timeout_seconds: 90
     max_tokens: 16000
   outlook:
-    model: claude-opus-5-5
+    model: claude-haiku-5-5
     effort: low # the narrative only: it never edits the table, so the budget goes to accuracy
     timeout_seconds: 120
     max_tokens: 16000
   brief:
-    model: claude-opus-5-5 # daily brief + weekly review
-    effort: high
+    model: claude-haiku-5-5 # daily brief + weekly review
+    effort: medium
     timeout_seconds: 300
     max_tokens: 16000
-  # The final BUY / SELL / WAIT and timeframe of every signal: independent Opus 5.5 answers in
-  # parallel, a strict majority approves (a tie holds). Effort low keeps a review to seconds, so
-  # a move is not over before the answer comes; an answer slower than timeout_seconds counts
-  # for nothing and the others decide.
+  # The final BUY / SELL / WAIT and timeframe of every signal: independent Haiku 5.5 answers in
+  # parallel, a strict majority approves (a tie holds). Haiku answers in seconds even at its
+  # default effort (medium), so a move is not over before the answer comes; an answer slower
+  # than timeout_seconds counts for nothing and the others decide.
   desk:
-    model: claude-opus-5-5
-    effort: low
+    model: claude-haiku-5-5
+    effort: medium
     timeout_seconds: 25
     max_tokens: 4096
   desk_votes: 3 # answers per review, run in parallel
-  # A review costs about $0.15 (three short Opus answers): 60 a day stays under $10 even on the
-  # busiest day; beyond it the engine decides alone (labelled "tanpa review AI").
+  # A review costs about $0.004 (three short Haiku answers); beyond this many a day, or once the
+  # day's AI share is spent, the engine decides alone (labelled "tanpa review AI").
   desk_reviews_per_day: 60
   # Questions you ask (dashboard "Tanya AI", Telegram /tanya or a plain message): answered from
   # everything the agent knows right now. A routine call (it stops at the routine share of the
   # budget); beyond chat_per_day the agent answers from its own numbers without AI.
   chat:
-    model: claude-opus-5-5
-    effort: low # an answer in seconds; the facts come from the program
+    model: claude-haiku-5-5
+    effort: medium # an answer in seconds; the facts come from the program
     timeout_seconds: 60
     max_tokens: 6000
   chat_per_day: 60
-  fallbacks: default # a refused request is retried server-side on the recommended model
+  # Server-side refusal fallback: Claude Haiku 5.5 has none (a declined request stays declined;
+  # the agent then answers from its own rules), so it must stay off.
+  fallbacks: "off"
   circuit_breaker:
     failures: 5
     cooldown_seconds: 120
-  # USD per million tokens (Claude API list prices checked 2026-10-06; update when they change).
+  # USD per million tokens (Claude API list prices checked 2026-11-13; update when they change).
   # cache_write = 5-minute cache writes (1.25x input), cache_read = cached prefix reads.
   pricing_per_mtok:
-    claude-haiku-5-5: { input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01 }
+    # Haiku 5.5 prompts over 100,000 tokens pay 5x (this agent's prompts are far shorter).
+    claude-haiku-5-5:
+      { input: 0.10, output: 0.50, cache_write: 0.125, cache_read: 0.01,
+        long_prompt_tokens: 100000, long_prompt_factor: 5.0 }
     claude-sonnet-5-5: { input: 2.00, output: 10.00, cache_write: 2.50, cache_read: 0.20 }
     claude-opus-5-5: { input: 4.00, output: 20.00, cache_write: 5.00, cache_read: 0.20 }
     # Possible server-side refusal fallbacks (billed at their own rates when they serve).
