@@ -20,16 +20,23 @@ from gold_agent.analysis.llm_client import (
     worst_case_usd,
 )
 from gold_agent.analysis.triage import TriageEngine, TriageInputs, build_user_message, cluster_items
-from gold_agent.config import Settings
+from gold_agent.config import Settings, load_settings
 from gold_agent.core.app import AppContext
 from gold_agent.core.clock import ManualClock
 from gold_agent.econ_calendar.events import load_events
 from gold_agent.econ_calendar.release_parser import ReleaseParser
 from gold_agent.models import DeepAnalysis, NewsCluster, TriageResult
 from gold_agent.processing.prefilter import Prefilter
+from tests.conftest import ai_everywhere
 from tests.fakes import FakeAnthropic, parsed, timeout_error, usage
 
 T0 = datetime(2026, 10, 13, 12, 30, tzinfo=UTC)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    """Every AI path on: these tests are about the AI's own mechanics."""
+    return ai_everywhere(load_settings(local=False))
 
 
 def triage_value(**extra: Any) -> TriageResult:
@@ -286,30 +293,38 @@ async def test_llm_claims_are_checked_against_the_source(ctx: AppContext) -> Non
     assert analysis.triage.confidence < 0.7
 
 
-async def test_release_numbers_stay_authoritative_over_the_llm(ctx: AppContext) -> None:
+async def test_release_numbers_need_no_ai_and_stay_authoritative_over_it(
+    ctx: AppContext,
+) -> None:
     title = "US CPI MoM 0.5% vs 0.3% exp"
     reading = ReleaseParser(load_events()).parse(title, now=T0, first_seen_at=T0)
-    assert reading is not None
-    llm_says = triage_value(
-        category="us_inflation",
-        direction_gold="bullish",  # contradicts the numbers
-        impact_score=2,
-        evidence=[title],
-        surprise={"actual": 0.5, "forecast": 0.3, "previous": None, "unit": "%"},
-    )
-    fake = FakeAnthropic(parsed(llm_says))
+    assert reading is not None and reading.forecast is not None
+    fake = FakeAnthropic()
     analysis = await make(ctx, fake).analyze(
         TriageInputs(
             cluster=cluster(title), items=cluster_items(cluster(title), []), release=reading
         )
     )
-    # A release is read with more thought (route triage_high) than an ordinary headline.
+    assert fake.requests == []  # the parser read the numbers: nothing for the AI to add
+    assert analysis.origin == "fast_path" and not analysis.ai_pending
+    assert "angka rilis dibaca mesin" in analysis.notes[0]
+    assert analysis.triage.direction_gold == "bearish" and analysis.triage.impact_score == 5
+    assert analysis.release is not None and analysis.release.bucket == "strong_bearish"
+    # Without a forecast the AI reads it (more thought, route triage_high), but the direction
+    # still comes from the parser, never from the AI.
+    bare = "US CPI MoM 0.5%"
+    unforecast = ReleaseParser(load_events()).parse(bare, now=T0, first_seen_at=T0)
+    assert unforecast is not None and unforecast.forecast is None
+    llm_says = triage_value(category="us_inflation", direction_gold="bullish", impact_score=2)
+    fake = FakeAnthropic(parsed(llm_says))
+    read = await make(ctx, fake).analyze(
+        TriageInputs(
+            cluster=cluster(bare), items=cluster_items(cluster(bare), []), release=unforecast
+        )
+    )
     assert fake.requests[0]["output_config"] == {"effort": "medium"}
     assert fake.options[0] == {"timeout": 40.0, "max_retries": 0}
-    assert analysis.origin == "fast_path" and not analysis.ai_pending
-    assert analysis.triage.direction_gold == "bearish"
-    assert analysis.triage.impact_score == 5
-    assert analysis.release is not None and analysis.release.bucket == "strong_bearish"
+    assert read.triage.direction_gold == unforecast.direction_gold != "bullish"
 
 
 async def test_deep_analysis_uses_the_large_model_and_keeps_quoted_evidence(

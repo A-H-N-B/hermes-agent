@@ -6,6 +6,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
+from gold_agent.config import Settings, load_settings
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import STREAM_NOTIFY
 from gold_agent.core.clock import ManualClock
@@ -14,11 +17,18 @@ from gold_agent.models import Candle, SignalOutcome
 from gold_agent.services.evaluator import EvaluatorService
 from gold_agent.signals.engine import KV_EVENT_MOVES
 from tests.builders import analysis
+from tests.conftest import ai_everywhere
 from tests.fakes import FakeAnthropic, parsed, timeout_error
 from tests.test_paper import buy
 
 # Wednesday 14 Oct 2026, 05:31 WIB: the nightly slot (05:30) has just passed.
 NIGHTLY = datetime(2026, 10, 13, 22, 31, tzinfo=UTC)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    """Every AI path on: these tests are about the AI's own mechanics."""
+    return ai_everywhere(load_settings(local=False))
 
 
 async def seed(ctx: AppContext, settings: object) -> None:

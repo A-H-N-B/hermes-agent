@@ -181,7 +181,9 @@ def rules_triage(
     *,
     big_claim_categories: tuple[str, ...],
     fed_blackout: bool = False,
+    final: bool = False,
 ) -> TriageResult:
+    """`final`: the program's own reading, not a stand-in while the AI is unavailable."""
     text = f"{cluster.title} {cluster.body or ''}"
     category, lexicon_key = _category(prefilter, text)
     direction = _direction(lexicon_key, text)
@@ -230,7 +232,8 @@ def rules_triage(
         priced_in_risk="medium",
         needs_confirmation=needs_confirmation,
         entities=[],
-        summary_id=f"(Analisis aturan — AI tertunda) {cluster.title[:200]}",
+        summary_id=f"{'(Dibaca mesin)' if final else '(Analisis aturan — AI tertunda)'} "
+        f"{cluster.title[:200]}",
         reasoning_id=f"Kata kunci: {terms}. Arah dari kamus aturan kategori {category}.{blackout}",
         evidence=[cluster.title[:300]],
         source_item_ids=list(cluster.item_ids),

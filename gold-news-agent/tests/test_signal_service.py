@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from gold_agent.config import Settings
+from gold_agent.config import Settings, load_settings
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
     STREAM_EVENTS,
@@ -25,6 +25,7 @@ from gold_agent.signals.desk import KV_DESK, DeskDecision
 from gold_agent.signals.engine import KV_ENGINE, KV_HALT
 from gold_agent.signals.outlook import OutlookNarrative
 from tests.builders import T0, analysis, market
+from tests.conftest import ai_everywhere
 from tests.fakes import FakeAnthropic, parsed, timeout_error
 
 NOW = T0 + timedelta(minutes=5)
@@ -34,6 +35,12 @@ LEVELS = [
 ]
 
 Factory = Callable[..., Any]
+
+
+@pytest.fixture
+def settings() -> Settings:
+    """Every AI path on: these tests are about the AI's own mechanics."""
+    return ai_everywhere(load_settings(local=False))
 
 
 @pytest.fixture

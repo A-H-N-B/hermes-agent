@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from gold_agent.config import Settings, load_settings
 from gold_agent.core.app import AppContext
 from gold_agent.core.bus import (
     STREAM_ALERTS,
@@ -19,10 +20,17 @@ from gold_agent.core.bus import (
 from gold_agent.core.clock import ManualClock
 from gold_agent.models import Analysis, CalendarEvent, MarketContext, NewsCluster
 from gold_agent.services.analyzer import AnalyzerService
+from tests.conftest import ai_everywhere
 from tests.fakes import FakeAnthropic, parsed, timeout_error
 from tests.test_llm_triage import triage_value
 
 T0 = datetime(2026, 10, 13, 12, 30, tzinfo=UTC)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    """Every AI path on: these tests are about the AI's own mechanics."""
+    return ai_everywhere(load_settings(local=False))
 
 
 def cluster(title: str, *, cid: str = "c1", **extra: Any) -> NewsCluster:

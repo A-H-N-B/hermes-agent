@@ -38,6 +38,18 @@ def settings() -> Settings:
     return load_settings(local=False)
 
 
+def ai_everywhere(settings: Settings) -> Settings:
+    """The shipped config saves the AI for news that needs it; tests of the AI's own mechanics
+    (requests, retries, votes, narratives) turn every AI path back on."""
+    data = settings.model_dump()
+    data["llm"] |= {"triage_min_impact": 0, "deep_min_impact": 3, "desk_votes": 3}
+    data["analysis"]["deep_on_scheduled_release"] = True
+    data["outlook"]["use_llm"] = True
+    data["reports"]["use_llm"] = True
+    data["budget"]["llm_monthly_usd"] = 5.0
+    return Settings.model_validate(data)
+
+
 @pytest.fixture
 def clock() -> ManualClock:
     return ManualClock(T0)

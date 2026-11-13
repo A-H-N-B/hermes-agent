@@ -139,7 +139,7 @@ class TriageEngine:
         self.prompt = load_prompt("triage", kb)
         self.deep_prompt = load_prompt("deep", kb)
 
-    def _baseline(self, inputs: TriageInputs) -> TriageResult:
+    def _baseline(self, inputs: TriageInputs, *, final: bool = False) -> TriageResult:
         if inputs.release is not None:
             return release_triage(inputs.release, [i.id for i in inputs.items])
         prefilter = inputs.cluster.prefilter or PrefilterResult(relevant=True)
@@ -148,7 +148,25 @@ class TriageEngine:
             prefilter,
             big_claim_categories=self._settings.analysis.big_claim_categories,
             fed_blackout=inputs.fed_blackout,
+            final=final,
         )
+
+    def easy(self, inputs: TriageInputs, baseline: TriageResult) -> str | None:
+        """Why the program can read this story alone (no AI call), or None when the AI should
+        read it: a release whose numbers the parser read, a story the rules rate below
+        `llm.triage_min_impact`, or one rated exactly that with a clear direction."""
+        floor = self._settings.llm.triage_min_impact
+        release = inputs.release
+        if release is not None and release.forecast is not None:
+            return "angka rilis dibaca mesin"
+        if release is not None:
+            return None
+        if baseline.impact_score < floor:
+            return f"dampak {baseline.impact_score}/5 rendah"
+        clear = baseline.direction_gold != "neutral" and not baseline.needs_confirmation
+        if baseline.impact_score == floor and clear:
+            return f"arah jelas dari kata kunci ({baseline.direction_gold})"
+        return None
 
     async def analyze(self, inputs: TriageInputs) -> Analysis:
         baseline = self._baseline(inputs)
@@ -157,7 +175,13 @@ class TriageEngine:
         model: str | None = None
         ai_pending = True
         notes: list[str] = []
-        if self._llm is not None:
+        easy = self.easy(inputs, baseline) if self._llm is not None else None
+        if easy is not None:
+            notes.append(f"dibaca mesin tanpa AI (hemat AI): {easy}")
+            ai_pending = False
+            if inputs.release is None:
+                triage = self._baseline(inputs, final=True)
+        if self._llm is not None and easy is None:
             message = build_user_message(
                 inputs, max_body_chars=self._settings.analysis.max_body_chars
             )

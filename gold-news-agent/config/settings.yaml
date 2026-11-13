@@ -102,7 +102,7 @@ budget:
   # it (each call reserves its worst case while it runs, so calls running together cannot
   # overshoot). Reached = the AI is off until the 1st; the dashboard, Telegram and signals keep
   # running on the program's own rules.
-  llm_monthly_usd: 5.0
+  llm_monthly_usd: 2.5 # so $5 of credit lasts two months
   # Each day may spend what is left of the month divided by the days left in it (so the AI lasts
   # the whole month and a quiet day leaves more for later), never more than this.
   llm_daily_usd: 1.0
@@ -183,7 +183,7 @@ analysis:
   triage_max_age_minutes: 30 # older stories (by first_seen) are archived, not triaged as new
   # Single unofficial source + one of these categories -> needs_confirmation (weight reduced).
   big_claim_categories: [geopolitics, central_bank_gold, trade_tariff, fiscal_debt]
-  deep_on_scheduled_release: true
+  deep_on_scheduled_release: false # the release parser already has the numbers
   release_calendar_window_minutes: 30 # a release headline must sit within ±30 min of its calendar slot
   max_body_chars: 1500 # text sent to the LLM per item
   volatility_cooldown_minutes: 10
@@ -193,7 +193,12 @@ analysis:
 llm:
   provider: anthropic
   enabled: true # false = rules-only mode
-  deep_min_impact: 3
+  # Deep analysis (a longer AI reading) only for news the triage rates this high.
+  deep_min_impact: 4
+  # Save the AI for news that needs it: the program alone reads releases (the parser has the
+  # numbers), stories the rules rate below this, and stories rated exactly this whose direction
+  # the keywords make clear. Harder stories (rated higher, unclear, or unconfirmed) go to the AI.
+  triage_min_impact: 3
   # Every route on Claude Haiku 5.5 ($0.10 / $0.50 per million tokens: 40x cheaper than Opus 5.5,
   # so $5 a month goes a long way). Adaptive thinking is on by default and `effort` controls
   # depth, latency and cost; max_tokens leaves room for the thinking, which counts toward it.
@@ -231,8 +236,8 @@ llm:
     effort: medium
     timeout_seconds: 25
     max_tokens: 4096
-  desk_votes: 3 # answers per review, run in parallel
-  # A review costs about $0.004 (three short Haiku answers); beyond this many a day, or once the
+  desk_votes: 1 # answers per review, run in parallel (1 = one quick answer, the cheapest)
+  # A review costs about $0.0015 (one short Haiku answer); beyond this many a day, or once the
   # day's AI share is spent, the engine decides alone (labelled "tanpa review AI").
   desk_reviews_per_day: 60
   # Questions you ask (dashboard "Tanya AI", Telegram /tanya or a plain message): answered from
@@ -243,7 +248,7 @@ llm:
     effort: medium # an answer in seconds; the facts come from the program
     timeout_seconds: 60
     max_tokens: 6000
-  chat_per_day: 60
+  chat_per_day: 20
   # Server-side refusal fallback: Claude Haiku 5.5 has none (a declined request stays declined;
   # the agent then answers from its own rules), so it must stay off.
   fallbacks: "off"
@@ -289,7 +294,7 @@ outlook:
   refresh_minute: 0
   refresh_on_moments: [tokyo_open, london_open, ny_open] # session opens also rebuild it
   refresh_debounce_minutes: 5 # high-impact news bursts rebuild at most this often
-  use_llm: true # narrative by the outlook model; the table itself is always rule-based
+  use_llm: false # AI narrative off to save the budget; the table itself is always rule-based
   weekend_outlook: { zone: Asia/Jakarta, weekday: sunday, local: "16:00" } # "outlook pembukaan Senin"
   near_confidence_decay_per_hour: 0.15 # hour h ahead shows confidence x (1 - 0.15 h)
   conditional_confidence_cap: 40
@@ -312,7 +317,7 @@ paper:
 reports:
   daily: { zone: Asia/Jakarta, local: "05:30" } # report on the previous WIB day
   weekly: { zone: Asia/Jakarta, weekday: saturday, local: "08:00" }
-  use_llm: true # short narrative by the brief model on top of the numbers (never edits them)
+  use_llm: false # AI narrative off to save the budget; the report's numbers need no AI
   event_study_days: 90
   min_event_samples: 5 # per group before a typical move is published to the outlook
   reliability_prior_weight: 20 # pseudo-observations: learned reliability moves slowly

@@ -408,6 +408,9 @@ class LlmSettings(StrictModel):
     provider: Literal["anthropic"]
     enabled: bool
     deep_min_impact: int = Field(ge=0, le=5)
+    # News the rules rate below this, or rate exactly this with a clear direction, is read by
+    # the program alone; the AI reads only harder stories (a release with numbers never needs it).
+    triage_min_impact: int = Field(ge=0, le=6)
     triage: LlmRoute
     triage_high: LlmRoute  # a scheduled release or rules impact >= 4
     deep: LlmRoute
