@@ -24,6 +24,12 @@ Siapkan dulu token bot Telegram dan (opsional) API key Claude (`docs/siapkan_aku
 powershell -NoExit -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/A-H-N-B/hermes-agent/claude/prompt-execution-repo-setup-7e735z/gold-news-agent/scripts/install_windows.ps1 | iex"
 ```
 
+**Sudah punya bot dan API key dari komputer lain?** Salin file `.env` dari
+`C:\hermes-agent\gold-news-agent\.env` komputer lama ke **Desktop** laptop baru (lewat flashdisk;
+boleh juga bernama `env.txt`) sebelum menjalankan perintah di atas. Installer memakainya apa adanya,
+tanpa meminta token dan key lagi. Matikan program di komputer lama (satu bot hanya bisa dipakai satu
+komputer), dan hapus file itu dari Desktop setelah selesai.
+
 `scripts/install_windows.ps1` mengerjakan langkah 1–10 di bawah: memasang git dan uv, mengunduh
 folder project ke `C:\hermes-agent\gold-news-agent`, meminta token dan key (input tersembunyi,
 dicek ke Telegram/Anthropic sebelum disimpan), mencari Chat ID sendiri setelah kamu menekan

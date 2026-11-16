@@ -92,7 +92,17 @@ function Install-GoldNewsAgent {
     Step 5 'Token bot Telegram, Chat ID, API key Claude'
     $EnvPath = Join-Path $Root '.env'
     $fill = $true
-    if (Test-Path $EnvPath) {
+    # The .env of another computer (bot token, chat ID, Claude key), copied onto this Desktop,
+    # is used as it is: nothing has to be typed again.
+    $desk = [Environment]::GetFolderPath('Desktop')
+    $carried = @('.env', 'env.txt', '.env.txt', 'gold-news-agent.env') | ForEach-Object { Join-Path $desk $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not (Test-Path $EnvPath) -and $carried -and (Select-String -Path $carried -Pattern '^TELEGRAM_BOT_TOKEN=\d+:' -Quiet)) {
+        Copy-Item $carried $EnvPath
+        Ok "Token, Chat ID, dan API key diambil dari $carried (tidak perlu diketik ulang)"
+        Warn 'Bot yang sama tidak bisa dipakai dua komputer sekaligus: matikan program di komputer lama.'
+        Warn "Setelah selesai, hapus $carried dari Desktop (isinya rahasia)."
+        $fill = $false
+    } elseif (Test-Path $EnvPath) {
         $fill = (Read-Host '  .env sudah ada. Isi ulang token dan key? (y/N)') -match '^[yY]'
     } else {
         Copy-Item (Join-Path $Root '.env.example') $EnvPath
