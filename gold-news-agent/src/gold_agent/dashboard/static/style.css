@@ -352,3 +352,5 @@ h2.sub { margin-top: 1.1rem; }
 .day-move.BUY { color: var(--up); border-color: var(--up); }
 .day-move.SELL { color: var(--down); border-color: var(--down); }
 .version { font-size: .75rem; white-space: nowrap; }
+.moves-days .move-value { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+.moves-days .move-value small { white-space: nowrap; font-size: .75rem; }

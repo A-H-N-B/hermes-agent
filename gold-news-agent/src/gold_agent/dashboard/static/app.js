@@ -398,7 +398,8 @@ function renderMoves(price) {
     today.low = Math.min(today.low, price);
     const change = changePct(price, today.open);
     chip.className = `day-move ${tone(change)}`;
-    chip.textContent = `Hari ini ${pctText(change)}`;
+    chip.textContent = `Hari ini ${pctText(change)} · ${num(today.open)} → ${num(price)}`;
+    chip.title = `sejak pasar buka ${today.open_at_wib} WIB: dari ${num(today.open)} ke ${num(price)} (${signed(price - today.open)}$)`;
     box.append(
       el("div", { class: `move-big ${tone(change)}`, text: `Hari ini ${pctText(change)}` }),
       el("div", { class: "muted", text: `${signed(price - today.open)}$ sejak pasar buka ${today.open_at_wib} WIB di ${num(today.open)} · sekarang ${num(price)}${data.market_open ? "" : " · pasar tutup"}` }),
@@ -465,8 +466,8 @@ function renderLookback(price) {
 // Each recent trading day, open to close, as a bar; today last, moving with the price.
 function renderMoveDays(today, price) {
   const list = clear($("#moves-days-list"));
-  const rows = moves.data.days.map((row) => ({ label: row.label, change: row.pct }));
-  if (today && price !== null && price !== undefined) rows.push({ label: "Hari ini", change: changePct(price, today.open), today: true });
+  const rows = moves.data.days.map((row) => ({ label: row.label, change: row.pct, from: row.open, to: row.close }));
+  if (today && price !== null && price !== undefined) rows.push({ label: "Hari ini", change: changePct(price, today.open), from: today.open, to: price, today: true });
   const widest = Math.max(0.05, ...rows.map((row) => Math.abs(row.change)));
   for (const row of rows) {
     const bar = el("div", { class: "bar" });
@@ -476,7 +477,9 @@ function renderMoveDays(today, price) {
     list.append(
       el("span", { class: row.today ? "today" : "muted", text: row.label }),
       bar,
-      el("b", { class: tone(row.change), text: pctText(row.change) }),
+      el("span", { class: "move-value" },
+        el("b", { class: tone(row.change), text: pctText(row.change) }),
+        el("small", { class: "muted", text: `${num(row.from)} → ${num(row.to)} (${signed(row.to - row.from)}$)` })),
     );
   }
 }
