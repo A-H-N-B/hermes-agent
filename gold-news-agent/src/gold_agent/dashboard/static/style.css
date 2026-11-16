@@ -346,3 +346,9 @@ h2.sub { margin-top: 1.1rem; }
 .strength { font-weight: 700; }
 .strength.KUAT, .strength.SANGAT-KUAT { color: var(--up); }
 .strength.LEMAH { color: var(--muted); }
+
+/* Today's move in the header, on every page. */
+.day-move { font-weight: 700; white-space: nowrap; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: .15rem .6rem; }
+.day-move.BUY { color: var(--up); border-color: var(--up); }
+.day-move.SELL { color: var(--down); border-color: var(--down); }
+.version { font-size: .75rem; white-space: nowrap; }

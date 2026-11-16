@@ -387,13 +387,18 @@ function renderMoves(price) {
   moves.price = price;
   const today = data.today;
   const box = clear($("#moves-today"));
+  const chip = $("#day-move");
   if (!today || price === null || price === undefined) {
+    chip.className = "day-move";
+    chip.textContent = "Hari ini: menunggu harga";
     box.append(el("p", { class: "muted", text: "data harga hari ini belum tersedia" }));
     $("#moves-range").hidden = true;
   } else {
     today.high = Math.max(today.high, price);
     today.low = Math.min(today.low, price);
     const change = changePct(price, today.open);
+    chip.className = `day-move ${tone(change)}`;
+    chip.textContent = `Hari ini ${pctText(change)}`;
     box.append(
       el("div", { class: `move-big ${tone(change)}`, text: `Hari ini ${pctText(change)}` }),
       el("div", { class: "muted", text: `${signed(price - today.open)}$ sejak pasar buka ${today.open_at_wib} WIB di ${num(today.open)} · sekarang ${num(price)}${data.market_open ? "" : " · pasar tutup"}` }),
@@ -1919,6 +1924,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#moves-form").addEventListener("submit", setMoveDays);
   loadMoves();
   setInterval(loadMoves, 60000);
+  api("/api/version").then((v) => { $("#version").textContent = `versi ${v.commit}`; }).catch(() => {});
   showAlertsButton();
   buildRing();
   // Fallback when the live push is down: the board, indicator read and forecast still refresh.

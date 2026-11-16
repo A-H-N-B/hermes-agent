@@ -27,6 +27,7 @@ from gold_agent.dashboard.auth import COOKIE, LoginLimiter, SessionSigner
 from gold_agent.dashboard.credit import credit_view, set_balance
 from gold_agent.dashboard.data import DashboardData
 from gold_agent.dashboard.live import LiveHub
+from gold_agent.dashboard.version import running_commit
 from gold_agent.market.rebase import request_calibration
 
 STATIC_DIR = Path(__file__).parent / "static"  # public assets (JS, CSS, vendored chart)
@@ -207,6 +208,13 @@ def create_app(
         ),
     ) -> dict[str, Any]:
         return await data.forecast(tf)
+
+    commit = running_commit()
+
+    @app.get("/api/version", dependencies=guard)
+    async def api_version() -> dict[str, str]:
+        """The running revision, so an update that did not reach the program shows."""
+        return {"commit": commit}
 
     @app.get("/api/moves", dependencies=guard)
     async def api_moves(days: int | None = Query(default=None, ge=1, le=60)) -> dict[str, Any]:

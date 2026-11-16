@@ -44,18 +44,45 @@ def price_at(bars: Sequence[Candle], at: datetime) -> tuple[datetime, float] | N
     return bars[index].close_time, bars[index].close
 
 
-def today(context: MarketContext | None) -> JSON | None:
-    """The trading day so far, from the open of the current daily bar."""
-    if context is None or context.day_open is None or context.day_open_at is None:
+Day = tuple[float, datetime, float, float]  # open, opened at, high, low
+
+
+def day_from_bars(daily: Sequence[Candle], fine: Sequence[Candle], now: datetime) -> Day | None:
+    """Today's open/high/low from stored bars, for a context that does not carry them (one
+    written before the field existed, or before the live daily bar formed): the daily bar
+    running now, else the M15 bars since the last complete daily bar closed."""
+    for bar in reversed(daily):
+        if bar.open_time <= now < bar.close_time:
+            return bar.open, bar.open_time, bar.high, bar.low
+    start = daily[-1].close_time if daily else None
+    since = [bar for bar in fine if start is not None and start <= bar.open_time <= now]
+    if not since:
         return None
-    price = context.mid
-    high = max(v for v in (context.day_high, price) if v is not None)
-    low = min(v for v in (context.day_low, price) if v is not None)
-    open_ = context.day_open
+    return since[0].open, since[0].open_time, max(b.high for b in since), min(b.low for b in since)
+
+
+def today(context: MarketContext | None, stored: Day | None = None) -> JSON | None:
+    """The trading day so far, from the open of the current daily bar (the live one in the
+    context, else `stored`, read from the bars)."""
+    if context is not None and context.day_open is not None and context.day_open_at is not None:
+        day: Day = (
+            context.day_open,
+            context.day_open_at,
+            context.day_high if context.day_high is not None else context.day_open,
+            context.day_low if context.day_low is not None else context.day_open,
+        )
+    elif stored is not None:
+        day = stored
+    else:
+        return None
+    open_, opened, high, low = day
+    price = context.mid if context is not None else None
+    if price is not None:
+        high, low = max(high, price), min(low, price)
     return {
         "open": open_,
-        "open_at": context.day_open_at.isoformat(),
-        "open_at_wib": fmt_wib(context.day_open_at, with_date=True),
+        "open_at": opened.isoformat(),
+        "open_at_wib": fmt_wib(opened, with_date=True),
         "high": high,
         "low": low,
         "price": price,
@@ -109,8 +136,8 @@ def price_moves(
     """Everything the "Naik / turun" card shows. `fine` = M15 bars (look-backs up to FINE_DAYS),
     `coarse` = H1 bars (longer ones), both oldest first."""
     price = context.mid if context else None
-    day = today(context)
-    opened = context.day_open_at if context else None
+    day = today(context, day_from_bars(daily, fine, now))
+    opened = datetime.fromisoformat(day["open_at"]) if day else None
     wanted: list[int] = sorted({*LOOKBACK_DAYS, *([extra_days] if extra_days else [])})
     return {
         "price": price,
