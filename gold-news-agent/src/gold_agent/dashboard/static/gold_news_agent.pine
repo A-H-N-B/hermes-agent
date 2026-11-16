@@ -1,0 +1,121 @@
+// Gold News Agent - indikator TradingView untuk sinyal XAUUSD dari alat berita kita.
+//
+// Pine Script tidak bisa mengambil data dari luar TradingView, jadi sinyal masuk lewat
+// "Kode sinyal": salin dari Telegram (baris "Kode TradingView") atau dari dashboard, lalu
+// tempel di Settings indikator ini. Format kodenya ditentukan oleh
+// src/gold_agent/signals/tvcode.py (GNA1, 13 kolom dipisah "|").
+//
+// Bukan saran keuangan. Indikator ini hanya menggambar; tidak pernah membuka order.
+
+//@version=6
+indicator("Gold News Agent", shorttitle = "GNA", overlay = true, max_lines_count = 200, max_labels_count = 60, max_boxes_count = 20)
+
+// ---------------------------------------------------------------- input (bisa di-custom)
+grpSignal = "Sinyal dari alat berita"
+kode = input.string("", "Kode sinyal", group = grpSignal, tooltip = "Tempel kode GNA1|... dari Telegram atau dashboard (menu Live). Kosongkan untuk menyembunyikan sinyal.")
+geser = input.bool(true, "Geser level ke harga chart ini", group = grpSignal, tooltip = "Sinyal dihitung dari harga PAXG/broker lain. Selisih harga saat sinyal dibuat ditambahkan ke semua level, supaya pas di chart broker Anda.")
+panjangSetelahBerlaku = input.int(0, "Perpanjang garis setelah kedaluwarsa (menit)", minval = 0, group = grpSignal)
+warnaBuy = input.color(color.new(color.teal, 0), "Warna BUY", group = grpSignal)
+warnaSell = input.color(color.new(color.red, 0), "Warna SELL", group = grpSignal)
+warnaSl = input.color(color.new(color.red, 0), "Warna Stop loss", group = grpSignal)
+warnaTp = input.color(color.new(color.green, 0), "Warna TP", group = grpSignal)
+
+grpSesi = "Sesi & jam rawan (sama dengan alat berita)"
+tampilSesi = input.bool(true, "Warnai sesi London & New York", group = grpSesi)
+warnaLondon = input.color(color.new(color.blue, 92), "London 08:00-16:00 London", group = grpSesi)
+warnaNy = input.color(color.new(color.purple, 92), "New York 08:00-17:00 New York", group = grpSesi)
+warnaOverlap = input.color(color.new(color.orange, 88), "Overlap London-New York", group = grpSesi)
+tampilJeda = input.bool(true, "Tandai jeda harian 17:00-18:00 New York", group = grpSesi)
+tampilDataAs = input.bool(true, "Garis rilis data AS 08:30 New York", group = grpSesi)
+
+// ---------------------------------------------------------------- sesi (DST ikut zona waktunya)
+intraday = timeframe.isintraday
+diLondon = not na(time(timeframe.period, "0800-1600", "Europe/London"))
+diNy = not na(time(timeframe.period, "0800-1700", "America/New_York"))
+diJeda = not na(time(timeframe.period, "1700-1800", "America/New_York"))
+warnaSesi = diLondon and diNy ? warnaOverlap : diLondon ? warnaLondon : diNy ? warnaNy : na
+bgcolor(tampilSesi and intraday ? warnaSesi : na, title = "Sesi")
+bgcolor(tampilJeda and intraday and diJeda ? color.new(color.gray, 75) : na, title = "Jeda harian")
+
+barDataAs = not na(time(timeframe.period, "0830-0831", "America/New_York"))
+if tampilDataAs and intraday and timeframe.in_seconds() <= 1800 and barDataAs and not barDataAs[1]
+    line.new(bar_index, low, bar_index, high, extend = extend.both, color = color.new(color.yellow, 40), style = line.style_dotted)
+
+// ---------------------------------------------------------------- baca kode sinyal
+bagian = str.split(str.trim(kode), "|")
+bool kodeValid = false
+if array.size(bagian) == 13
+    kodeValid := array.get(bagian, 0) == "GNA1"
+
+string aksi = na
+float dibuatMs = na
+float hargaRef = na
+float entryBawah = na
+float entryAtas = na
+float stopLoss = na
+float tp1 = na
+float tp2 = na
+float tp3 = na
+float berlakuMs = na
+float keyakinan = na
+string sumber = na
+if kodeValid
+    aksi := array.get(bagian, 1)
+    dibuatMs := str.tonumber(array.get(bagian, 2)) * 1000
+    hargaRef := str.tonumber(array.get(bagian, 3))
+    entryBawah := str.tonumber(array.get(bagian, 4))
+    entryAtas := str.tonumber(array.get(bagian, 5))
+    stopLoss := str.tonumber(array.get(bagian, 6))
+    tp1 := str.tonumber(array.get(bagian, 7))
+    tp2 := str.tonumber(array.get(bagian, 8))
+    tp3 := str.tonumber(array.get(bagian, 9))
+    berlakuMs := str.tonumber(array.get(bagian, 10)) * 1000
+    keyakinan := str.tonumber(array.get(bagian, 11))
+    sumber := array.get(bagian, 12)
+    kodeValid := (aksi == "BUY" or aksi == "SELL") and not na(dibuatMs) and not na(hargaRef) and not na(stopLoss) and not na(tp1) and not na(berlakuMs)
+
+// Harga chart di bar tempat sinyal dibuat: patokan untuk menggeser level.
+var float hargaChartSaatSinyal = na
+if kodeValid and na(hargaChartSaatSinyal) and time_close > dibuatMs and time <= dibuatMs
+    hargaChartSaatSinyal := close
+selisih = geser and kodeValid and not na(hargaChartSaatSinyal) ? hargaChartSaatSinyal - hargaRef : 0.0
+
+// ---------------------------------------------------------------- gambar (sekali, di bar terakhir)
+var array<line> garis = array.new<line>()
+var array<label> teks = array.new<label>()
+var box kotakEntry = na
+var label pesan = na
+
+hapusSemua() =>
+    for g in garis
+        line.delete(g)
+    array.clear(garis)
+    for t in teks
+        label.delete(t)
+    array.clear(teks)
+
+level(float harga, string nama, color warna, int x1, int x2, string gaya) =>
+    y = harga + selisih
+    array.push(garis, line.new(x1, y, x2, y, xloc = xloc.bar_time, color = warna, width = 2, style = gaya))
+    array.push(teks, label.new(x2, y, nama + " " + str.tostring(y, format.mintick), xloc = xloc.bar_time, style = label.style_label_left, color = color.new(warna, 20), textcolor = color.white, size = size.small))
+
+if barstate.islast
+    hapusSemua()
+    box.delete(kotakEntry)
+    label.delete(pesan)
+    if str.length(str.trim(kode)) > 0 and not kodeValid
+        pesan := label.new(bar_index, high, "Kode sinyal tidak dikenali.\nSalin ulang baris GNA1|... secara lengkap.", style = label.style_label_down, color = color.new(color.orange, 0), textcolor = color.black)
+    else if kodeValid
+        x1 = int(dibuatMs)
+        x2 = int(berlakuMs) + panjangSetelahBerlaku * 60000
+        warna = aksi == "BUY" ? warnaBuy : warnaSell
+        kotakEntry := box.new(x1, entryAtas + selisih, x2, entryBawah + selisih, xloc = xloc.bar_time, border_color = warna, bgcolor = color.new(warna, 80))
+        level(stopLoss, "SL", warnaSl, x1, x2, line.style_solid)
+        level(tp1, "TP1", warnaTp, x1, x2, line.style_dashed)
+        level(tp2, "TP2", warnaTp, x1, x2, line.style_dashed)
+        level(tp3, "TP3", warnaTp, x1, x2, line.style_dotted)
+        kedaluwarsa = timenow > berlakuMs
+        status = kedaluwarsa ? "KEDALUWARSA" : "berlaku s/d " + str.format_time(int(berlakuMs), "dd MMM HH:mm", "Asia/Jakarta") + " WIB"
+        catatanGeser = sumber == "P" ? (na(hargaChartSaatSinyal) ? "\nHarga PAXG: level BELUM digeser (sinyal di luar riwayat chart)" : "\nHarga PAXG, digeser " + (selisih >= 0 ? "+" : "") + str.tostring(selisih, "0.00")) : ""
+        teksUtama = aksi + " XAUUSD - conf " + str.tostring(keyakinan, "0") + "\n" + status + catatanGeser
+        array.push(teks, label.new(x1, aksi == "BUY" ? entryBawah + selisih : entryAtas + selisih, teksUtama, xloc = xloc.bar_time, style = aksi == "BUY" ? label.style_label_up : label.style_label_down, color = kedaluwarsa ? color.gray : warna, textcolor = color.white))

@@ -1,0 +1,184 @@
+# Gold News Agent: the 24/7 stack on one Linux VPS (docs/runbook.md).
+#   docker compose build && docker compose up -d
+# Secrets come from .env (never committed); behaviour from config/settings.yaml, mounted
+# read-only, so a config change is a restart, not a rebuild. Only the dashboard is published,
+# and only on the host's loopback (SSH tunnel / Tailscale / Cloudflare Tunnel).
+name: gold-news-agent
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-health: &health
+  interval: 60s
+  timeout: 30s
+  retries: 3
+  start_period: 120s
+
+x-env: &env
+  DATABASE_URL: postgresql+asyncpg://gold:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/gold
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+
+x-app: &app
+  image: gold-news-agent:local
+  build: .
+  init: true
+  env_file: .env
+  environment: *env
+  volumes:
+    - ./config:/app/config:ro
+    - golddata:/app/data
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging: *logging
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_USER: gold
+      POSTGRES_DB: gold
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gold -d gold"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:7.4-alpine
+    # AOF so a restart keeps unacknowledged stream entries; never evict them under memory pressure.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    image: gold-news-agent:local
+    build: .
+    env_file: .env
+    environment: *env
+    volumes:
+      - ./config:/app/config:ro
+    command: ["db", "upgrade"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    logging: *logging
+
+  collector:
+    <<: *app
+    command: ["run", "collector", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "collector"]
+
+  market:
+    <<: *app
+    command: ["run", "market", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "market"]
+
+  calendar:
+    <<: *app
+    command: ["run", "calendar", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "calendar"]
+
+  analyzer:
+    <<: *app
+    command: ["run", "analyzer", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "analyzer"]
+
+  signal:
+    <<: *app
+    command: ["run", "signal", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "signal"]
+
+  paper:
+    <<: *app
+    command: ["run", "paper", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "paper"]
+
+  evaluator:
+    <<: *app
+    command: ["run", "evaluator", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "evaluator"]
+
+  notifier:
+    <<: *app
+    command: ["run", "notifier", "--bus", "redis", "--no-migrate"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "notifier"]
+
+  dashboard:
+    <<: *app
+    # Inside the container it must listen on 0.0.0.0, so DASHBOARD_PASSWORD is required.
+    command:
+      ["run", "dashboard", "--bus", "redis", "--no-migrate", "--dashboard-host", "0.0.0.0"]
+    environment:
+      <<: *env
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set DASHBOARD_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:8787:8787"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "dashboard"]
+
+  watchdog:
+    <<: *app
+    command: ["run", "watchdog", "--bus", "redis", "--no-migrate"]
+    volumes:
+      - ./config:/app/config:ro
+      - golddata:/app/data
+      # The host's chrony offset, written every minute by deploy/systemd/gold-clock-offset.timer.
+      - /run/gold:/run/gold:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "gold-agent", "healthcheck", "watchdog"]
+
+volumes:
+  pgdata:
+  redisdata:
+  golddata:

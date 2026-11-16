@@ -1,0 +1,11 @@
+# Nightly PostgreSQL dump with 14-day rotation (scripts/backup.sh). Copy the backups off the
+# VPS as well (rclone/restic to object storage): a backup on the same disk is not a backup.
+[Unit]
+Description=Gold News Agent: PostgreSQL backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/gold-news-agent
+ExecStart=/opt/gold-news-agent/scripts/backup.sh /opt/gold-news-agent/backups 14

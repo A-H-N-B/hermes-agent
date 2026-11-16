@@ -1,0 +1,10 @@
+# Writes the host's chrony offset for the watchdog container (scripts/clock_offset.sh).
+# Install: copy both gold-clock-offset.* units to /etc/systemd/system, then
+#   systemctl daemon-reload && systemctl enable --now gold-clock-offset.timer
+[Unit]
+Description=Gold News Agent: publish the chrony clock offset to /run/gold
+After=chronyd.service chrony.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gold-news-agent/scripts/clock_offset.sh /run/gold/clock_offset

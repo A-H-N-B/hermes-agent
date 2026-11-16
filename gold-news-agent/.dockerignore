@@ -1,0 +1,31 @@
+# Secrets never enter the image: .env is passed at run time (env_file), the Telethon session
+# lives in the data volume.
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+secrets/
+
+# Runtime state and local tooling
+data/
+logs/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.git
+
+# Not needed to run
+tests/
+docs/
+scripts/
+deploy/
+PROMPT_XAUUSD_NEWS_AGENT.md
+CLAUDE.md
